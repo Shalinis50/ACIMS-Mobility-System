@@ -10,6 +10,12 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: buses
+    description: Bus tracking and route operations
+  - name: queue
+    description: Overflow queue operations
+  - name: notifications
+    description: Smart alert operations
 paths:
   /healthz:
     get:
@@ -24,7 +30,216 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /buses:
+    get:
+      operationId: listBuses
+      tags: [buses]
+      summary: List active buses
+      responses:
+        "200":
+          description: Active buses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Bus"
+  /buses/{busId}:
+    get:
+      operationId: getBus
+      tags: [buses]
+      summary: Get a bus
+      parameters:
+        - $ref: "#/components/parameters/BusId"
+      responses:
+        "200":
+          description: Bus details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bus"
+        "404":
+          description: Bus not found
+  /buses/{busId}/location:
+    get:
+      operationId: getBusLocation
+      tags: [buses]
+      summary: Get the latest bus location
+      parameters:
+        - $ref: "#/components/parameters/BusId"
+      responses:
+        "200":
+          description: Latest simulated or real location
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusLocation"
+        "404":
+          description: Bus not found
+  /buses/{busId}/stops:
+    get:
+      operationId: listBusStops
+      tags: [buses]
+      summary: List stops for a bus route
+      parameters:
+        - $ref: "#/components/parameters/BusId"
+      responses:
+        "200":
+          description: Bus stops
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BusStop"
+        "404":
+          description: Bus not found
+  /bus/location:
+    post:
+      operationId: updateBusLocation
+      tags: [buses]
+      summary: Ingest a bus location update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusLocationInput"
+      responses:
+        "200":
+          description: Updated bus
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bus"
+        "400":
+          description: Invalid location
+        "404":
+          description: Bus not found
+  /buses/{busId}/occupancy:
+    post:
+      operationId: updateBusOccupancy
+      tags: [buses]
+      summary: Update occupancy for development simulation
+      parameters:
+        - $ref: "#/components/parameters/BusId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusOccupancyInput"
+      responses:
+        "200":
+          description: Updated bus
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bus"
+        "400":
+          description: Invalid occupancy
+        "404":
+          description: Bus not found
+  /queue/status:
+    get:
+      operationId: getQueueStatus
+      tags: [queue]
+      summary: Get the demo student's queue status
+      parameters:
+        - $ref: "#/components/parameters/BusIdQuery"
+      responses:
+        "200":
+          description: Queue status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueStatus"
+  /queue/join:
+    post:
+      operationId: joinQueue
+      tags: [queue]
+      summary: Join the overflow queue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QueueInput"
+      responses:
+        "201":
+          description: Queue entry created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueStatus"
+        "409":
+          description: Student is already in the queue
+  /queue/leave:
+    post:
+      operationId: leaveQueue
+      tags: [queue]
+      summary: Leave the overflow queue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QueueLeaveInput"
+      responses:
+        "200":
+          description: Updated queue status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueStatus"
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: List smart alerts
+      responses:
+        "200":
+          description: Smart alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+  /notifications/read:
+    post:
+      operationId: markNotificationRead
+      tags: [notifications]
+      summary: Mark a notification as read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationReadInput"
+      responses:
+        "200":
+          description: Updated notification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Notification"
+        "404":
+          description: Notification not found
 components:
+  parameters:
+    BusId:
+      name: busId
+      in: path
+      required: true
+      schema:
+        type: string
+    BusIdQuery:
+      name: busId
+      in: query
+      required: false
+      schema:
+        type: string
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +248,183 @@ components:
           type: string
       required:
         - status
+    Coordinate:
+      type: object
+      properties:
+        latitude:
+          type: number
+        longitude:
+          type: number
+      required: [latitude, longitude]
+    BusStop:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        sequence:
+          type: integer
+        minutesFromPrevious:
+          type: integer
+      required: [id, name, latitude, longitude, sequence, minutesFromPrevious]
+    BusLocation:
+      type: object
+      properties:
+        busId:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        nextStopId:
+          type: string
+        nextStop:
+          type: string
+        etaMinutes:
+          type: integer
+        status:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+      required: [busId, latitude, longitude, nextStopId, nextStop, etaMinutes, status, updatedAt, source]
+    BusLocationInput:
+      type: object
+      properties:
+        busId:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
+      required: [busId, latitude, longitude]
+    BusOccupancyInput:
+      type: object
+      properties:
+        currentOccupancy:
+          type: integer
+          minimum: 0
+      required: [currentOccupancy]
+    Bus:
+      type: object
+      properties:
+        id:
+          type: string
+        busNumber:
+          type: string
+        origin:
+          type: string
+        destination:
+          type: string
+        routeLabel:
+          type: string
+        capacity:
+          type: integer
+        currentOccupancy:
+          type: integer
+        currentLocation:
+          $ref: "#/components/schemas/Coordinate"
+        nextStop:
+          type: string
+        nextStopId:
+          type: string
+        etaMinutes:
+          type: integer
+        status:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, busNumber, origin, destination, routeLabel, capacity, currentOccupancy, currentLocation, nextStop, nextStopId, etaMinutes, status, updatedAt]
+    QueueEntry:
+      type: object
+      properties:
+        studentId:
+          type: string
+        busId:
+          type: string
+        boardingStop:
+          type: string
+        queuePosition:
+          type: integer
+        joinedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+      required: [studentId, busId, boardingStop, queuePosition, joinedAt, status]
+    QueueStatus:
+      type: object
+      properties:
+        joined:
+          type: boolean
+        entry:
+          type: ["object", "null"]
+          $ref: "#/components/schemas/QueueEntry"
+        busId:
+          type: string
+        currentOccupancy:
+          type: integer
+        capacity:
+          type: integer
+        seatsAvailable:
+          type: integer
+        estimatedAvailabilityMinutes:
+          type: integer
+        message:
+          type: string
+      required: [joined, entry, busId, currentOccupancy, capacity, seatsAvailable, estimatedAvailabilityMinutes, message]
+    QueueInput:
+      type: object
+      properties:
+        studentId:
+          type: string
+        busId:
+          type: string
+        boardingStop:
+          type: string
+      required: [studentId, busId, boardingStop]
+    QueueLeaveInput:
+      type: object
+      properties:
+        studentId:
+          type: string
+        busId:
+          type: string
+      required: [studentId, busId]
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        read:
+          type: boolean
+        busId:
+          type: string
+      required: [id, type, title, message, createdAt, read, busId]
+    NotificationReadInput:
+      type: object
+      properties:
+        id:
+          type: string
+      required: [id]
 

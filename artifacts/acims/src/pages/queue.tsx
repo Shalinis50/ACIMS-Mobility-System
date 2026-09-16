@@ -1,0 +1,39 @@
+import { useMemo, useState } from 'react';
+import { ArrowRight, CheckCircle2, Clock3, LogOut, Ticket, UsersRound } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { getGetQueueStatusQueryKey, getListBusStopsQueryKey, getListBusesQueryKey, useGetQueueStatus, useJoinQueue, useLeaveQueue, useListBusStops, useListBuses } from '@workspace/api-client-react';
+import { demoStudentId, EmptyState, ErrorState, LoadingRows, PageHeading, useSelectedBusId } from '@/components/acims-ui';
+
+export default function QueuePage() {
+  const queryClient = useQueryClient();
+  const selectedBusId = useSelectedBusId();
+  const [boardingStop, setBoardingStop] = useState('');
+  const busesQuery = useListBuses({ query: { queryKey: getListBusesQueryKey() } });
+  const bus = useMemo(() => busesQuery.data?.find((item) => item.id === selectedBusId) ?? busesQuery.data?.[0], [busesQuery.data, selectedBusId]);
+  const busId = bus?.id ?? '';
+  const queueKey = getGetQueueStatusQueryKey({ busId });
+  const queueQuery = useGetQueueStatus({ busId }, { query: { enabled: !!busId, queryKey: queueKey } });
+  const stopsQuery = useListBusStops(busId, { query: { enabled: !!busId, queryKey: getListBusStopsQueryKey(busId) } });
+  const joinMutation = useJoinQueue();
+  const leaveMutation = useLeaveQueue();
+  const queue = queueQuery.data;
+  const stops = stopsQuery.data?.slice().sort((a, b) => a.sequence - b.sequence) ?? [];
+  const chosenStop = boardingStop || stops[0]?.name || bus?.nextStop || '';
+  const join = () => { if (!busId || !chosenStop) return; joinMutation.mutate({ data: { studentId: demoStudentId, busId, boardingStop: chosenStop } }, { onSuccess: () => void queryClient.invalidateQueries({ queryKey: queueKey }) }); };
+  const leave = () => { if (!busId) return; leaveMutation.mutate({ data: { studentId: demoStudentId, busId } }, { onSuccess: () => void queryClient.invalidateQueries({ queryKey: queueKey }) }); };
+  if (busesQuery.isLoading) return <LoadingRows count={4} />;
+  if (busesQuery.isError) return <ErrorState onRetry={() => void busesQuery.refetch()} />;
+  if (!bus) return <EmptyState icon={Ticket} title="Pick a moving route first" message="The boarding queue becomes available when there is an active bus to join." />;
+  return <div className="page-in">
+    <PageHeading eyebrow="Overflow queue" title="A place in line, held." description="Join only when the bus is tight. We will keep your spot tied to your boarding stop." />
+    <section className="grid gap-5 lg:grid-cols-[1.05fr_.95fr]">
+      <div className="overflow-hidden rounded-[28px] bg-primary p-6 text-primary-foreground soft-shadow sm:p-8"><div className="flex items-start justify-between"><div><div className="mono text-[10px] uppercase tracking-[0.18em] text-primary-foreground/55">Queue status</div><h2 className="mt-3 display-font text-3xl font-extrabold">{queue?.joined ? 'You are in.' : 'Seats are moving.'}</h2></div><span className="grid h-11 w-11 place-items-center rounded-2xl bg-accent text-accent-foreground"><UsersRound size={21} /></span></div>{queue?.joined ? <div className="mt-12"><div className="mono text-[10px] uppercase tracking-[0.16em] text-primary-foreground/55">Your position</div><div className="mt-1 flex items-end gap-4"><span className="display-font text-[6rem] font-extrabold leading-none tracking-[-.12em] text-accent">{queue.entry?.queuePosition ?? '—'}</span><span className="mb-3 text-sm text-primary-foreground/65">in line<br />at {queue.entry?.boardingStop}</span></div><p className="mt-6 max-w-sm text-sm leading-6 text-primary-foreground/70">{queue.message}</p><button type="button" onClick={leave} disabled={leaveMutation.isPending} data-testid="button-leave-queue" className="mt-7 inline-flex items-center gap-2 rounded-full border border-primary-foreground/20 px-4 py-2.5 text-xs font-extrabold transition hover:bg-primary-foreground/10 disabled:opacity-50"><LogOut size={14} />{leaveMutation.isPending ? 'Leaving…' : 'Leave the queue'}</button></div> : <div className="mt-12"><div className="grid grid-cols-2 gap-4"><div className="rounded-2xl bg-primary-foreground/10 p-4"><div className="mono text-[10px] uppercase tracking-[.14em] text-primary-foreground/55">Seats available</div><div className="mt-2 display-font text-4xl font-extrabold text-accent">{queue?.seatsAvailable ?? Math.max(0, bus.capacity - bus.currentOccupancy)}</div></div><div className="rounded-2xl bg-primary-foreground/10 p-4"><div className="mono text-[10px] uppercase tracking-[.14em] text-primary-foreground/55">Est. wait</div><div className="mt-2 display-font text-4xl font-extrabold">{queue?.estimatedAvailabilityMinutes ?? 0}<span className="ml-1 text-base tracking-normal">min</span></div></div></div><p className="mt-6 max-w-sm text-sm leading-6 text-primary-foreground/70">{queue?.message ?? 'Choose your boarding stop to hold a spot when capacity opens up.'}</p></div>}</div>
+      <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8"><div className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Boarding stop</div><h2 className="mt-2 text-xl font-extrabold">Where will you get on?</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">Your place is released if you change routes, so choose the stop you can reach.</p><div className="mt-6 space-y-2">{stops.length ? stops.map((stop, index) => <button key={stop.id} type="button" disabled={queue?.joined} onClick={() => setBoardingStop(stop.name)} data-testid={`button-stop-${stop.id}`} className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition ${chosenStop === stop.name ? 'border-primary bg-secondary/60' : 'border-border hover:bg-muted'} ${queue?.joined ? 'cursor-default' : ''}`}><span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-extrabold ${chosenStop === stop.name ? 'bg-primary text-accent' : 'bg-muted text-muted-foreground'}`}>{index + 1}</span><span className="flex-1 text-sm font-bold">{stop.name}</span>{chosenStop === stop.name && <CheckCircle2 size={17} className="text-primary" />}</button>) : <LoadingRows count={3} />}</div>{!queue?.joined && <button type="button" onClick={join} disabled={joinMutation.isPending || !chosenStop} data-testid="button-join-queue" className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3.5 text-sm font-extrabold text-accent-foreground transition hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50">{joinMutation.isPending ? 'Holding your place…' : <>Join overflow queue <ArrowRight size={16} /></>}</button>}{(joinMutation.isError || leaveMutation.isError) && <p className="mt-3 text-xs font-bold text-destructive">We could not update your place. Try once more.</p>}</div>
+    </section>
+    <div className="mt-5 grid gap-4 sm:grid-cols-3"><QueueNote icon={Clock3} title="Live position" copy="Your position changes as seats open." /><QueueNote icon={CheckCircle2} title="One tap to leave" copy="No penalty if your plans change." /><QueueNote icon={UsersRound} title="Capacity-aware" copy="We only queue when the bus is tight." /></div>
+  </div>;
+}
+
+function QueueNote({ icon: Icon, title, copy }: { icon: typeof Clock3; title: string; copy: string }) {
+  return <div className="flex gap-3 rounded-2xl border border-border bg-card p-4"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><Icon size={16} /></span><div><div className="text-xs font-extrabold">{title}</div><div className="mt-1 text-[11px] leading-5 text-muted-foreground">{copy}</div></div></div>;
+}

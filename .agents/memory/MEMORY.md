@@ -1,0 +1,1 @@
+- [Generated client TypeScript](monorepo-typecheck.md) — browser API clients need iterable DOM types in composite library checks.

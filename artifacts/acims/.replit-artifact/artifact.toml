@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "ACIMS Mobility System"
+description = "A mobile-first college transportation companion that helps students track buses, receive movement-based alerts, and join an overflow queue when a route is full."
+version = "1.0.0"
+id = "artifacts/acims"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24864
+
+[services.development]
+run = "pnpm --filter @workspace/acims run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/acims", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/acims/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24864"
+BASE_PATH = "/"
