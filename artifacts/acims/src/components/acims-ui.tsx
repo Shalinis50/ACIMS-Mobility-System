@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
-import { Bell, BusFront, ChevronDown, CircleHelp, Clock3, Map, Menu, Navigation, Route, UsersRound } from 'lucide-react';
+import { Bell, Bot, BusFront, ChevronDown, CircleHelp, Clock3, Compass, Map, Menu, Navigation, Route, ShieldCheck, TrainFront, UsersRound, Wrench } from 'lucide-react';
 import { useListBuses, getListBusesQueryKey } from '@workspace/api-client-react';
 import type { Bus } from '@workspace/api-client-react';
 
@@ -63,6 +63,12 @@ const navItems = [
   { href: '/map', label: 'Live map', icon: Map },
   { href: '/queue', label: 'Queue', icon: UsersRound },
   { href: '/alerts', label: 'Alerts', icon: Bell },
+  { href: '/campus-map', label: 'Campus map', icon: Compass },
+  { href: '/navigation', label: 'Navigation', icon: Navigation },
+  { href: '/safety', label: 'Safety', icon: ShieldCheck },
+  { href: '/public-transport', label: 'Public transport', icon: TrainFront },
+  { href: '/ai-agent', label: 'AI mobility desk', icon: Bot },
+  { href: '/admin', label: 'Operations', icon: Wrench },
 ];
 
 export function AcimsLayout({ children }: { children: ReactNode }) {
@@ -73,7 +79,7 @@ export function AcimsLayout({ children }: { children: ReactNode }) {
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[238px] flex-col border-r border-border bg-primary px-4 py-5 text-primary-foreground lg:flex">
         <div className="px-3"><RouteMark /></div>
         <div className="mt-12 px-3 text-[10px] font-bold uppercase tracking-[0.22em] text-primary-foreground/45">Your commute</div>
-        <nav className="mt-3 space-y-1">
+       <nav className="mt-3 space-y-1">
           {navItems.map(({ href, label, icon: Icon }) => {
             const active = href === '/' ? location === '/' : location.startsWith(href);
             return <Link key={href} href={href} data-testid={`link-nav-${label.toLowerCase().replace(' ', '-')}`} className={`group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold transition ${active ? 'bg-accent text-accent-foreground' : 'text-primary-foreground/65 hover:bg-primary-foreground/10 hover:text-primary-foreground'}`}>
@@ -98,11 +104,11 @@ export function AcimsLayout({ children }: { children: ReactNode }) {
             <div className="hidden h-9 w-9 place-items-center rounded-full bg-secondary text-xs font-extrabold text-secondary-foreground sm:grid">MP</div>
           </div>
         </header>
-        {mobileOpen && <div className="absolute left-3 right-3 top-[80px] z-40 rounded-2xl border border-border bg-card p-2 soft-shadow lg:hidden">{navItems.map(({ href, label, icon: Icon }) => <Link key={href} href={href} onClick={() => setMobileOpen(false)} data-testid={`link-mobile-${label.toLowerCase().replace(' ', '-')}`} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold hover:bg-muted"><Icon size={17} />{label}</Link>)}</div>}
+         {mobileOpen && <div className="absolute left-3 right-3 top-[80px] z-40 max-h-[calc(100dvh-100px)] overflow-y-auto rounded-2xl border border-border bg-card p-2 soft-shadow lg:hidden">{navItems.map(({ href, label, icon: Icon }) => <Link key={href} href={href} onClick={() => setMobileOpen(false)} data-testid={`link-mobile-${label.toLowerCase().replaceAll(' ', '-')}`} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold hover:bg-muted"><Icon size={17} />{label}</Link>)}</div>}
         <main className="mx-auto max-w-[1440px] px-4 py-7 pb-28 sm:px-8 sm:py-10 lg:pb-12">{children}</main>
       </div>
       <nav className="fixed bottom-0 left-0 right-0 z-30 flex h-[72px] items-center justify-around border-t border-border bg-card/95 px-3 backdrop-blur-lg lg:hidden">
-        {navItems.map(({ href, label, icon: Icon }) => {
+         {navItems.slice(0, 4).map(({ href, label, icon: Icon }) => {
           const active = href === '/' ? location === '/' : location.startsWith(href);
           return <Link key={href} href={href} data-testid={`link-bottom-${label.toLowerCase().replace(' ', '-')}`} className={`flex min-w-[62px] flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-bold transition ${active ? 'text-foreground' : 'text-muted-foreground'}`}><span className={`rounded-xl px-3 py-1.5 ${active ? 'bg-accent text-accent-foreground' : ''}`}><Icon size={17} /></span>{label}</Link>;
         })}

@@ -1,0 +1,65 @@
+import { useState, type ReactNode } from 'react';
+import { Activity, BusFront, CheckCircle2, Plus, Route as RouteIcon, ShieldAlert, UserRound, UsersRound } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { getGetAdminDashboardQueryKey, getGetAdminQueuesQueryKey, getGetAdminSafetyReportsQueryKey, getListAdminBusesQueryKey, getListAdminDriversQueryKey, getListAdminRoutesQueryKey, useCreateAdminBus, useCreateAdminDriver, useCreateAdminRoute, useGetAdminDashboard, useGetAdminQueues, useGetAdminSafetyReports, useListAdminBuses, useListAdminDrivers, useListAdminRoutes } from '@workspace/api-client-react';
+import { EmptyState, ErrorState, LoadingRows, PageHeading } from '@/components/acims-ui';
+
+export default function AdminPage() {
+  const queryClient = useQueryClient();
+  const dashboardQuery = useGetAdminDashboard({ query: { queryKey: getGetAdminDashboardQueryKey() } });
+  const busesQuery = useListAdminBuses({ query: { queryKey: getListAdminBusesQueryKey() } });
+  const driversQuery = useListAdminDrivers({ query: { queryKey: getListAdminDriversQueryKey() } });
+  const routesQuery = useListAdminRoutes({ query: { queryKey: getListAdminRoutesQueryKey() } });
+  const queuesQuery = useGetAdminQueues({ query: { queryKey: getGetAdminQueuesQueryKey() } });
+  const safetyQuery = useGetAdminSafetyReports({ query: { queryKey: getGetAdminSafetyReportsQueryKey() } });
+  const createBus = useCreateAdminBus();
+  const createDriver = useCreateAdminDriver();
+  const createRoute = useCreateAdminRoute();
+  const [busNumber, setBusNumber] = useState('');
+  const [busRouteId, setBusRouteId] = useState('');
+  const [busDriverId, setBusDriverId] = useState('');
+  const [capacity, setCapacity] = useState('40');
+  const [driverName, setDriverName] = useState('');
+  const [driverPhone, setDriverPhone] = useState('');
+  const [routeName, setRouteName] = useState('');
+  const [routeDestination, setRouteDestination] = useState('');
+  const [routeStops, setRouteStops] = useState('');
+  const dashboard = dashboardQuery.data;
+  const buses = busesQuery.data ?? [];
+  const drivers = driversQuery.data ?? [];
+  const routes = routesQuery.data ?? [];
+  const queues = queuesQuery.data ?? [];
+  const safety = safetyQuery.data ?? [];
+  const invalidate = (keys: readonly unknown[]) => void queryClient.invalidateQueries({ queryKey: keys });
+  const refresh = () => { void dashboardQuery.refetch(); void busesQuery.refetch(); void driversQuery.refetch(); void routesQuery.refetch(); void queuesQuery.refetch(); void safetyQuery.refetch(); };
+  const submitBus = () => { if (!busNumber.trim() || !busRouteId) return; createBus.mutate({ data: { busNumber: busNumber.trim(), routeId: busRouteId, driverId: busDriverId || undefined, capacity: Number(capacity), active: true } }, { onSuccess: () => { setBusNumber(''); invalidate(getListAdminBusesQueryKey()); invalidate(getGetAdminDashboardQueryKey()); } }); };
+  const submitDriver = () => { if (!driverName.trim() || !driverPhone.trim()) return; createDriver.mutate({ data: { name: driverName.trim(), phone: driverPhone.trim(), active: true } }, { onSuccess: () => { setDriverName(''); setDriverPhone(''); invalidate(getListAdminDriversQueryKey()); invalidate(getGetAdminDashboardQueryKey()); } }); };
+  const submitRoute = () => { if (!routeName.trim() || !routeDestination.trim()) return; createRoute.mutate({ data: { name: routeName.trim(), destination: routeDestination.trim(), stopIds: routeStops.split(',').map((item) => item.trim()).filter(Boolean), active: true } }, { onSuccess: () => { setRouteName(''); setRouteDestination(''); setRouteStops(''); invalidate(getListAdminRoutesQueryKey()); invalidate(getGetAdminDashboardQueryKey()); } }); };
+  const isLoading = dashboardQuery.isLoading || busesQuery.isLoading || driversQuery.isLoading || routesQuery.isLoading || queuesQuery.isLoading || safetyQuery.isLoading;
+  const isError = dashboardQuery.isError || busesQuery.isError || driversQuery.isError || routesQuery.isError || queuesQuery.isError || safetyQuery.isError;
+  if (isLoading) return <LoadingRows count={6} />;
+  if (isError) return <ErrorState onRetry={refresh} label="Operations data could not be loaded." />;
+  return <div className="page-in">
+    <PageHeading eyebrow="Operations surface" title="Keep the network moving." description="A focused transport desk for buses, routes, queues, drivers, and the safety signals that need a human response." action={<div className="rounded-full border border-border bg-card px-3 py-2 text-[11px] font-extrabold"><span className="mr-2 inline-block h-2 w-2 rounded-full bg-accent-foreground" />{dashboard?.systemStatus ?? 'System status'}</div>} />
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{dashboard && <><AdminStat icon={BusFront} label="Active buses" value={dashboard.activeBuses} /><AdminStat icon={RouteIcon} label="Active routes" value={dashboard.activeRoutes} /><AdminStat icon={UsersRound} label="Queue entries" value={dashboard.queueEntries} /><AdminStat icon={ShieldAlert} label="Open safety" value={dashboard.openSafetyReports} /></>}</section>
+    <section className="mt-5 grid gap-5 xl:grid-cols-[1.2fr_.8fr]">
+      <div className="space-y-5">
+        <Panel title="Fleet on the road" eyebrow="Active buses" icon={BusFront}>{buses.length ? <div className="grid gap-2 sm:grid-cols-2">{buses.map((bus) => <div key={bus.id} data-testid={`row-admin-bus-${bus.id}`} className="rounded-xl border border-border p-3"><div className="flex items-center justify-between"><span className="text-sm font-extrabold">Bus {bus.busNumber}</span><span className="rounded-full bg-secondary px-2 py-1 text-[9px] font-extrabold">{bus.status}</span></div><div className="mt-2 text-[11px] text-muted-foreground">Route {bus.routeId} · capacity {bus.capacity}</div></div>)}</div> : <EmptyState icon={BusFront} title="No managed buses" message="Add a bus below to put a vehicle into the operations register." />}</Panel>
+        <Panel title="Queue watch" eyebrow="Live pressure" icon={UsersRound}>{queues.length ? <div className="space-y-2">{queues.map((queue) => <div key={queue.busId} data-testid={`row-admin-queue-${queue.busId}`} className="flex items-center gap-3 rounded-xl bg-muted p-3"><span className="grid h-8 w-8 place-items-center rounded-lg bg-card"><UsersRound size={14} /></span><span className="flex-1"><span className="block text-xs font-extrabold">Bus {queue.busNumber}</span><span className="text-[10px] text-muted-foreground">{queue.occupancy}/{queue.capacity} occupied · {queue.queueSize} waiting</span></span><span className="rounded-full bg-card px-2 py-1 text-[9px] font-extrabold">{queue.status}</span></div>)}</div> : <EmptyState icon={UsersRound} title="No active queues" message="Queue pressure will appear here when students are waiting." />}</Panel>
+        <Panel title="Safety review" eyebrow="Needs attention" icon={ShieldAlert}>{safety.length ? <div className="space-y-2">{safety.slice(0, 5).map((report) => <div key={report.id} data-testid={`row-admin-safety-${report.id}`} className="rounded-xl border border-destructive/15 bg-destructive/5 p-3"><div className="flex items-center justify-between"><span className="text-xs font-extrabold">{report.reportType}</span><span className="text-[9px] font-extrabold uppercase text-destructive">{report.status}</span></div><p className="mt-1 text-[11px] text-muted-foreground">{report.description}</p></div>)}</div> : <EmptyState icon={CheckCircle2} title="No safety reports" message="The safety review queue is clear." />}</Panel>
+      </div>
+      <div className="space-y-5">
+        <Panel title="Add to the register" eyebrow="Create records" icon={Plus}><div className="space-y-6">
+          <FormBlock title="New bus" pending={createBus.isPending} onSubmit={submitBus} submitLabel="Add bus"><input data-testid="input-admin-bus-number" value={busNumber} onChange={(event) => setBusNumber(event.target.value)} placeholder="Bus number" className="admin-input" /><select data-testid="select-admin-bus-route" value={busRouteId} onChange={(event) => setBusRouteId(event.target.value)} className="admin-input"><option value="">Choose route</option>{routes.map((route) => <option key={route.id} value={route.id}>{route.name}</option>)}</select><select data-testid="select-admin-bus-driver" value={busDriverId} onChange={(event) => setBusDriverId(event.target.value)} className="admin-input"><option value="">Driver optional</option>{drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.name}</option>)}</select><input data-testid="input-admin-capacity" type="number" min="1" value={capacity} onChange={(event) => setCapacity(event.target.value)} placeholder="Capacity" className="admin-input" /></FormBlock>
+          <FormBlock title="New driver" pending={createDriver.isPending} onSubmit={submitDriver} submitLabel="Add driver"><input data-testid="input-admin-driver-name" value={driverName} onChange={(event) => setDriverName(event.target.value)} placeholder="Full name" className="admin-input" /><input data-testid="input-admin-driver-phone" value={driverPhone} onChange={(event) => setDriverPhone(event.target.value)} placeholder="Phone" className="admin-input" /></FormBlock>
+          <FormBlock title="New route" pending={createRoute.isPending} onSubmit={submitRoute} submitLabel="Add route"><input data-testid="input-admin-route-name" value={routeName} onChange={(event) => setRouteName(event.target.value)} placeholder="Route name" className="admin-input" /><input data-testid="input-admin-route-destination" value={routeDestination} onChange={(event) => setRouteDestination(event.target.value)} placeholder="Destination" className="admin-input" /><input data-testid="input-admin-route-stops" value={routeStops} onChange={(event) => setRouteStops(event.target.value)} placeholder="Stop IDs, comma separated" className="admin-input" /></FormBlock>
+        </div></Panel>
+        <Panel title="Drivers and routes" eyebrow="Network inventory" icon={Activity}><div className="space-y-2">{drivers.slice(0, 3).map((driver) => <div key={driver.id} className="flex items-center gap-3 rounded-xl bg-muted p-3"><span className="grid h-8 w-8 place-items-center rounded-lg bg-card"><UserRound size={14} /></span><span className="flex-1 text-xs font-extrabold">{driver.name}<span className="block text-[10px] font-medium text-muted-foreground">{driver.phone}</span></span><span className="text-[9px] font-extrabold">{driver.active ? 'Active' : 'Off duty'}</span></div>)}{routes.slice(0, 3).map((route) => <div key={route.id} className="flex items-center gap-3 rounded-xl bg-muted p-3"><span className="grid h-8 w-8 place-items-center rounded-lg bg-card"><RouteIcon size={14} /></span><span className="flex-1 text-xs font-extrabold">{route.name}<span className="block text-[10px] font-medium text-muted-foreground">{route.destination}</span></span><span className="text-[9px] font-extrabold">{route.assignedBusIds.length} buses</span></div>)}</div></Panel>
+      </div>
+    </section>
+  </div>;
+}
+
+function AdminStat({ icon: Icon, label, value }: { icon: typeof BusFront; label: string; value: number }) { return <div className="rounded-2xl border border-border bg-card p-4"><div className="flex items-center justify-between"><span className="grid h-8 w-8 place-items-center rounded-lg bg-muted"><Icon size={15} /></span><span className="mono text-[10px] text-muted-foreground">LIVE</span></div><div className="mt-4 display-font text-3xl font-extrabold">{value}</div><div className="mt-1 text-xs font-bold text-muted-foreground">{label}</div></div>; }
+function Panel({ title, eyebrow, icon: Icon, children }: { title: string; eyebrow: string; icon: typeof Plus; children: ReactNode }) { return <div className="rounded-[28px] border border-border bg-card p-6 sm:p-7"><div className="flex items-start justify-between"><div><div className="mono text-[10px] uppercase tracking-[.18em] text-muted-foreground">{eyebrow}</div><h2 className="mt-1 text-xl font-extrabold">{title}</h2></div><span className="grid h-9 w-9 place-items-center rounded-xl bg-muted"><Icon size={16} /></span></div><div className="mt-5">{children}</div></div>; }
+function FormBlock({ title, pending, onSubmit, submitLabel, children }: { title: string; pending: boolean; onSubmit: () => void; submitLabel: string; children: ReactNode }) { return <div className="border-t border-border pt-5 first:border-t-0 first:pt-0"><div className="mb-3 text-xs font-extrabold">{title}</div><div className="space-y-2">{children}</div><button type="button" onClick={onSubmit} disabled={pending} data-testid={`button-submit-${title.toLowerCase().replace(' ', '-')}`} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50"><Plus size={14} />{pending ? 'Saving…' : submitLabel}</button></div>; }

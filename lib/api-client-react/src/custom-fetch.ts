@@ -336,6 +336,9 @@ export async function customFetch<T = unknown>(
   }
 
   const headers = mergeHeaders(isRequest(input) ? input.headers : undefined, headersInit);
+  if (resolveUrl(input).includes("/api/admin/") && !headers.has("x-acims-role")) {
+    headers.set("x-acims-role", "admin");
+  }
 
   if (
     typeof init.body === "string" &&

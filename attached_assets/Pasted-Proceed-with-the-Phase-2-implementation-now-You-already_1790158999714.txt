@@ -1,0 +1,75 @@
+Proceed with the Phase 2 implementation now.
+
+You already have the Phase 2 specification and have confirmed that the current ACIMS implementation does not yet contain these modules.
+
+I am explicitly authorizing you to BUILD the Phase 2 modules now.
+
+Do not ask me for further confirmation.
+
+Implement Phase 2 in the following order:
+
+1. Campus Map + Navigation
+2. Smart Safety
+3. Admin + Transport Management
+4. Advanced AI Agent
+5. Full Public Transport Integration
+
+IMPORTANT:
+
+- Preserve all existing Phase 1 functionality.
+- Do not rebuild ACIMS from scratch.
+- Inspect the existing code and reuse the current architecture.
+- Do not remove or break Live Tracking, ETA + Delay Prediction,
+  Smart Travel Recommendation, or Queue.
+- Do not create unrelated modules.
+- Do not merely create documentation.
+- Do not stop after planning.
+- Actually implement the frontend, backend, database models,
+  APIs and integrations required for each Phase 2 module.
+
+Implement the modules incrementally.
+
+After each major module:
+1. Run typecheck.
+2. Run the application.
+3. Check for runtime/API errors.
+4. Fix errors.
+5. Continue to the next module.
+
+Use real ACIMS data wherever it already exists.
+
+For external public transport data, create the provider architecture
+and clearly isolate mock/development data if no live provider is available.
+Never present mock external transport data as real live information.
+
+Do not introduce paid APIs or paid services.
+
+Do not expose API keys or secrets.
+
+At the end, verify:
+
+PHASE 1
+✓ Live Tracking
+✓ ETA + Delay Prediction
+✓ Smart Travel Recommendation
+✓ Queue
+
+PHASE 2
+✓ Campus Map + Navigation
+✓ Smart Safety
+✓ Admin + Transport Management
+✓ Advanced AI Agent
+✓ Full Public Transport Integration
+
+Then give me a concise implementation report containing:
+- features actually implemented
+- files/components changed
+- APIs created
+- database changes
+- features using real data
+- features still dependent on external APIs
+- anything that remains incomplete
+
+Most importantly:
+DO THE IMPLEMENTATION NOW. Do not stop at analysis,
+documentation, or a request for confirmation.

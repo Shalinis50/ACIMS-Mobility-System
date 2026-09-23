@@ -285,3 +285,571 @@ export const MarkNotificationReadResponse = zod.object({
 })
 
 
+/**
+ * @summary List important campus locations
+ */
+export const ListCampusLocationsResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "type": zod.string(),
+  "description": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number()
+})
+export const ListCampusLocationsResponse = zod.array(ListCampusLocationsResponseItem)
+
+
+/**
+ * @summary List campus bus stops
+ */
+export const ListCampusStopsResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "servingBusIds": zod.array(zod.string()),
+  "routeNames": zod.array(zod.string())
+})
+export const ListCampusStopsResponse = zod.array(ListCampusStopsResponseItem)
+
+
+/**
+ * @summary List campus mobility routes
+ */
+export const ListCampusRoutesResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "busId": zod.string(),
+  "busNumber": zod.string(),
+  "destination": zod.string(),
+  "stopIds": zod.array(zod.string())
+})
+export const ListCampusRoutesResponse = zod.array(ListCampusRoutesResponseItem)
+
+
+/**
+ * @summary List navigation destinations
+ */
+export const ListNavigationDestinationsResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "type": zod.string(),
+  "description": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number()
+})
+export const ListNavigationDestinationsResponse = zod.array(ListNavigationDestinationsResponseItem)
+
+
+/**
+ * @summary Calculate a campus navigation option
+ */
+export const CalculateNavigationRouteBody = zod.object({
+  "destinationId": zod.string(),
+  "startLatitude": zod.number().optional(),
+  "startLongitude": zod.number().optional(),
+  "mode": zod.string().optional()
+})
+
+export const CalculateNavigationRouteResponse = zod.object({
+  "start": zod.object({
+  "latitude": zod.number(),
+  "longitude": zod.number()
+}),
+  "destination": zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "type": zod.string(),
+  "description": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number()
+}),
+  "mode": zod.string(),
+  "distanceKm": zod.number(),
+  "walkingMinutes": zod.number().int(),
+  "relevantStop": zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "servingBusIds": zod.array(zod.string()),
+  "routeNames": zod.array(zod.string())
+}),
+  "busOptions": zod.array(zod.object({
+  "busId": zod.string(),
+  "busNumber": zod.string(),
+  "destination": zod.string(),
+  "etaMinutes": zod.number().int(),
+  "occupancy": zod.number().int(),
+  "capacity": zod.number().int(),
+  "seatsAvailable": zod.number().int(),
+  "status": zod.string()
+})),
+  "routeCoordinates": zod.array(zod.object({
+  "latitude": zod.number(),
+  "longitude": zod.number()
+}))
+})
+
+
+/**
+ * @summary List the current student's safety reports
+ */
+export const ListSafetyReportsResponseItem = zod.object({
+  "id": zod.string(),
+  "studentId": zod.string(),
+  "reportType": zod.string(),
+  "description": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "status": zod.string()
+})
+export const ListSafetyReportsResponse = zod.array(ListSafetyReportsResponseItem)
+
+
+/**
+ * @summary Report a safety concern
+ */
+export const CreateSafetyReportBody = zod.object({
+  "studentId": zod.string(),
+  "reportType": zod.string(),
+  "description": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number()
+})
+
+export const CreateSafetyReportResponse = zod.object({
+  "id": zod.string(),
+  "studentId": zod.string(),
+  "reportType": zod.string(),
+  "description": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "status": zod.string()
+})
+
+
+/**
+ * @summary List active safety alerts
+ */
+export const ListSafetyAlertsResponseItem = zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "message": zod.string(),
+  "severity": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "createdAt": zod.coerce.date()
+})
+export const ListSafetyAlertsResponse = zod.array(ListSafetyAlertsResponseItem)
+
+
+/**
+ * @summary Activate the student emergency assistance state
+ */
+export const ActivateEmergencyBody = zod.object({
+  "studentId": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "message": zod.string()
+})
+
+export const ActivateEmergencyResponse = zod.object({
+  "status": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "message": zod.string(),
+  "contacts": zod.array(zod.object({
+  "name": zod.string(),
+  "relationship": zod.string(),
+  "phone": zod.string()
+}))
+})
+
+
+/**
+ * @summary Get the transport operations dashboard
+ */
+export const GetAdminDashboardResponse = zod.object({
+  "activeBuses": zod.number().int(),
+  "activeTrips": zod.number().int(),
+  "activeRoutes": zod.number().int(),
+  "delayedBuses": zod.number().int(),
+  "queueEntries": zod.number().int(),
+  "openSafetyReports": zod.number().int(),
+  "providersOnline": zod.number().int(),
+  "systemStatus": zod.string()
+})
+
+
+/**
+ * @summary List buses for transport management
+ */
+export const ListAdminBusesResponseItem = zod.object({
+  "busNumber": zod.string(),
+  "routeId": zod.string(),
+  "driverId": zod.string().optional(),
+  "capacity": zod.number().int(),
+  "active": zod.boolean().optional()
+}).and(zod.object({
+  "id": zod.string(),
+  "status": zod.string()
+}))
+export const ListAdminBusesResponse = zod.array(ListAdminBusesResponseItem)
+
+
+/**
+ * @summary Add a managed bus
+ */
+export const CreateAdminBusBody = zod.object({
+  "busNumber": zod.string(),
+  "routeId": zod.string(),
+  "driverId": zod.string().optional(),
+  "capacity": zod.number().int(),
+  "active": zod.boolean().optional()
+})
+
+export const CreateAdminBusResponse = zod.object({
+  "busNumber": zod.string(),
+  "routeId": zod.string(),
+  "driverId": zod.string().optional(),
+  "capacity": zod.number().int(),
+  "active": zod.boolean().optional()
+}).and(zod.object({
+  "id": zod.string(),
+  "status": zod.string()
+}))
+
+
+/**
+ * @summary Update a managed bus
+ */
+export const UpdateAdminBusParams = zod.object({
+  "busId": zod.coerce.string()
+})
+
+export const UpdateAdminBusBody = zod.object({
+  "busNumber": zod.string(),
+  "routeId": zod.string(),
+  "driverId": zod.string().optional(),
+  "capacity": zod.number().int(),
+  "active": zod.boolean().optional()
+})
+
+export const UpdateAdminBusResponse = zod.object({
+  "busNumber": zod.string(),
+  "routeId": zod.string(),
+  "driverId": zod.string().optional(),
+  "capacity": zod.number().int(),
+  "active": zod.boolean().optional()
+}).and(zod.object({
+  "id": zod.string(),
+  "status": zod.string()
+}))
+
+
+/**
+ * @summary Deactivate a managed bus
+ */
+export const DeactivateAdminBusParams = zod.object({
+  "busId": zod.coerce.string()
+})
+
+export const DeactivateAdminBusResponse = zod.object({
+  "busNumber": zod.string(),
+  "routeId": zod.string(),
+  "driverId": zod.string().optional(),
+  "capacity": zod.number().int(),
+  "active": zod.boolean().optional()
+}).and(zod.object({
+  "id": zod.string(),
+  "status": zod.string()
+}))
+
+
+/**
+ * @summary List transport drivers
+ */
+export const ListAdminDriversResponseItem = zod.object({
+  "name": zod.string(),
+  "phone": zod.string(),
+  "active": zod.boolean().optional()
+}).and(zod.object({
+  "id": zod.string(),
+  "busId": zod.string().optional(),
+  "routeId": zod.string().optional()
+}))
+export const ListAdminDriversResponse = zod.array(ListAdminDriversResponseItem)
+
+
+/**
+ * @summary Add a driver
+ */
+export const CreateAdminDriverBody = zod.object({
+  "name": zod.string(),
+  "phone": zod.string(),
+  "active": zod.boolean().optional()
+})
+
+export const CreateAdminDriverResponse = zod.object({
+  "name": zod.string(),
+  "phone": zod.string(),
+  "active": zod.boolean().optional()
+}).and(zod.object({
+  "id": zod.string(),
+  "busId": zod.string().optional(),
+  "routeId": zod.string().optional()
+}))
+
+
+/**
+ * @summary List managed routes
+ */
+export const ListAdminRoutesResponseItem = zod.object({
+  "name": zod.string(),
+  "destination": zod.string(),
+  "stopIds": zod.array(zod.string()),
+  "active": zod.boolean().optional()
+}).and(zod.object({
+  "id": zod.string(),
+  "assignedBusIds": zod.array(zod.string())
+}))
+export const ListAdminRoutesResponse = zod.array(ListAdminRoutesResponseItem)
+
+
+/**
+ * @summary Create a route
+ */
+export const CreateAdminRouteBody = zod.object({
+  "name": zod.string(),
+  "destination": zod.string(),
+  "stopIds": zod.array(zod.string()),
+  "active": zod.boolean().optional()
+})
+
+export const CreateAdminRouteResponse = zod.object({
+  "name": zod.string(),
+  "destination": zod.string(),
+  "stopIds": zod.array(zod.string()),
+  "active": zod.boolean().optional()
+}).and(zod.object({
+  "id": zod.string(),
+  "assignedBusIds": zod.array(zod.string())
+}))
+
+
+/**
+ * @summary Monitor active queues
+ */
+export const GetAdminQueuesResponseItem = zod.object({
+  "busId": zod.string(),
+  "busNumber": zod.string(),
+  "queueSize": zod.number().int(),
+  "occupancy": zod.number().int(),
+  "capacity": zod.number().int(),
+  "status": zod.string()
+})
+export const GetAdminQueuesResponse = zod.array(GetAdminQueuesResponseItem)
+
+
+/**
+ * @summary Review safety reports
+ */
+export const GetAdminSafetyReportsResponseItem = zod.object({
+  "id": zod.string(),
+  "studentId": zod.string(),
+  "reportType": zod.string(),
+  "description": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "status": zod.string()
+})
+export const GetAdminSafetyReportsResponse = zod.array(GetAdminSafetyReportsResponseItem)
+
+
+/**
+ * @summary Get current ACIMS mobility context
+ */
+export const GetAiContextResponse = zod.object({
+  "buses": zod.array(zod.object({
+  "id": zod.string(),
+  "busNumber": zod.string(),
+  "origin": zod.string(),
+  "destination": zod.string(),
+  "routeLabel": zod.string(),
+  "capacity": zod.number().int(),
+  "currentOccupancy": zod.number().int(),
+  "currentLocation": zod.object({
+  "latitude": zod.number(),
+  "longitude": zod.number()
+}),
+  "nextStop": zod.string(),
+  "nextStopId": zod.string(),
+  "etaMinutes": zod.number().int(),
+  "status": zod.string(),
+  "updatedAt": zod.coerce.date()
+})),
+  "queue": zod.object({
+  "joined": zod.boolean(),
+  "entry": zod.object({
+  "studentId": zod.string(),
+  "busId": zod.string(),
+  "boardingStop": zod.string(),
+  "queuePosition": zod.number().int(),
+  "joinedAt": zod.coerce.date(),
+  "status": zod.string()
+}).nullable(),
+  "busId": zod.string(),
+  "currentOccupancy": zod.number().int(),
+  "capacity": zod.number().int(),
+  "seatsAvailable": zod.number().int(),
+  "estimatedAvailabilityMinutes": zod.number().int(),
+  "message": zod.string()
+}),
+  "safetyAlerts": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "message": zod.string(),
+  "severity": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "createdAt": zod.coerce.date()
+})),
+  "destinations": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "type": zod.string(),
+  "description": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number()
+}))
+})
+
+
+/**
+ * @summary Ask the data-grounded mobility assistant
+ */
+export const SendAiChatBody = zod.object({
+  "studentId": zod.string(),
+  "message": zod.string(),
+  "destinationId": zod.string().optional()
+})
+
+export const SendAiChatResponse = zod.object({
+  "answer": zod.string(),
+  "sources": zod.array(zod.string()),
+  "context": zod.object({
+  "buses": zod.array(zod.object({
+  "id": zod.string(),
+  "busNumber": zod.string(),
+  "origin": zod.string(),
+  "destination": zod.string(),
+  "routeLabel": zod.string(),
+  "capacity": zod.number().int(),
+  "currentOccupancy": zod.number().int(),
+  "currentLocation": zod.object({
+  "latitude": zod.number(),
+  "longitude": zod.number()
+}),
+  "nextStop": zod.string(),
+  "nextStopId": zod.string(),
+  "etaMinutes": zod.number().int(),
+  "status": zod.string(),
+  "updatedAt": zod.coerce.date()
+})),
+  "queue": zod.object({
+  "joined": zod.boolean(),
+  "entry": zod.object({
+  "studentId": zod.string(),
+  "busId": zod.string(),
+  "boardingStop": zod.string(),
+  "queuePosition": zod.number().int(),
+  "joinedAt": zod.coerce.date(),
+  "status": zod.string()
+}).nullable(),
+  "busId": zod.string(),
+  "currentOccupancy": zod.number().int(),
+  "capacity": zod.number().int(),
+  "seatsAvailable": zod.number().int(),
+  "estimatedAvailabilityMinutes": zod.number().int(),
+  "message": zod.string()
+}),
+  "safetyAlerts": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "message": zod.string(),
+  "severity": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "createdAt": zod.coerce.date()
+})),
+  "destinations": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "type": zod.string(),
+  "description": zod.string(),
+  "latitude": zod.number(),
+  "longitude": zod.number()
+}))
+})
+})
+
+
+/**
+ * @summary List transport providers and data freshness
+ */
+export const ListTransportProvidersResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "category": zod.string(),
+  "status": zod.string(),
+  "dataLabel": zod.string()
+})
+export const ListTransportProvidersResponse = zod.array(ListTransportProvidersResponseItem)
+
+
+/**
+ * @summary List available transport routes
+ */
+export const ListTransportRoutesResponseItem = zod.object({
+  "id": zod.string(),
+  "providerId": zod.string(),
+  "transportType": zod.string(),
+  "route": zod.string(),
+  "departure": zod.string(),
+  "arrival": zod.string(),
+  "durationMinutes": zod.number().int(),
+  "transfers": zod.number().int(),
+  "walkingDistanceKm": zod.number(),
+  "availability": zod.string(),
+  "dataLabel": zod.string()
+})
+export const ListTransportRoutesResponse = zod.array(ListTransportRoutesResponseItem)
+
+
+/**
+ * @summary Search mobility options between two locations
+ */
+export const SearchTransportBody = zod.object({
+  "start": zod.string(),
+  "destination": zod.string()
+})
+
+export const SearchTransportResponseItem = zod.object({
+  "id": zod.string(),
+  "providerId": zod.string(),
+  "transportType": zod.string(),
+  "route": zod.string(),
+  "departure": zod.string(),
+  "arrival": zod.string(),
+  "durationMinutes": zod.number().int(),
+  "transfers": zod.number().int(),
+  "walkingDistanceKm": zod.number(),
+  "availability": zod.string(),
+  "dataLabel": zod.string()
+})
+export const SearchTransportResponse = zod.array(SearchTransportResponseItem)
+
+

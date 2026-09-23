@@ -109,6 +109,214 @@ export interface NotificationReadInput {
   id: string;
 }
 
+export interface CampusLocation {
+  id: string;
+  name: string;
+  type: string;
+  description: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface CampusStop {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  servingBusIds: string[];
+  routeNames: string[];
+}
+
+export interface CampusRoute {
+  id: string;
+  name: string;
+  busId: string;
+  busNumber: string;
+  destination: string;
+  stopIds: string[];
+}
+
+export interface NavigationInput {
+  destinationId: string;
+  startLatitude?: number;
+  startLongitude?: number;
+  mode?: string;
+}
+
+export interface NavigationBusOption {
+  busId: string;
+  busNumber: string;
+  destination: string;
+  etaMinutes: number;
+  occupancy: number;
+  capacity: number;
+  seatsAvailable: number;
+  status: string;
+}
+
+export interface NavigationRoute {
+  start: Coordinate;
+  destination: CampusLocation;
+  mode: string;
+  distanceKm: number;
+  walkingMinutes: number;
+  relevantStop: CampusStop;
+  busOptions: NavigationBusOption[];
+  routeCoordinates: Coordinate[];
+}
+
+export interface SafetyReportInput {
+  studentId: string;
+  reportType: string;
+  description: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface SafetyReport {
+  id: string;
+  studentId: string;
+  reportType: string;
+  description: string;
+  latitude: number;
+  longitude: number;
+  createdAt: string;
+  status: string;
+}
+
+export interface SafetyAlert {
+  id: string;
+  title: string;
+  message: string;
+  severity: string;
+  latitude: number;
+  longitude: number;
+  createdAt: string;
+}
+
+export interface EmergencyInput {
+  studentId: string;
+  latitude: number;
+  longitude: number;
+  message: string;
+}
+
+export interface EmergencyContact {
+  name: string;
+  relationship: string;
+  phone: string;
+}
+
+export interface EmergencyResponse {
+  status: string;
+  createdAt: string;
+  message: string;
+  contacts: EmergencyContact[];
+}
+
+export interface AdminBusInput {
+  busNumber: string;
+  routeId: string;
+  driverId?: string;
+  capacity: number;
+  active?: boolean;
+}
+
+export type AdminBus = AdminBusInput & {
+  id: string;
+  status: string;
+};
+
+export interface DriverInput {
+  name: string;
+  phone: string;
+  active?: boolean;
+}
+
+export type Driver = DriverInput & {
+  id: string;
+  busId?: string;
+  routeId?: string;
+};
+
+export interface AdminRouteInput {
+  name: string;
+  destination: string;
+  stopIds: string[];
+  active?: boolean;
+}
+
+export type AdminRoute = AdminRouteInput & {
+  id: string;
+  assignedBusIds: string[];
+};
+
+export interface AdminQueue {
+  busId: string;
+  busNumber: string;
+  queueSize: number;
+  occupancy: number;
+  capacity: number;
+  status: string;
+}
+
+export interface AdminDashboard {
+  activeBuses: number;
+  activeTrips: number;
+  activeRoutes: number;
+  delayedBuses: number;
+  queueEntries: number;
+  openSafetyReports: number;
+  providersOnline: number;
+  systemStatus: string;
+}
+
+export interface AiContext {
+  buses: Bus[];
+  queue: QueueStatus;
+  safetyAlerts: SafetyAlert[];
+  destinations: CampusLocation[];
+}
+
+export interface AiChatInput {
+  studentId: string;
+  message: string;
+  destinationId?: string;
+}
+
+export interface AiChatResponse {
+  answer: string;
+  sources: string[];
+  context: AiContext;
+}
+
+export interface TransportProvider {
+  id: string;
+  name: string;
+  category: string;
+  status: string;
+  dataLabel: string;
+}
+
+export interface TransportSearchInput {
+  start: string;
+  destination: string;
+}
+
+export interface PublicTransportJourney {
+  id: string;
+  providerId: string;
+  transportType: string;
+  route: string;
+  departure: string;
+  arrival: string;
+  durationMinutes: number;
+  transfers: number;
+  walkingDistanceKm: number;
+  availability: string;
+  dataLabel: string;
+}
+
 export type BusIdQueryParameter = string;
 
 export type GetQueueStatusParams = {

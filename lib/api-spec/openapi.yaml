@@ -16,6 +16,18 @@ tags:
     description: Overflow queue operations
   - name: notifications
     description: Smart alert operations
+  - name: campus
+    description: Campus locations, stops, and routes
+  - name: navigation
+    description: Walking and bus navigation
+  - name: safety
+    description: Student safety and emergency assistance
+  - name: admin
+    description: Administrative transport management
+  - name: ai
+    description: Data-grounded mobility assistant
+  - name: transport
+    description: Public transport provider integrations
 paths:
   /healthz:
     get:
@@ -226,6 +238,392 @@ paths:
                 $ref: "#/components/schemas/Notification"
         "404":
           description: Notification not found
+  /campus/locations:
+    get:
+      operationId: listCampusLocations
+      tags: [campus]
+      summary: List important campus locations
+      responses:
+        "200":
+          description: Campus locations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CampusLocation"
+  /campus/stops:
+    get:
+      operationId: listCampusStops
+      tags: [campus]
+      summary: List campus bus stops
+      responses:
+        "200":
+          description: Campus stops
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CampusStop"
+  /campus/routes:
+    get:
+      operationId: listCampusRoutes
+      tags: [campus]
+      summary: List campus mobility routes
+      responses:
+        "200":
+          description: Campus routes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CampusRoute"
+  /navigation/destinations:
+    get:
+      operationId: listNavigationDestinations
+      tags: [navigation]
+      summary: List navigation destinations
+      responses:
+        "200":
+          description: Navigation destinations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CampusLocation"
+  /navigation/route:
+    post:
+      operationId: calculateNavigationRoute
+      tags: [navigation]
+      summary: Calculate a campus navigation option
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NavigationInput"
+      responses:
+        "200":
+          description: Navigation route
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NavigationRoute"
+        "404":
+          description: Destination not found
+  /safety/reports:
+    get:
+      operationId: listSafetyReports
+      tags: [safety]
+      summary: List the current student's safety reports
+      responses:
+        "200":
+          description: Safety reports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SafetyReport"
+  /safety/report:
+    post:
+      operationId: createSafetyReport
+      tags: [safety]
+      summary: Report a safety concern
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SafetyReportInput"
+      responses:
+        "201":
+          description: Safety report created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SafetyReport"
+  /safety/alerts:
+    get:
+      operationId: listSafetyAlerts
+      tags: [safety]
+      summary: List active safety alerts
+      responses:
+        "200":
+          description: Safety alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SafetyAlert"
+  /safety/emergency:
+    post:
+      operationId: activateEmergency
+      tags: [safety]
+      summary: Activate the student emergency assistance state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmergencyInput"
+      responses:
+        "200":
+          description: Emergency assistance state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmergencyResponse"
+  /admin/dashboard:
+    get:
+      operationId: getAdminDashboard
+      tags: [admin]
+      summary: Get the transport operations dashboard
+      responses:
+        "200":
+          description: Admin dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDashboard"
+  /admin/buses:
+    get:
+      operationId: listAdminBuses
+      tags: [admin]
+      summary: List buses for transport management
+      responses:
+        "200":
+          description: Managed buses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminBus"
+    post:
+      operationId: createAdminBus
+      tags: [admin]
+      summary: Add a managed bus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminBusInput"
+      responses:
+        "201":
+          description: Created bus
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBus"
+  /admin/buses/{busId}:
+    patch:
+      operationId: updateAdminBus
+      tags: [admin]
+      summary: Update a managed bus
+      parameters:
+        - $ref: "#/components/parameters/BusId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminBusInput"
+      responses:
+        "200":
+          description: Updated bus
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBus"
+        "404":
+          description: Bus not found
+    delete:
+      operationId: deactivateAdminBus
+      tags: [admin]
+      summary: Deactivate a managed bus
+      parameters:
+        - $ref: "#/components/parameters/BusId"
+      responses:
+        "200":
+          description: Deactivated bus
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBus"
+  /admin/drivers:
+    get:
+      operationId: listAdminDrivers
+      tags: [admin]
+      summary: List transport drivers
+      responses:
+        "200":
+          description: Drivers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Driver"
+    post:
+      operationId: createAdminDriver
+      tags: [admin]
+      summary: Add a driver
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverInput"
+      responses:
+        "201":
+          description: Created driver
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Driver"
+  /admin/routes:
+    get:
+      operationId: listAdminRoutes
+      tags: [admin]
+      summary: List managed routes
+      responses:
+        "200":
+          description: Routes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminRoute"
+    post:
+      operationId: createAdminRoute
+      tags: [admin]
+      summary: Create a route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRouteInput"
+      responses:
+        "201":
+          description: Created route
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRoute"
+  /admin/queues:
+    get:
+      operationId: getAdminQueues
+      tags: [admin]
+      summary: Monitor active queues
+      responses:
+        "200":
+          description: Queue monitoring
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminQueue"
+  /admin/safety:
+    get:
+      operationId: getAdminSafetyReports
+      tags: [admin]
+      summary: Review safety reports
+      responses:
+        "200":
+          description: Safety reports for administrators
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SafetyReport"
+  /ai/context:
+    get:
+      operationId: getAiContext
+      tags: [ai]
+      summary: Get current ACIMS mobility context
+      responses:
+        "200":
+          description: ACIMS context
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiContext"
+  /ai/chat:
+    post:
+      operationId: sendAiChat
+      tags: [ai]
+      summary: Ask the data-grounded mobility assistant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiChatInput"
+      responses:
+        "200":
+          description: Assistant response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiChatResponse"
+  /transport/providers:
+    get:
+      operationId: listTransportProviders
+      tags: [transport]
+      summary: List transport providers and data freshness
+      responses:
+        "200":
+          description: Transport providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TransportProvider"
+  /transport/routes:
+    get:
+      operationId: listTransportRoutes
+      tags: [transport]
+      summary: List available transport routes
+      responses:
+        "200":
+          description: Transport routes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PublicTransportJourney"
+  /transport/search:
+    post:
+      operationId: searchTransport
+      tags: [transport]
+      summary: Search mobility options between two locations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransportSearchInput"
+      responses:
+        "200":
+          description: Mobility options
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PublicTransportJourney"
 components:
   parameters:
     BusId:
@@ -427,4 +825,401 @@ components:
         id:
           type: string
       required: [id]
+    CampusLocation:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        description:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+      required: [id, name, type, description, latitude, longitude]
+    CampusStop:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        servingBusIds:
+          type: array
+          items:
+            type: string
+        routeNames:
+          type: array
+          items:
+            type: string
+      required: [id, name, latitude, longitude, servingBusIds, routeNames]
+    CampusRoute:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        busId:
+          type: string
+        busNumber:
+          type: string
+        destination:
+          type: string
+        stopIds:
+          type: array
+          items:
+            type: string
+      required: [id, name, busId, busNumber, destination, stopIds]
+    NavigationInput:
+      type: object
+      properties:
+        destinationId:
+          type: string
+        startLatitude:
+          type: number
+        startLongitude:
+          type: number
+        mode:
+          type: string
+      required: [destinationId]
+    NavigationRoute:
+      type: object
+      properties:
+        start:
+          $ref: "#/components/schemas/Coordinate"
+        destination:
+          $ref: "#/components/schemas/CampusLocation"
+        mode:
+          type: string
+        distanceKm:
+          type: number
+        walkingMinutes:
+          type: integer
+        relevantStop:
+          $ref: "#/components/schemas/CampusStop"
+        busOptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/NavigationBusOption"
+        routeCoordinates:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coordinate"
+      required: [start, destination, mode, distanceKm, walkingMinutes, relevantStop, busOptions, routeCoordinates]
+    NavigationBusOption:
+      type: object
+      properties:
+        busId:
+          type: string
+        busNumber:
+          type: string
+        destination:
+          type: string
+        etaMinutes:
+          type: integer
+        occupancy:
+          type: integer
+        capacity:
+          type: integer
+        seatsAvailable:
+          type: integer
+        status:
+          type: string
+      required: [busId, busNumber, destination, etaMinutes, occupancy, capacity, seatsAvailable, status]
+    SafetyReportInput:
+      type: object
+      properties:
+        studentId:
+          type: string
+        reportType:
+          type: string
+        description:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+      required: [studentId, reportType, description, latitude, longitude]
+    SafetyReport:
+      type: object
+      properties:
+        id:
+          type: string
+        studentId:
+          type: string
+        reportType:
+          type: string
+        description:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+      required: [id, studentId, reportType, description, latitude, longitude, createdAt, status]
+    SafetyAlert:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        severity:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, title, message, severity, latitude, longitude, createdAt]
+    EmergencyInput:
+      type: object
+      properties:
+        studentId:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        message:
+          type: string
+      required: [studentId, latitude, longitude, message]
+    EmergencyContact:
+      type: object
+      properties:
+        name:
+          type: string
+        relationship:
+          type: string
+        phone:
+          type: string
+      required: [name, relationship, phone]
+    EmergencyResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        message:
+          type: string
+        contacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmergencyContact"
+      required: [status, createdAt, message, contacts]
+    AdminBusInput:
+      type: object
+      properties:
+        busNumber:
+          type: string
+        routeId:
+          type: string
+        driverId:
+          type: string
+        capacity:
+          type: integer
+        active:
+          type: boolean
+      required: [busNumber, routeId, capacity]
+    AdminBus:
+      allOf:
+        - $ref: "#/components/schemas/AdminBusInput"
+        - type: object
+          properties:
+            id:
+              type: string
+            status:
+              type: string
+          required: [id, status]
+    DriverInput:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        active:
+          type: boolean
+      required: [name, phone]
+    Driver:
+      allOf:
+        - $ref: "#/components/schemas/DriverInput"
+        - type: object
+          properties:
+            id:
+              type: string
+            busId:
+              type: string
+            routeId:
+              type: string
+          required: [id]
+    AdminRouteInput:
+      type: object
+      properties:
+        name:
+          type: string
+        destination:
+          type: string
+        stopIds:
+          type: array
+          items:
+            type: string
+        active:
+          type: boolean
+      required: [name, destination, stopIds]
+    AdminRoute:
+      allOf:
+        - $ref: "#/components/schemas/AdminRouteInput"
+        - type: object
+          properties:
+            id:
+              type: string
+            assignedBusIds:
+              type: array
+              items:
+                type: string
+          required: [id, assignedBusIds]
+    AdminQueue:
+      type: object
+      properties:
+        busId:
+          type: string
+        busNumber:
+          type: string
+        queueSize:
+          type: integer
+        occupancy:
+          type: integer
+        capacity:
+          type: integer
+        status:
+          type: string
+      required: [busId, busNumber, queueSize, occupancy, capacity, status]
+    AdminDashboard:
+      type: object
+      properties:
+        activeBuses:
+          type: integer
+        activeTrips:
+          type: integer
+        activeRoutes:
+          type: integer
+        delayedBuses:
+          type: integer
+        queueEntries:
+          type: integer
+        openSafetyReports:
+          type: integer
+        providersOnline:
+          type: integer
+        systemStatus:
+          type: string
+      required: [activeBuses, activeTrips, activeRoutes, delayedBuses, queueEntries, openSafetyReports, providersOnline, systemStatus]
+    AiContext:
+      type: object
+      properties:
+        buses:
+          type: array
+          items:
+            $ref: "#/components/schemas/Bus"
+        queue:
+          $ref: "#/components/schemas/QueueStatus"
+        safetyAlerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SafetyAlert"
+        destinations:
+          type: array
+          items:
+            $ref: "#/components/schemas/CampusLocation"
+      required: [buses, queue, safetyAlerts, destinations]
+    AiChatInput:
+      type: object
+      properties:
+        studentId:
+          type: string
+        message:
+          type: string
+        destinationId:
+          type: string
+      required: [studentId, message]
+    AiChatResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+        sources:
+          type: array
+          items:
+            type: string
+        context:
+          $ref: "#/components/schemas/AiContext"
+      required: [answer, sources, context]
+    TransportProvider:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+        dataLabel:
+          type: string
+      required: [id, name, category, status, dataLabel]
+    TransportSearchInput:
+      type: object
+      properties:
+        start:
+          type: string
+        destination:
+          type: string
+      required: [start, destination]
+    PublicTransportJourney:
+      type: object
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        transportType:
+          type: string
+        route:
+          type: string
+        departure:
+          type: string
+        arrival:
+          type: string
+        durationMinutes:
+          type: integer
+        transfers:
+          type: integer
+        walkingDistanceKm:
+          type: number
+        availability:
+          type: string
+        dataLabel:
+          type: string
+      required: [id, providerId, transportType, route, departure, arrival, durationMinutes, transfers, walkingDistanceKm, availability, dataLabel]
 

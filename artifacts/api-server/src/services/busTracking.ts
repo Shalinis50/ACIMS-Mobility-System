@@ -133,7 +133,8 @@ function updateDerivedState(source: string, timestamp = new Date()) {
 }
 
 export function getBuses() {
-  return [getBus(busId)];
+  const bus = getBus(busId);
+  return bus ? [bus] : [];
 }
 
 export function getBus(id: string) {

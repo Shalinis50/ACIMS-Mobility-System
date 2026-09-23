@@ -8,6 +8,12 @@ import Dashboard from '@/pages/dashboard';
 import LiveMap from '@/pages/map';
 import QueuePage from '@/pages/queue';
 import AlertsPage from '@/pages/alerts';
+import CampusMapPage from '@/pages/campus-map';
+import NavigationPage from '@/pages/navigation';
+import SafetyPage from '@/pages/safety';
+import AdminPage from '@/pages/admin';
+import AiAgentPage from '@/pages/ai-agent';
+import PublicTransportPage from '@/pages/public-transport';
 import { AcimsLayout } from '@/components/acims-ui';
 import {
   Route,
@@ -29,6 +35,12 @@ function Router() {
           <Route path="/map" component={LiveMap} />
           <Route path="/queue" component={QueuePage} />
           <Route path="/alerts" component={AlertsPage} />
+          <Route path="/campus-map" component={CampusMapPage} />
+          <Route path="/navigation" component={NavigationPage} />
+          <Route path="/safety" component={SafetyPage} />
+          <Route path="/admin" component={AdminPage} />
+          <Route path="/ai-agent" component={AiAgentPage} />
+          <Route path="/public-transport" component={PublicTransportPage} />
           <Route component={NotFound} />
         </Switch>
       </AcimsLayout>
