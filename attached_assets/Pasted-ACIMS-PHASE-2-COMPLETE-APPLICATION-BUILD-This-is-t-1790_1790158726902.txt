@@ -1,0 +1,704 @@
+ACIMS — PHASE 2 COMPLETE APPLICATION BUILD
+===========================================
+
+This is the second development phase of the existing ACIMS
+(Adaptive Campus Mobility Intelligence System).
+
+IMPORTANT:
+The handwritten ACIMS module plan is the source of truth for Phase 2.
+
+PHASE 2 HAS EXACTLY THESE 5 MODULES:
+
+1. Campus Map + Navigation
+2. Smart Safety
+3. Admin + Transport Management
+4. Advanced AI Agent
+5. Full Public Transport Integration
+
+Do NOT add unrelated modules such as Parent Management, QR Boarding,
+separate Occupancy Management, etc. unless they are technically
+required as supporting functionality for these five modules.
+
+The existing Phase 1 modules are:
+
+1. Live Tracking
+2. ETA + Delay Prediction
+3. Smart Travel Recommendation
+4. Queue
+
+Phase 2 must BUILD ON the existing Phase 1 system.
+
+DO NOT rebuild Phase 1 from scratch.
+DO NOT remove Phase 1 functionality.
+DO NOT redesign the entire application unnecessarily.
+
+First inspect the existing ACIMS codebase and understand the existing
+frontend, backend, database, APIs, routing and Phase 1 implementation.
+
+==================================================
+PHASE 2 — MODULE 1
+CAMPUS MAP + NAVIGATION
+==================================================
+
+Build a complete campus mobility map and navigation system.
+
+The map should provide:
+
+- Campus map
+- Campus buildings/locations
+- Bus stops
+- Routes
+- Important campus locations
+- User's current location when permission is available
+- Bus locations from Phase 1 live tracking
+- Selected destination
+- Selected bus stop
+- Route visualization
+
+Users should be able to:
+
+1. Open Campus Map
+2. Search for a campus location
+3. Select a location
+4. View the location on the map
+5. Select a bus stop
+6. View routes serving that stop
+7. Navigate between campus locations
+8. Navigate to a bus stop
+9. See relevant mobility options
+
+Navigation should provide:
+
+- Starting location
+- Destination
+- Route
+- Distance
+- Estimated walking time
+- Relevant bus stop
+- Available bus options where applicable
+
+Integrate this with Phase 1.
+
+For example:
+
+Student selects:
+"Tambaram Bus Stop"
+
+ACIMS should be able to show:
+
+Current location
+→ walking route
+→ bus stop
+→ available bus
+→ ETA
+
+Do NOT use fake navigation data.
+
+If a mapping/navigation API is unavailable,
+build the architecture so a real map provider can be connected later.
+
+Prefer free/open-source mapping solutions where practical.
+
+==================================================
+PHASE 2 — MODULE 2
+SMART SAFETY
+==================================================
+
+Build a Smart Safety module focused on commuter safety.
+
+The system should provide:
+
+- Safe-route awareness
+- Emergency assistance
+- Safety alerts
+- Unsafe/alert location reporting
+- Route safety information
+- Emergency contact functionality
+- Trip safety status
+
+Create a dedicated:
+
+"Safety" section.
+
+Possible functionality:
+
+1. Emergency/SOS button
+2. Share trip/status
+3. Safety alert
+4. Report unsafe location
+5. Report transport-related safety issue
+6. Safety notification
+7. Emergency contact information
+
+When the user activates SOS:
+
+Display a clear emergency state.
+
+Do not falsely claim that police/emergency services have
+been contacted unless an actual integration exists.
+
+If direct emergency-service integration is unavailable,
+provide a clear fallback such as:
+
+"Emergency assistance information"
+
+and allow configured emergency contacts to be displayed/called
+where supported.
+
+Safety reports should contain:
+
+- location
+- time
+- report type
+- optional description
+- status
+
+Possible report types:
+
+- Unsafe area
+- Harassment/safety concern
+- Bus/driver concern
+- Road hazard
+- Accident
+- Other
+
+Admin should be able to review safety reports.
+
+==================================================
+PHASE 2 — MODULE 3
+ADMIN + TRANSPORT MANAGEMENT
+==================================================
+
+Build a complete administrative transport-management system.
+
+Create an Admin Dashboard.
+
+Dashboard should show:
+
+- Active buses
+- Active trips
+- Current routes
+- Current delays
+- Queue activity
+- Safety alerts/reports
+- Public transport integration status
+- System status
+
+ADMIN FEATURES:
+
+BUS MANAGEMENT
+
+Admin can:
+
+- Add bus
+- Edit bus
+- Remove/deactivate bus
+- Assign route
+- Assign driver
+- Set capacity
+- View status
+
+ROUTE MANAGEMENT
+
+Admin can:
+
+- Create route
+- Edit route
+- Add stops
+- Remove stops
+- Reorder stops
+- Assign buses
+- Activate/deactivate routes
+
+DRIVER MANAGEMENT
+
+Admin can:
+
+- Add driver
+- Edit driver
+- Assign bus
+- Assign route
+- Activate/deactivate driver
+
+TRANSPORT MONITORING
+
+Admin can view:
+
+- Active buses
+- Live bus locations
+- Current routes
+- Current stops
+- ETA
+- Delays
+- Queue activity
+
+QUEUE MANAGEMENT
+
+Admin can:
+
+- View active queues
+- View queue size
+- View queue status
+- Monitor overloaded buses
+
+SAFETY MANAGEMENT
+
+Admin can:
+
+- View safety reports
+- View location
+- View report type
+- View timestamp
+- Update report status
+
+Possible statuses:
+
+OPEN
+UNDER REVIEW
+RESOLVED
+DISMISSED
+
+==================================================
+PHASE 2 — MODULE 4
+ADVANCED AI AGENT
+==================================================
+
+Build the Advanced ACIMS AI Agent.
+
+IMPORTANT:
+
+The existing Phase 1 ETA AI Agent should remain intact.
+
+This Phase 2 agent is a broader mobility assistant.
+
+It should combine ACIMS data such as:
+
+- Live bus locations
+- ETA
+- Delays
+- Routes
+- Queue status
+- Campus locations
+- Public transport options
+- Safety information
+- User's selected destination
+
+The agent should answer mobility questions such as:
+
+"How do I get to the library?"
+
+"Which bus should I take?"
+
+"Is my bus delayed?"
+
+"What is the fastest available option?"
+
+"I missed my bus. What can I take now?"
+
+"Is there another route?"
+
+"How long will my journey take?"
+
+"Which route is safer?"
+
+The AI agent must use actual ACIMS data.
+
+Do NOT fabricate:
+
+- buses
+- ETAs
+- routes
+- public transport services
+- safety information
+- availability
+
+If required data is unavailable, explicitly state that it is unavailable.
+
+Create an AI Agent interface with:
+
+- Chat
+- Suggested questions
+- Current trip context
+- Destination context
+- Mobility recommendations
+- Relevant alerts
+
+Keep the AI layer modular.
+
+Do not hardcode the AI provider.
+
+The system should allow an AI API/provider to be configured later
+through environment variables without exposing API keys.
+
+==================================================
+PHASE 2 — MODULE 5
+FULL PUBLIC TRANSPORT INTEGRATION
+==================================================
+
+Build the architecture for integrating external/public transport.
+
+This module should extend ACIMS beyond college buses.
+
+The system should support transport categories such as:
+
+- Public bus
+- Train
+- Metro
+- Walking
+- College bus
+
+The user should be able to enter:
+
+START
+DESTINATION
+
+and receive available mobility options.
+
+Example:
+
+START:
+College
+
+DESTINATION:
+Tambaram
+
+Possible results:
+
+College Bus
+Public Bus
+Train
+Metro
+Walking
+
+For each available option show where data exists:
+
+- Transport type
+- Route
+- Departure
+- Arrival/ETA
+- Duration
+- Transfers
+- Walking distance
+- Availability
+
+IMPORTANT:
+
+Do NOT invent live public transport data.
+
+If a real API/data source is unavailable:
+
+- create the integration service interface
+- create the data models
+- create the UI
+- use clearly labeled development/mock data only
+- make it easy to replace with a real provider later
+
+Do not present mock public transport information as live data.
+
+Create a modular adapter architecture such as:
+
+PublicTransportProvider
+    ↓
+BusProvider
+TrainProvider
+MetroProvider
+etc.
+
+This should allow providers to be added later without rebuilding
+the frontend.
+
+==================================================
+PHASE 2 — INTEGRATION BETWEEN MODULES
+==================================================
+
+The five Phase 2 modules must work together.
+
+Example workflow:
+
+USER SELECTS DESTINATION
+        ↓
+CAMPUS MAP
+        ↓
+NAVIGATION
+        ↓
+ACIMS CHECKS LIVE BUS DATA
+        ↓
+ACIMS CHECKS ETA
+        ↓
+ACIMS CHECKS QUEUE
+        ↓
+ACIMS CHECKS PUBLIC TRANSPORT
+        ↓
+ACIMS CHECKS SAFETY INFORMATION
+        ↓
+ADVANCED AI AGENT
+        ↓
+MOBILITY RECOMMENDATION
+
+The system should produce an actionable result.
+
+==================================================
+EXAMPLE END-TO-END SCENARIO
+==================================================
+
+Student wants to travel from college to Tambaram.
+
+Student enters:
+
+"How do I get to Tambaram?"
+
+ACIMS:
+
+1. Detects current location if permission exists.
+2. Finds relevant campus bus stops.
+3. Checks active college buses.
+4. Checks live bus locations.
+5. Checks ETA.
+6. Checks delays.
+7. Checks queue status.
+8. Checks available public transport options.
+9. Checks relevant safety information.
+10. Presents available travel options.
+11. Advanced AI Agent explains the options.
+
+Example response:
+
+"Bus 12 is currently 5 minutes away from your stop,
+but its queue is full.
+
+Another available route reaches Tambaram in approximately
+12 minutes.
+
+Walking to Stop B will reduce your waiting time."
+
+ONLY show information supported by actual system data.
+
+==================================================
+DATA ARCHITECTURE
+==================================================
+
+Extend the existing database instead of creating duplicate models.
+
+Add models/entities where required for:
+
+CampusLocation
+NavigationRoute
+SafetyReport
+EmergencyContact
+SafetyAlert
+AdminUser
+TransportProvider
+PublicTransportRoute
+PublicTransportStop
+PublicTransportJourney
+AIConversation
+AIMessage
+
+Reuse existing:
+
+User
+Bus
+Route
+Stop
+Trip
+BusLocation
+ETA
+Queue
+Notification
+
+==================================================
+API ARCHITECTURE
+==================================================
+
+Create modular APIs for:
+
+CAMPUS
+
+GET /campus/locations
+GET /campus/stops
+GET /campus/routes
+
+NAVIGATION
+
+POST /navigation/route
+GET /navigation/destinations
+
+SAFETY
+
+POST /safety/report
+GET /safety/reports
+GET /safety/alerts
+POST /safety/emergency
+
+ADMIN
+
+GET /admin/dashboard
+GET /admin/buses
+GET /admin/drivers
+GET /admin/routes
+GET /admin/queues
+GET /admin/safety
+
+AI
+
+POST /ai/chat
+GET /ai/context
+
+PUBLIC TRANSPORT
+
+GET /transport/providers
+GET /transport/routes
+POST /transport/search
+
+Reuse existing API conventions if the project already has them.
+
+==================================================
+SECURITY
+==================================================
+
+Implement role-based access.
+
+Student:
+- own mobility information
+- own safety reports
+- own notifications
+
+Admin:
+- transport management
+- safety management
+- system monitoring
+
+Never expose sensitive administrative information to students.
+
+Never expose:
+
+API keys
+passwords
+tokens
+environment variables
+
+Do not commit .env files to GitHub.
+
+==================================================
+UI / UX
+==================================================
+
+Preserve the existing ACIMS design language.
+
+Add:
+
+- Campus Map
+- Navigation
+- Safety
+- Admin Dashboard
+- AI Agent
+- Public Transport
+
+Maintain consistent:
+
+- navigation
+- cards
+- buttons
+- status indicators
+- map components
+- notifications
+- responsive layouts
+
+Ensure everything works on:
+
+- desktop
+- tablet
+- mobile
+
+==================================================
+FUNCTIONALITY REQUIREMENTS
+==================================================
+
+Do not simply create static screens.
+
+Every Phase 2 screen must be connected to the appropriate
+backend/API architecture.
+
+Where real external data is unavailable, clearly separate:
+
+REAL ACIMS DATA
+from
+DEVELOPMENT/MOCK EXTERNAL DATA.
+
+Do not fake real-world live information.
+
+==================================================
+TESTING
+==================================================
+
+After implementation test:
+
+TEST 1:
+Campus map opens and campus locations are visible.
+
+TEST 2:
+Student selects destination and receives navigation information.
+
+TEST 3:
+Navigation can use Phase 1 bus/route data.
+
+TEST 4:
+Safety report can be created and appears in Admin.
+
+TEST 5:
+Admin can manage buses/routes/drivers.
+
+TEST 6:
+Admin can monitor active buses.
+
+TEST 7:
+Advanced AI Agent can access ACIMS context.
+
+TEST 8:
+AI Agent does not invent unavailable transport information.
+
+TEST 9:
+Public transport search works with available data.
+
+TEST 10:
+External transport data is clearly identified as external/mock
+when no live provider is connected.
+
+TEST 11:
+Phase 1 functionality remains intact.
+
+TEST 12:
+Mobile layout works correctly.
+
+==================================================
+FINAL VALIDATION
+==================================================
+
+After completing Phase 2:
+
+- Run full typecheck.
+- Run frontend.
+- Run backend.
+- Test all Phase 1 routes.
+- Test all Phase 2 routes.
+- Fix runtime errors.
+- Fix API errors.
+- Fix navigation errors.
+- Fix mobile UI issues.
+- Verify role permissions.
+- Verify database operations.
+- Verify Git status.
+
+Then provide a final report containing:
+
+1. Phase 2 features completed
+2. Files/components created
+3. APIs created
+4. Database models created
+5. Features using real ACIMS data
+6. Features requiring external APIs
+7. Features currently using development/mock data
+8. Remaining integration work
+9. Exact instructions for testing each Phase 2 module
+
+DO NOT claim a feature is fully functional if it is only a UI prototype.
