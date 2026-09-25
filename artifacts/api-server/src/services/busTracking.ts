@@ -38,9 +38,7 @@ export type Bus = {
   updatedAt: Date;
 };
 
-const busId = "bus-12";
-
-const stops: BusStop[] = [
+const defaultStops: BusStop[] = [
   {
     id: "vandalur",
     name: "Vandalur",
@@ -75,21 +73,83 @@ const stops: BusStop[] = [
   },
 ];
 
-const busState: Bus = {
-  id: busId,
-  busNumber: "12",
-  origin: "Vandalur",
-  destination: "Tambaram",
-  routeLabel: "Vandalur → Perungalathur → Tambaram → College",
-  capacity: 40,
-  currentOccupancy: 40,
-  currentLocation: { latitude: 12.9161, longitude: 80.1119 },
-  nextStop: "Tambaram",
-  nextStopId: "tambaram",
-  etaMinutes: 3,
-  status: "Moving",
-  updatedAt: new Date(),
-};
+const fleetState: Bus[] = [
+  {
+    id: "bus-12",
+    busNumber: "12",
+    origin: "Vandalur Transit Hub",
+    destination: "Academic Quad",
+    routeLabel: "Campus Loop A",
+    capacity: 40,
+    currentOccupancy: 38,
+    currentLocation: { latitude: 12.9161, longitude: 80.1119 },
+    nextStop: "Tambaram Terminal",
+    nextStopId: "tambaram",
+    etaMinutes: 3,
+    status: "On Time",
+    updatedAt: new Date(),
+  },
+  {
+    id: "bus-4b",
+    busNumber: "4B",
+    origin: "North Residence Complex",
+    destination: "Tech & Innovation Park",
+    routeLabel: "Engineering Express",
+    capacity: 45,
+    currentOccupancy: 26,
+    currentLocation: { latitude: 12.9312, longitude: 80.1215 },
+    nextStop: "Bio-Engineering Center",
+    nextStopId: "bio-center",
+    etaMinutes: 5,
+    status: "Delayed (+6 min)",
+    updatedAt: new Date(Date.now() - 1000 * 45),
+  },
+  {
+    id: "bus-7",
+    busNumber: "7",
+    origin: "Hostel Village",
+    destination: "Central Library & Union",
+    routeLabel: "North Campus Shuttle",
+    capacity: 35,
+    currentOccupancy: 12,
+    currentLocation: { latitude: 12.9015, longitude: 80.0984 },
+    nextStop: "Athletic Pavilion",
+    nextStopId: "athletics",
+    etaMinutes: 2,
+    status: "On Time",
+    updatedAt: new Date(Date.now() - 1000 * 20),
+  },
+  {
+    id: "bus-18",
+    busNumber: "18",
+    origin: "Metro Central Station",
+    destination: "Medical Sciences Center",
+    routeLabel: "Metro Connector Feeder",
+    capacity: 50,
+    currentOccupancy: 48,
+    currentLocation: { latitude: 12.9287, longitude: 80.1352 },
+    nextStop: "Hospital Gate North",
+    nextStopId: "hospital-gate",
+    etaMinutes: 9,
+    status: "Delayed (+10 min)",
+    updatedAt: new Date(Date.now() - 1000 * 90),
+  },
+  {
+    id: "bus-21",
+    busNumber: "21",
+    origin: "South Commuter Lot",
+    destination: "Main Auditorium",
+    routeLabel: "South Perimeter Circle",
+    capacity: 30,
+    currentOccupancy: 20,
+    currentLocation: { latitude: 12.8955, longitude: 80.0864 },
+    nextStop: "Faculty Enclave",
+    nextStopId: "faculty-enclave",
+    etaMinutes: 4,
+    status: "Boarding",
+    updatedAt: new Date(Date.now() - 1000 * 30),
+  },
+];
 
 let segmentIndex = 1;
 let segmentProgress = 0.45;
@@ -109,45 +169,38 @@ function interpolate(start: Coordinate, end: Coordinate, progress: number) {
   };
 }
 
-function updateDerivedState(source: string, timestamp = new Date()) {
-  const nextStop = stops[segmentIndex + 1] ?? stops[stops.length - 1];
-  const currentStop = stops[segmentIndex] ?? stops[0];
-  busState.nextStop = nextStop.name;
-  busState.nextStopId = nextStop.id;
-  busState.etaMinutes = calculateEtaMinutes(busState.currentLocation, nextStop);
-  busState.currentLocation = busState.currentLocation;
-  busState.status = "Moving";
-  busState.updatedAt = timestamp;
-
+function updateDerivedState(bus: Bus, source: string, timestamp = new Date()) {
+  bus.updatedAt = timestamp;
   return {
-    busId: busState.id,
-    ...busState.currentLocation,
-    nextStopId: nextStop.id,
-    nextStop: nextStop.name,
-    etaMinutes: busState.etaMinutes,
-    status: busState.status,
+    busId: bus.id,
+    ...bus.currentLocation,
+    nextStopId: bus.nextStopId,
+    nextStop: bus.nextStop,
+    etaMinutes: bus.etaMinutes,
+    status: bus.status,
     updatedAt: timestamp,
     source,
-    currentStop: currentStop.name,
+    currentStop: bus.origin,
   };
 }
 
-export function getBuses() {
-  const bus = getBus(busId);
-  return bus ? [bus] : [];
+export function getBuses(): Bus[] {
+  return fleetState.map((bus) => ({ ...bus, currentLocation: { ...bus.currentLocation } }));
 }
 
-export function getBus(id: string) {
-  return id === busId ? { ...busState, currentLocation: { ...busState.currentLocation } } : undefined;
+export function getBus(id: string): Bus | undefined {
+  const bus = fleetState.find((candidate) => candidate.id === id);
+  return bus ? { ...bus, currentLocation: { ...bus.currentLocation } } : undefined;
 }
 
-export function getStops(id: string) {
-  return id === busId ? stops.map((stop) => ({ ...stop })) : undefined;
+export function getStops(id: string): BusStop[] {
+  return defaultStops.map((stop) => ({ ...stop }));
 }
 
 export function getLocation(id: string) {
-  if (id !== busId) return undefined;
-  return updateDerivedState("simulated");
+  const bus = fleetState.find((candidate) => candidate.id === id);
+  if (!bus) return undefined;
+  return updateDerivedState(bus, "simulated");
 }
 
 export function updateLocation(
@@ -156,36 +209,39 @@ export function updateLocation(
   source = "driver-device",
   timestamp = new Date(),
 ) {
-  if (id !== busId) return undefined;
-  busState.currentLocation = {
+  const bus = fleetState.find((candidate) => candidate.id === id);
+  if (!bus) return undefined;
+  bus.currentLocation = {
     latitude: location.latitude,
     longitude: location.longitude,
   };
-  return updateDerivedState(source, timestamp);
+  return updateDerivedState(bus, source, timestamp);
 }
 
 export function updateOccupancy(id: string, currentOccupancy: number) {
-  if (id !== busId) return undefined;
-  busState.currentOccupancy = Math.min(
-    busState.capacity,
+  const bus = fleetState.find((candidate) => candidate.id === id);
+  if (!bus) return undefined;
+  bus.currentOccupancy = Math.min(
+    bus.capacity,
     Math.max(0, Math.round(currentOccupancy)),
   );
-  busState.updatedAt = new Date();
-  return getBus(id);
+  bus.updatedAt = new Date();
+  return { ...bus, currentLocation: { ...bus.currentLocation } };
 }
 
 export function advanceSimulation() {
-  const current = stops[segmentIndex] ?? stops[0];
-  const next = stops[segmentIndex + 1] ?? stops[stops.length - 1];
+  const bus = fleetState[0];
+  const current = defaultStops[segmentIndex] ?? defaultStops[0];
+  const next = defaultStops[segmentIndex + 1] ?? defaultStops[defaultStops.length - 1];
 
   segmentProgress += 0.12;
-  if (segmentProgress >= 1 && segmentIndex < stops.length - 2) {
+  if (segmentProgress >= 1 && segmentIndex < defaultStops.length - 2) {
     segmentIndex += 1;
     segmentProgress = 0;
   }
 
-  busState.currentLocation = interpolate(current, next, segmentProgress);
-  return updateDerivedState("simulated");
+  bus.currentLocation = interpolate(current, next, segmentProgress);
+  return updateDerivedState(bus, "simulated");
 }
 
 export function startSimulation(onTick: () => void) {
