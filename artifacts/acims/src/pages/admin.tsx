@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock,
   Edit2,
+  LogOut,
   MapPin,
   Plus,
   Power,
@@ -41,10 +42,13 @@ import {
 } from '@workspace/api-client-react';
 import type { AdminBus, AdminRoute, Driver, SafetyReport } from '@workspace/api-client-react';
 import { EmptyState, ErrorState, LoadingRows, PageHeading } from '@/components/acims-ui';
+import { useLocation } from 'wouter';
+import { adminLogout } from '@/lib/adminAuth';
 
 type AdminTab = 'monitoring' | 'buses' | 'routes' | 'drivers' | 'queues' | 'safety';
 
 export default function AdminPage() {
+  const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<AdminTab>('monitoring');
 
@@ -132,16 +136,17 @@ export default function AdminPage() {
 
   const handleSaveEditBus = () => {
     if (!editingBus) return;
+    const patchData: Record<string, unknown> = {
+      busNumber: editingBus.busNumber,
+      routeId: editBusRouteId || editingBus.routeId,
+      driverId: editBusDriverId || editingBus.driverId,
+      capacity: Number(editBusCapacity) || editingBus.capacity,
+      active: editingBus.active,
+    };
     updateBus.mutate(
       {
         busId: editingBus.id,
-        data: {
-          busNumber: editingBus.busNumber,
-          routeId: editBusRouteId || editingBus.routeId,
-          driverId: editBusDriverId || editingBus.driverId,
-          capacity: Number(editBusCapacity) || editingBus.capacity,
-          active: editingBus.active,
-        },
+        data: patchData as any,
       },
       {
         onSuccess: () => {
@@ -308,6 +313,19 @@ export default function AdminPage() {
               <span className="mr-2 inline-block h-2 w-2 rounded-full bg-accent-foreground" />
               {dashboard?.systemStatus ?? 'Operational'}
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                adminLogout();
+                setLocation('/admin/login', { replace: true });
+              }}
+              data-testid="button-admin-logout"
+              title="End admin session"
+              className="inline-flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-3.5 py-2 text-xs font-bold text-destructive hover:bg-destructive/20 transition"
+            >
+              <LogOut size={13} />
+              <span>Logout</span>
+            </button>
           </div>
         }
       />
@@ -480,9 +498,10 @@ export default function AdminPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold uppercase text-muted-foreground">Capacity</label>
+                    <label className="text-[10px] font-bold uppercase text-muted-foreground">Vehicle Capacity (Seats)</label>
                     <input
                       type="number"
+                      data-testid="input-edit-bus-capacity"
                       value={editBusCapacity}
                       onChange={(e) => setEditBusCapacity(e.target.value)}
                       className="admin-input mt-1"
@@ -731,45 +750,37 @@ export default function AdminPage() {
                 <h2 className="mt-1 text-2xl font-extrabold">Active Boarding Queues</h2>
               </div>
               <span className="rounded-full bg-secondary px-3 py-1 text-xs font-bold">
-                {queues.filter((q) => q.status === 'Overloaded').length} Overloaded Buses
+                {queues.filter((q) => q.queueSize > 0).length} Lines with Waitlist
               </span>
             </div>
 
             <div className="mt-6 space-y-3">
               {queues.map((queue) => {
-                const isOverloaded = queue.occupancy >= queue.capacity;
+                const hasWaitlist = queue.queueSize > 0;
                 return (
                   <div
                     key={queue.busId}
                     data-testid={`row-admin-queue-${queue.busId}`}
                     className={`rounded-2xl border p-4 flex flex-wrap items-center justify-between gap-4 ${
-                      isOverloaded ? 'border-destructive/30 bg-destructive/5' : 'border-border bg-card'
+                      hasWaitlist ? 'border-primary/40 bg-card' : 'border-border bg-card'
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <span className={`grid h-10 w-10 place-items-center rounded-xl ${isOverloaded ? 'bg-destructive/15 text-destructive' : 'bg-muted text-foreground'}`}>
+                      <span className={`grid h-10 w-10 place-items-center rounded-xl ${hasWaitlist ? 'bg-secondary text-secondary-foreground' : 'bg-muted text-foreground'}`}>
                         <UsersRound size={18} />
                       </span>
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-extrabold">Bus #{queue.busNumber}</span>
-                          <span className={`rounded-full px-2.5 py-0.5 text-[9px] font-extrabold ${
-                            isOverloaded ? 'bg-destructive text-destructive-foreground' : 'bg-secondary text-secondary-foreground'
-                          }`}>
+                          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[9px] font-extrabold text-secondary-foreground">
                             {queue.status}
                           </span>
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
-                          {queue.occupancy} / {queue.capacity} seated · {queue.queueSize} waiting in overflow queue
+                          Vehicle capacity: {queue.capacity} seats · {queue.queueSize} waiting in boarding queue
                         </div>
                       </div>
                     </div>
-
-                    {isOverloaded && (
-                      <span className="flex items-center gap-1.5 text-xs font-bold text-destructive">
-                        <AlertTriangle size={14} /> Overflow Triggered: Dispatch Relief Bus
-                      </span>
-                    )}
                   </div>
                 );
               })}

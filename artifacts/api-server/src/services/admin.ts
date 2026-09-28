@@ -1,4 +1,11 @@
-import { getBuses } from "./busTracking";
+import {
+  getBuses,
+  getBus,
+  createBusInFleet,
+  updateBusInFleet,
+  deactivateBusInFleet,
+  type Bus,
+} from "./busTracking";
 
 export type AdminBus = {
   id: string;
@@ -28,53 +35,26 @@ export type AdminRoute = {
   assignedBusIds: string[];
 };
 
-const buses: AdminBus[] = [
-  {
-    id: "bus-12",
-    busNumber: "12",
-    routeId: "route-bus-12",
-    driverId: "driver-arun",
-    capacity: 40,
-    active: true,
-    status: "Moving",
-  },
-  {
-    id: "bus-4b",
-    busNumber: "4B",
-    routeId: "route-bus-4b",
-    driverId: "driver-suresh",
-    capacity: 45,
-    active: true,
-    status: "Delayed (+6 min)",
-  },
-  {
-    id: "bus-7",
-    busNumber: "7",
-    routeId: "route-bus-7",
-    driverId: "driver-venkat",
-    capacity: 35,
-    active: true,
-    status: "Moving",
-  },
-  {
-    id: "bus-18",
-    busNumber: "18",
-    routeId: "route-bus-18",
-    driverId: "driver-rajesh",
-    capacity: 50,
-    active: true,
-    status: "Delayed (+10 min)",
-  },
-  {
-    id: "bus-21",
-    busNumber: "21",
-    routeId: "route-bus-21",
-    driverId: "driver-karthik",
-    capacity: 30,
-    active: true,
-    status: "Boarding",
-  },
-];
+const STOP_NAMES: Record<string, string> = {
+  vandalur: "Vandalur Transit Hub",
+  perungalathur: "Perungalathur Junction",
+  tambaram: "Tambaram Terminal",
+  college: "College Main Terminal",
+  "north-residence": "North Residence Complex",
+  "bio-center": "Bio-Engineering Center",
+  "hostel-village": "Hostel Village",
+  athletics: "Athletic Pavilion",
+  library: "Central Library",
+  "metro-central": "Metro Central Station",
+  "hospital-gate": "Hospital Gate North",
+  "south-lot": "South Commuter Lot",
+  "faculty-enclave": "Faculty Enclave",
+  "student-center": "Student Center",
+};
+
+export function getStopNameById(id: string): string {
+  return STOP_NAMES[id] || id.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 const drivers: Driver[] = [
   {
@@ -162,32 +142,121 @@ const routes: AdminRoute[] = [
   },
 ];
 
-export function listAdminBuses() {
-  return buses.map((bus) => ({ ...bus }));
+export function listAdminBuses(): AdminBus[] {
+  return getBuses().map((bus) => ({
+    id: bus.id,
+    busNumber: bus.busNumber,
+    routeId: bus.routeId,
+    driverId: bus.driverId,
+    capacity: bus.capacity,
+    active: bus.active,
+    status: bus.status,
+  }));
 }
 
-export function createAdminBus(input: Omit<AdminBus, "id" | "status">) {
-  const bus: AdminBus = { ...input, id: `bus-${Date.now()}`, status: input.active ? "Standby" : "Inactive" };
-  buses.push(bus);
-  return { ...bus };
-}
+export function createAdminBus(input: Omit<AdminBus, "id" | "status">): AdminBus {
+  const route = routes.find((r) => r.id === input.routeId);
+  const routeLabel = route ? (route.name.split('(')[0]?.trim() || route.name) : `Route ${input.busNumber}`;
+  const destination = route?.destination || "Campus Terminal";
+  const origin = route?.name.includes("→") ? route.name.split("→")[0].replace(/.*\(|\)/g, "").trim() : "Main Transit Hub";
+  const nextStop = route?.stopIds?.[0] ? getStopNameById(route.stopIds[0]) : "Campus Main Gate";
+  const nextStopId = route?.stopIds?.[0] || "college";
 
-export function updateAdminBus(id: string, input: Partial<Omit<AdminBus, "id">>) {
-  const bus = buses.find((candidate) => candidate.id === id);
-  if (!bus) return undefined;
-  Object.assign(bus, input);
-  if (input.active !== undefined) {
-    bus.status = input.active ? (bus.status === "Inactive" ? "Standby" : bus.status) : "Inactive";
+  const busId = `bus-${input.busNumber.toLowerCase().replace(/[^a-z0-9]/g, "") || Date.now()}`;
+  const active = input.active ?? true;
+
+  const newBus: Bus = {
+    id: busId,
+    busNumber: input.busNumber,
+    origin,
+    destination,
+    routeLabel,
+    capacity: input.capacity,
+    currentLocation: { latitude: 12.9407, longitude: 80.1393 },
+    nextStop,
+    nextStopId,
+    etaMinutes: 5,
+    status: active ? "Standby" : "Inactive",
+    updatedAt: new Date(),
+    active,
+    routeId: input.routeId,
+    driverId: input.driverId,
+  };
+
+  createBusInFleet(newBus);
+
+  if (route && !route.assignedBusIds.includes(newBus.id)) {
+    route.assignedBusIds.push(newBus.id);
   }
-  return { ...bus };
+
+  return {
+    id: newBus.id,
+    busNumber: newBus.busNumber,
+    routeId: newBus.routeId,
+    driverId: newBus.driverId,
+    capacity: newBus.capacity,
+    active: newBus.active,
+    status: newBus.status,
+  };
 }
 
-export function deactivateAdminBus(id: string) {
-  const bus = buses.find((candidate) => candidate.id === id);
-  if (!bus) return undefined;
-  bus.active = !bus.active;
-  bus.status = bus.active ? "Standby" : "Inactive";
-  return { ...bus };
+export function updateAdminBus(id: string, input: Partial<Omit<AdminBus, "id">>): AdminBus | undefined {
+  const existing = getBus(id);
+  if (!existing) return undefined;
+
+  const updates: Partial<Bus> = {};
+  if (input.busNumber !== undefined) updates.busNumber = input.busNumber;
+  if (input.capacity !== undefined) {
+    updates.capacity = input.capacity;
+  }
+  if (input.driverId !== undefined) updates.driverId = input.driverId;
+  if (input.routeId !== undefined && input.routeId !== existing.routeId) {
+    updates.routeId = input.routeId;
+    const route = routes.find((r) => r.id === input.routeId);
+    if (route) {
+      updates.routeLabel = route.name.split('(')[0]?.trim() || route.name;
+      updates.destination = route.destination;
+      if (route.stopIds?.length > 0) {
+        updates.nextStop = getStopNameById(route.stopIds[0]);
+        updates.nextStopId = route.stopIds[0];
+      }
+      if (!route.assignedBusIds.includes(id)) {
+        route.assignedBusIds.push(id);
+      }
+    }
+  }
+  if (input.active !== undefined) {
+    updates.active = input.active;
+    updates.status = input.active ? (existing.status === "Inactive" ? "Standby" : existing.status) : "Inactive";
+  }
+
+  const updated = updateBusInFleet(id, updates);
+  if (!updated) return undefined;
+
+  return {
+    id: updated.id,
+    busNumber: updated.busNumber,
+    routeId: updated.routeId,
+    driverId: updated.driverId,
+    capacity: updated.capacity,
+    active: updated.active,
+    status: updated.status,
+  };
+}
+
+export function deactivateAdminBus(id: string): AdminBus | undefined {
+  const updated = deactivateBusInFleet(id);
+  if (!updated) return undefined;
+
+  return {
+    id: updated.id,
+    busNumber: updated.busNumber,
+    routeId: updated.routeId,
+    driverId: updated.driverId,
+    capacity: updated.capacity,
+    active: updated.active,
+    status: updated.status,
+  };
 }
 
 export function listDrivers() {
@@ -221,6 +290,28 @@ export function updateRoute(id: string, input: Partial<Omit<AdminRoute, "id">>) 
   const route = routes.find((candidate) => candidate.id === id);
   if (!route) return undefined;
   Object.assign(route, input);
+  if (input.stopIds) {
+    route.stopIds = [...input.stopIds];
+  }
+  if (input.assignedBusIds) {
+    route.assignedBusIds = [...input.assignedBusIds];
+  }
+
+  // Synchronize route changes to any buses in the shared fleet assigned to this route
+  const buses = getBuses();
+  for (const bus of buses) {
+    if (bus.routeId === route.id || route.assignedBusIds.includes(bus.id)) {
+      const updates: Partial<Bus> = {};
+      if (input.destination) updates.destination = input.destination;
+      if (input.name) updates.routeLabel = input.name.split('(')[0]?.trim() || input.name;
+      if (input.stopIds && input.stopIds.length > 0) {
+        updates.nextStop = getStopNameById(input.stopIds[0]);
+        updates.nextStopId = input.stopIds[0];
+      }
+      updateBusInFleet(bus.id, updates);
+    }
+  }
+
   return { ...route, stopIds: [...route.stopIds], assignedBusIds: [...route.assignedBusIds] };
 }
 
@@ -228,9 +319,8 @@ export function getAdminQueues() {
   return getBuses().map((bus) => ({
     busId: bus.id,
     busNumber: bus.busNumber,
-    queueSize: bus.currentOccupancy >= bus.capacity ? 3 : 0,
-    occupancy: bus.currentOccupancy,
+    queueSize: bus.id === "bus-12" ? 3 : 0,
     capacity: bus.capacity,
-    status: bus.currentOccupancy >= bus.capacity ? "Overloaded" : "Open",
+    status: "Active",
   }));
 }

@@ -1,21 +1,39 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { BusFront, LocateFixed, MapPin, Navigation, Radio, Route as RouteIcon } from 'lucide-react';
 import { divIcon } from 'leaflet';
 import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, Tooltip } from 'react-leaflet';
 import { getGetBusLocationQueryKey, getListBusStopsQueryKey, getListBusesQueryKey, useGetBusLocation, useListBusStops, useListBuses } from '@workspace/api-client-react';
 import { EmptyState, ErrorState, formatUpdatedAt, LoadingRows, PageHeading, statusLabel, useSelectedBusId } from '@/components/acims-ui';
+import { useNetworkStatus } from '@/hooks/use-network';
+import { OfflineMobilityView } from '@/components/offline-mobility-view';
+import { saveLastKnownBusSnapshot } from '@/lib/offline-storage';
 import 'leaflet/dist/leaflet.css';
 
 export default function LiveMap() {
+  const { isOnline } = useNetworkStatus();
   const selectedBusId = useSelectedBusId();
-  const busesQuery = useListBuses({ query: { queryKey: getListBusesQueryKey() } });
+  const busesQuery = useListBuses({ query: { enabled: isOnline, queryKey: getListBusesQueryKey() } });
   const bus = useMemo(() => busesQuery.data?.find((item) => item.id === selectedBusId) ?? busesQuery.data?.[0], [busesQuery.data, selectedBusId]);
-  const busId = bus?.id ?? '';
-  const locationQuery = useGetBusLocation(busId, { query: { enabled: !!busId, queryKey: getGetBusLocationQueryKey(busId), refetchInterval: 10000 } });
-  const stopsQuery = useListBusStops(busId, { query: { enabled: !!busId, queryKey: getListBusStopsQueryKey(busId) } });
+  const busId = bus?.id ?? selectedBusId ?? 'bus-12';
+  const locationQuery = useGetBusLocation(busId, { query: { enabled: isOnline && !!busId, queryKey: getGetBusLocationQueryKey(busId), refetchInterval: 10000 } });
+  const stopsQuery = useListBusStops(busId, { query: { enabled: isOnline && !!busId, queryKey: getListBusStopsQueryKey(busId) } });
+
+  // Cache bus state when online for offline view
+  useEffect(() => {
+    if (bus) {
+      saveLastKnownBusSnapshot(bus);
+    }
+  }, [bus]);
+
+  // OFFLINE MODE: When internet is not available, cleanly switch to Offline Mobility Information
+  if (!isOnline) {
+    return <OfflineMobilityView initialTab="routes" selectedBusId={busId} />;
+  }
+
   if (busesQuery.isLoading) return <LoadingRows count={4} />;
   if (busesQuery.isError) return <ErrorState onRetry={() => void busesQuery.refetch()} />;
   if (!bus) return <EmptyState icon={RouteIcon} title="No route to draw" message="Choose an active campus route to see its live stop pattern." />;
+
   const location = locationQuery.data;
   const stops = stopsQuery.data ?? [];
   const maxSequence = Math.max(1, ...stops.map((stop) => stop.sequence));

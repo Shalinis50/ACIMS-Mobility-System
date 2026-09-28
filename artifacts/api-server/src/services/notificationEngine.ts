@@ -22,10 +22,10 @@ const notifications: Notification[] = [
     busId: "bus-12",
   },
   {
-    id: "alert-bus-full",
-    type: "BUS_FULL",
-    title: "Bus is at capacity",
-    message: "Bus 12 is currently full. Join the overflow queue for a seat.",
+    id: "alert-boarding-queue",
+    type: "QUEUE_OPEN",
+    title: "Boarding queue open",
+    message: "Boarding queue for Bus 12 is now active for upcoming stops.",
     createdAt: new Date(Date.now() - 1000 * 60 * 8),
     read: false,
     busId: "bus-12",
@@ -44,7 +44,6 @@ const notifications: Notification[] = [
 let lastState = {
   nextStop: "Tambaram",
   etaMinutes: 3,
-  occupancy: 40,
 };
 
 function addNotification(
@@ -87,15 +86,6 @@ export function syncBusNotifications(
   bus: Bus,
   queueEntry?: QueueEntry | null,
 ) {
-  if (bus.currentOccupancy >= bus.capacity && lastState.occupancy < bus.capacity) {
-    addNotification(
-      "BUS_FULL",
-      "Bus is at capacity",
-      `Bus ${bus.busNumber} is currently full.`,
-      bus.id,
-    );
-  }
-
   if (bus.nextStop !== lastState.nextStop) {
     addNotification(
       "APPROACHING_STOP",
@@ -127,7 +117,6 @@ export function syncBusNotifications(
   lastState = {
     nextStop: bus.nextStop,
     etaMinutes: bus.etaMinutes,
-    occupancy: bus.currentOccupancy,
   };
 }
 

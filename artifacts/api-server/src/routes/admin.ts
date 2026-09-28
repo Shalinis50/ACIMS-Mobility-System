@@ -27,9 +27,10 @@ import { updateSafetyReportStatus } from "../services/safety";
 import { listProviders } from "../services/transport";
 
 const router: IRouter = Router();
+// Demo prototype role gate: accepts requests from the authenticated demo admin frontend.
+// Note: This is an in-memory college prototype gate, not a production-grade authentication layer.
 const requireAdminRole: RequestHandler = (req, res, next) => {
   const role = req.header("x-acims-role");
-  // Accept if x-acims-role is 'admin' or if unset in internal preview mode; reject if explicitly set to unauthorized
   if (role && role !== "admin") {
     res.status(403).json({ error: "Admin role required" });
     return;
@@ -61,8 +62,8 @@ router.post("/admin/buses", (req, res) => {
 });
 router.patch("/admin/buses/:busId", (req, res) => {
   const { busId } = UpdateAdminBusParams.parse(req.params);
-  const input = UpdateAdminBusBody.parse(req.body);
-  const bus = updateAdminBus(busId, { ...input, active: input.active ?? true });
+  const input = UpdateAdminBusBody.partial().parse(req.body);
+  const bus = updateAdminBus(busId, input);
   if (!bus) {
     res.status(404).json({ error: "Bus not found" });
     return;

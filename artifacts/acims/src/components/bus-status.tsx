@@ -12,7 +12,8 @@ import {
   ChevronRight, 
   ArrowRight,
   Sparkles,
-  Gauge
+  Gauge,
+  WifiOff
 } from 'lucide-react';
 import type { Bus } from '@workspace/api-client-react';
 import { 
@@ -21,6 +22,8 @@ import {
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { selectBus, useSelectedBusId, formatUpdatedAt } from '@/components/acims-ui';
+import { useNetworkStatus } from '@/hooks/use-network';
+import { getOfflineRoutes, getLastKnownBusSnapshots } from '@/lib/offline-storage';
 
 export type DelaySeverity = 'on_time' | 'minor_delay' | 'major_delay' | 'boarding' | 'unknown';
 
@@ -64,56 +67,6 @@ export function getDelayDetails(statusString?: string): {
   return { severity: 'on_time', label: 'On Schedule', isDelayed: false };
 }
 
-export function getOccupancyLevel(occupancy: number, capacity: number): {
-  percentage: number;
-  label: string;
-  colorClass: string;
-  barColorClass: string;
-  status: 'light' | 'moderate' | 'heavy' | 'full';
-} {
-  const safeCapacity = capacity > 0 ? capacity : 40;
-  const percentage = Math.min(100, Math.round((occupancy / safeCapacity) * 100));
-  const seatsLeft = Math.max(0, safeCapacity - occupancy);
-
-  if (percentage >= 95) {
-    return {
-      percentage,
-      label: 'At Capacity · Standing only',
-      colorClass: 'text-rose-600 dark:text-rose-400',
-      barColorClass: 'bg-rose-500',
-      status: 'full',
-    };
-  }
-
-  if (percentage >= 75) {
-    return {
-      percentage,
-      label: `${seatsLeft} seats left · Crowded`,
-      colorClass: 'text-amber-600 dark:text-amber-400',
-      barColorClass: 'bg-amber-500',
-      status: 'heavy',
-    };
-  }
-
-  if (percentage >= 40) {
-    return {
-      percentage,
-      label: `${seatsLeft} seats left · Moderate`,
-      colorClass: 'text-emerald-600 dark:text-emerald-400',
-      barColorClass: 'bg-emerald-500',
-      status: 'moderate',
-    };
-  }
-
-  return {
-    percentage,
-    label: `${seatsLeft} seats left · Plenty of space`,
-    colorClass: 'text-teal-600 dark:text-teal-400',
-    barColorClass: 'bg-teal-500',
-    status: 'light',
-  };
-}
-
 interface BusStatusProps {
   className?: string;
   onSelectBus?: (busId: string) => void;
@@ -122,15 +75,43 @@ interface BusStatusProps {
 export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
   const queryClient = useQueryClient();
   const selectedBusId = useSelectedBusId();
+  const { isOnline } = useNetworkStatus();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'on_time' | 'delayed' | 'crowded'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'on_time' | 'delayed'>('all');
+
+  const offlineRoutes = useMemo(() => getOfflineRoutes(), []);
+  const snapshots = useMemo(() => getLastKnownBusSnapshots(), [isOnline]);
 
   const { data: buses = [], isLoading, isError, refetch, isRefetching } = useListBuses({
     query: {
+      enabled: isOnline,
       queryKey: getListBusesQueryKey(),
-      refetchInterval: 15000,
+      refetchInterval: isOnline ? 15000 : false,
     },
   });
+
+  const effectiveBuses: Bus[] = useMemo(() => {
+    if (buses && buses.length > 0) return buses;
+    return offlineRoutes.map((route) => {
+      const snap = snapshots[route.id];
+      return {
+        id: route.id,
+        busNumber: route.busNumber,
+        origin: route.origin,
+        destination: route.destination,
+        routeLabel: route.routeLabel,
+        capacity: snap?.capacity ?? 40,
+        currentLocation: { latitude: 12.9407, longitude: 80.1393 },
+        nextStop: snap?.lastStop ?? route.stops?.[2]?.name ?? 'Campus Main Gate',
+        nextStopId: 'stop-cached',
+        etaMinutes: snap?.etaMinutes ?? 5,
+        status: snap?.status ?? 'Scheduled route',
+        updatedAt: new Date(),
+        active: true,
+        routeId: route.id,
+      } as Bus;
+    });
+  }, [buses, offlineRoutes, snapshots]);
 
   const handleSelect = (busId: string) => {
     selectBus(busId);
@@ -138,13 +119,11 @@ export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
   };
 
   const filteredBuses = useMemo(() => {
-    return buses.filter((bus) => {
+    return effectiveBuses.filter((bus) => {
       const delayInfo = getDelayDetails(bus.status);
-      const occupancyPct = bus.capacity ? (bus.currentOccupancy / bus.capacity) * 100 : 0;
 
       if (filterType === 'on_time' && delayInfo.isDelayed) return false;
       if (filterType === 'delayed' && !delayInfo.isDelayed) return false;
-      if (filterType === 'crowded' && occupancyPct < 75) return false;
 
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
@@ -158,24 +137,20 @@ export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
 
       return true;
     });
-  }, [buses, filterType, searchQuery]);
+  }, [effectiveBuses, filterType, searchQuery]);
 
   const counts = useMemo(() => {
     let onTimeCount = 0;
     let delayedCount = 0;
-    let crowdedCount = 0;
 
-    buses.forEach((b) => {
+    effectiveBuses.forEach((b) => {
       const delay = getDelayDetails(b.status);
       if (delay.isDelayed) delayedCount++;
       else onTimeCount++;
-
-      const pct = b.capacity ? (b.currentOccupancy / b.capacity) * 100 : 0;
-      if (pct >= 75) crowdedCount++;
     });
 
-    return { total: buses.length, onTimeCount, delayedCount, crowdedCount };
-  }, [buses]);
+    return { total: effectiveBuses.length, onTimeCount, delayedCount };
+  }, [effectiveBuses]);
 
   return (
     <section 
@@ -187,41 +162,61 @@ export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <div className="mono text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            Live Fleet Monitor
+            {isOnline ? 'Live Fleet Monitor' : 'Fleet Monitor (Offline Mode)'}
           </div>
           <div className="mt-1 flex items-center gap-3">
             <h2 className="display-font text-2xl font-extrabold text-foreground sm:text-3xl">
               Bus Status & Route Health
             </h2>
-            <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-              {counts.total} Active Routes
-            </span>
+            {isOnline ? (
+              <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                {counts.total} Active Routes
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-300">
+                <WifiOff size={11} />
+                Offline mode · {counts.total} Cached Routes
+              </span>
+            )}
           </div>
           <p className="mt-1 max-w-xl text-xs leading-5 text-muted-foreground">
-            Real-time headway, current delay status, and passenger load across campus lines.
+            {isOnline
+              ? 'Real-time headway, current delay status, and active routing across campus lines.'
+              : 'Cached timetable headways, route itineraries, and vehicle specs saved on this device.'}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            disabled={isRefetching}
-            aria-label="Refresh route status"
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border bg-muted/60 px-3 text-xs font-bold text-foreground transition hover:bg-muted disabled:opacity-50"
-          >
-            <RotateCw size={13} className={isRefetching ? 'animate-spin' : ''} />
-            <span>{isRefetching ? 'Updating…' : 'Refresh'}</span>
-          </button>
-
-          <Link
-            href="/map"
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground transition hover:opacity-90"
-          >
-            <span>Live Map View</span>
-            <ArrowRight size={13} />
-          </Link>
+          {isOnline ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void refetch()}
+                disabled={isRefetching}
+                aria-label="Refresh route status"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border bg-muted/60 px-3 text-xs font-bold text-foreground transition hover:bg-muted disabled:opacity-50"
+              >
+                <RotateCw size={13} className={isRefetching ? 'animate-spin' : ''} />
+                <span>{isRefetching ? 'Updating…' : 'Refresh'}</span>
+              </button>
+              <Link
+                href="/map"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground transition hover:opacity-90"
+              >
+                <span>Live Map View</span>
+                <ArrowRight size={13} />
+              </Link>
+            </>
+          ) : (
+            <Link
+              href="/offline"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 text-xs font-bold text-amber-800 dark:text-amber-200 transition hover:bg-amber-500/20"
+            >
+              <WifiOff size={13} />
+              <span>Offline Desk</span>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -261,17 +256,6 @@ export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
             }`}
           >
             Delays ({counts.delayedCount})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterType('crowded')}
-            className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-              filterType === 'crowded'
-                ? 'bg-card text-rose-600 shadow-sm dark:text-rose-400'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Crowded ≥75% ({counts.crowdedCount})
           </button>
         </div>
 
@@ -339,6 +323,7 @@ export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
               bus={bus}
               isSelected={bus.id === selectedBusId}
               onSelect={() => handleSelect(bus.id)}
+              isOnline={isOnline}
             />
           ))}
         </div>
@@ -351,11 +336,11 @@ interface BusStatusCardProps {
   bus: Bus;
   isSelected: boolean;
   onSelect: () => void;
+  isOnline?: boolean;
 }
 
-function BusStatusCard({ bus, isSelected, onSelect }: BusStatusCardProps) {
+function BusStatusCard({ bus, isSelected, onSelect, isOnline = true }: BusStatusCardProps) {
   const delay = getDelayDetails(bus.status);
-  const occupancy = getOccupancyLevel(bus.currentOccupancy, bus.capacity);
 
   return (
     <article
@@ -400,7 +385,9 @@ function BusStatusCard({ bus, isSelected, onSelect }: BusStatusCardProps) {
           <div className="text-right">
             <div
               className={`inline-flex items-center gap-1.5 text-xs font-extrabold ${
-                delay.severity === 'major_delay'
+                !isOnline
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : delay.severity === 'major_delay'
                   ? 'text-rose-600 dark:text-rose-400'
                   : delay.severity === 'minor_delay'
                   ? 'text-amber-600 dark:text-amber-400'
@@ -409,17 +396,22 @@ function BusStatusCard({ bus, isSelected, onSelect }: BusStatusCardProps) {
                   : 'text-emerald-600 dark:text-emerald-400'
               }`}
             >
-              {delay.isDelayed ? (
+              {!isOnline ? (
+                <>
+                  <Clock3 size={13} className="shrink-0" />
+                  <span>Scheduled</span>
+                </>
+              ) : delay.isDelayed ? (
                 <AlertTriangle size={13} className="shrink-0" />
               ) : delay.severity === 'boarding' ? (
                 <Clock3 size={13} className="shrink-0" />
               ) : (
                 <CheckCircle2 size={13} className="shrink-0" />
               )}
-              <span>{delay.label}</span>
+              {isOnline && <span>{delay.label}</span>}
             </div>
             <div className="text-[10px] text-muted-foreground">
-              ETA: <span className="font-mono font-bold tabular-nums text-foreground">{bus.etaMinutes} min</span>
+              {isOnline ? 'ETA' : 'Last known ETA'}: <span className="font-mono font-bold tabular-nums text-foreground">{bus.etaMinutes} min</span>
             </div>
           </div>
         </div>
@@ -439,43 +431,14 @@ function BusStatusCard({ bus, isSelected, onSelect }: BusStatusCardProps) {
           </div>
         </div>
 
-        {/* Occupancy Level Section */}
-        <div className="mt-4">
-          <div className="flex items-center justify-between text-xs">
-            <span className="flex items-center gap-1.5 font-bold text-muted-foreground">
-              <Users size={13} />
-              <span>Occupancy</span>
-            </span>
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono font-extrabold tabular-nums text-foreground">
-                {bus.currentOccupancy} / {bus.capacity}
-              </span>
-              <span className="text-[11px] font-bold text-muted-foreground">
-                ({occupancy.percentage}%)
-              </span>
-            </div>
-          </div>
-
-          {/* Progress Bar */}
-          <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-muted/80">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ease-out ${occupancy.barColorClass}`}
-              style={{ width: `${occupancy.percentage}%` }}
-              role="progressbar"
-              aria-valuenow={occupancy.percentage}
-              aria-valuemin={0}
-              aria-valuemax={100}
-            />
-          </div>
-
-          <div className="mt-1.5 flex items-center justify-between text-[11px]">
-            <span className={`font-semibold ${occupancy.colorClass}`}>
-              {occupancy.label}
-            </span>
-            <span className="text-muted-foreground text-[10px]">
-              {formatUpdatedAt(typeof bus.updatedAt === 'string' ? bus.updatedAt : undefined)}
-            </span>
-          </div>
+        {/* Status / Updated */}
+        <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>Vehicle spec: {bus.capacity} seats</span>
+          <span className="text-[10px]">
+            {isOnline
+              ? formatUpdatedAt(typeof bus.updatedAt === 'string' ? bus.updatedAt : undefined)
+              : 'Offline cached reading'}
+          </span>
         </div>
       </div>
 

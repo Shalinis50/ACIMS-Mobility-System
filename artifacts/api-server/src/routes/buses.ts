@@ -4,7 +4,6 @@ import {
   GetBusParams,
   ListBusStopsParams,
   UpdateBusLocationBody,
-  UpdateBusOccupancyBody,
 } from "@workspace/api-zod";
 import {
   advanceSimulation,
@@ -13,7 +12,6 @@ import {
   getLocation,
   getStops,
   updateLocation,
-  updateOccupancy,
 } from "../services/busTracking";
 import { syncBusNotifications } from "../services/notificationEngine";
 
@@ -69,18 +67,6 @@ router.post("/bus/location", (req, res) => {
   }
   const bus = getBus(input.busId);
   if (bus) syncBusNotifications(bus);
-  res.json(bus);
-});
-
-router.post("/buses/:busId/occupancy", (req, res) => {
-  const { busId } = GetBusParams.parse(req.params);
-  const input = UpdateBusOccupancyBody.parse(req.body);
-  const bus = updateOccupancy(busId, input.currentOccupancy);
-  if (!bus) {
-    res.status(404).json({ error: "Bus not found" });
-    return;
-  }
-  syncBusNotifications(bus);
   res.json(bus);
 });
 

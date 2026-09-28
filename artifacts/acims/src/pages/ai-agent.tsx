@@ -136,7 +136,7 @@ export default function AiAgentPage() {
               <ContextStat
                 icon={UsersRound}
                 label="Queue Outlook"
-                value={context.queue.joined ? `Position #${context.queue.entry?.queuePosition}` : `${context.queue.seatsAvailable} seats open`}
+                value={context.queue.joined ? `Position #${context.queue.entry?.queuePosition}` : (context.queue.message || 'Queue open')}
               />
               <ContextStat icon={ShieldAlert} label="Safety Notices" value={`${context.safetyAlerts.length} active`} />
               <ContextStat icon={Compass} label="Landmarks" value={`${context.destinations.length} mapped`} />

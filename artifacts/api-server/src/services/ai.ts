@@ -21,7 +21,6 @@ export function getAiContext(): AiContext {
     destination: "Academic Quad",
     routeLabel: "Campus Loop A",
     capacity: 40,
-    currentOccupancy: 38,
     currentLocation: { latitude: 12.9161, longitude: 80.1119 },
     nextStop: "Tambaram Terminal",
     nextStopId: "tambaram",
@@ -158,10 +157,8 @@ export class DeterministicMobilityEngine implements IAiMobilityEngine {
     // Default grounded mobility summary
     const queue = context.queue;
     const queueNote = queue.joined
-      ? `You are at position #${queue.entry?.queuePosition} in the overflow queue.`
-      : queue.seatsAvailable > 0
-        ? `${queue.seatsAvailable} seats available on Bus #${primaryBus.busNumber}.`
-        : "Bus capacity is full; overflow queue is available.";
+      ? `You are at position #${queue.entry?.queuePosition} in the boarding queue.`
+      : `Boarding queue is open for Bus #${primaryBus.busNumber}.`;
 
     let answer = `ACIMS live status: Bus #${primaryBus.busNumber} is ${primaryBus.etaMinutes} min from ${primaryBus.nextStop} traveling toward ${primaryBus.destination} (${primaryBus.status}). ${queueNote}`;
     if (targetName) {

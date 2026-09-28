@@ -53,23 +53,20 @@ export function getQueueStatus(bus: Bus, studentId = "demo-student-001") {
       candidate.studentId === studentId &&
       candidate.status === "waiting",
   );
-  const seatsAvailable = Math.max(0, bus.capacity - bus.currentOccupancy);
-  const estimatedAvailabilityMinutes =
-    seatsAvailable > 0 ? 0 : Math.max(3, (entry?.queuePosition ?? entriesForBus(bus.id).length + 1) * 4);
+  const busEntries = entriesForBus(bus.id);
+  const estimatedAvailabilityMinutes = entry
+    ? Math.max(2, entry.queuePosition * 3)
+    : Math.max(3, (busEntries.length + 1) * 3);
 
   return {
     joined: Boolean(entry),
     entry: entry ? { ...entry } : null,
     busId: bus.id,
-    currentOccupancy: bus.currentOccupancy,
     capacity: bus.capacity,
-    seatsAvailable,
     estimatedAvailabilityMinutes,
-    message: seatsAvailable > 0
-      ? "Seat available! You are now eligible to board."
-      : entry
-        ? `You are #${entry.queuePosition} in the overflow queue.`
-        : "Bus is full. Join the overflow queue for a seat.",
+    message: entry
+      ? `You are #${entry.queuePosition} in line for Bus #${bus.busNumber} at ${entry.boardingStop}.`
+      : `Select your stop to reserve a position in the boarding queue for Bus #${bus.busNumber}.`,
   };
 }
 

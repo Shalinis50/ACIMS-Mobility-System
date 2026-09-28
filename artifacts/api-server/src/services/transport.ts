@@ -57,9 +57,7 @@ export class CollegeBusProvider implements IPublicTransportProvider {
       durationMinutes: bus.etaMinutes + 8,
       transfers: 0,
       walkingDistanceKm: 0.2,
-      availability: bus.currentOccupancy < bus.capacity
-        ? `${bus.capacity - bus.currentOccupancy} seats open (${bus.status})`
-        : "Boarding queue active",
+      availability: `Scheduled campus loop (${bus.status})`,
       dataLabel: "REAL ACIMS DATA",
     }));
   }
@@ -116,7 +114,7 @@ export class PublicBusProvider implements IPublicTransportProvider {
         durationMinutes: 22,
         transfers: 0,
         walkingDistanceKm: 0.5,
-        availability: "Moderate seating available (Development estimate)",
+        availability: "Scheduled city service (Development estimate)",
         dataLabel: "DEVELOPMENT/MOCK EXTERNAL DATA",
       },
     ];

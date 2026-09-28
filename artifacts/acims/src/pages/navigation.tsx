@@ -4,7 +4,9 @@ import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, Tooltip } from
 import { divIcon } from 'leaflet';
 import { getListNavigationDestinationsQueryKey, useListNavigationDestinations, useCalculateNavigationRoute } from '@workspace/api-client-react';
 import type { NavigationRoute } from '@workspace/api-client-react';
-import { EmptyState, ErrorState, LoadingRows, PageHeading, OccupancyBar } from '@/components/acims-ui';
+import { EmptyState, ErrorState, LoadingRows, PageHeading } from '@/components/acims-ui';
+import { useNetworkStatus } from '@/hooks/use-network';
+import { OfflineMobilityView } from '@/components/offline-mobility-view';
 import 'leaflet/dist/leaflet.css';
 
 const COLLEGE_CENTER = { latitude: 12.9407, longitude: 80.1393 };
@@ -17,7 +19,8 @@ const startPresets = [
 ];
 
 export default function NavigationPage() {
-  const destinationsQuery = useListNavigationDestinations({ query: { queryKey: getListNavigationDestinationsQueryKey() } });
+  const { isOnline } = useNetworkStatus();
+  const destinationsQuery = useListNavigationDestinations({ query: { enabled: isOnline, queryKey: getListNavigationDestinationsQueryKey() } });
   const calculateMutation = useCalculateNavigationRoute();
   const [destinationId, setDestinationId] = useState('');
   const [mode, setMode] = useState('walk-transit');
@@ -25,6 +28,12 @@ export default function NavigationPage() {
   const [locationNote, setLocationNote] = useState('College Main Entrance');
   const [route, setRoute] = useState<NavigationRoute>();
   const destinations = useMemo(() => destinationsQuery.data ?? [], [destinationsQuery.data]);
+
+  // OFFLINE MODE: When internet is not available, cleanly switch to Offline Mobility Information
+  if (!isOnline) {
+    return <OfflineMobilityView initialTab="locations" />;
+  }
+
 
   // Check if destination was passed from Campus Map or preset
   useEffect(() => {
@@ -307,11 +316,8 @@ function NavigationResult({ route }: { route: NavigationRoute }) {
                   <span className="rounded-full bg-accent px-2 py-0.5 text-[9px] font-extrabold">ETA {bus.etaMinutes} min</span>
                 </div>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  {bus.seatsAvailable} seats available · Status: {bus.status}
+                  Status: {bus.status}
                 </p>
-                <div className="mt-2">
-                  <OccupancyBar occupancy={bus.occupancy} capacity={bus.capacity} />
-                </div>
               </div>
             </div>
           )}

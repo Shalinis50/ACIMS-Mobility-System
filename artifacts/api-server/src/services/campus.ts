@@ -1,5 +1,6 @@
 import { getBuses, getStops, type Coordinate } from "./busTracking";
 import { calculateEtaMinutes, distanceInKilometers } from "./eta";
+import { listRoutes } from "./admin";
 
 export type CampusLocation = Coordinate & {
   id: string;
@@ -124,6 +125,12 @@ const allStops: Array<Coordinate & { id: string; name: string; sequence: number 
   { id: "athletics", name: "Athletic Pavilion Stop", sequence: 5, latitude: 12.9015, longitude: 80.0984 },
   { id: "hospital-gate", name: "Hospital Gate North", sequence: 6, latitude: 12.9287, longitude: 80.1352 },
   { id: "faculty-enclave", name: "Faculty Enclave Stop", sequence: 7, latitude: 12.8955, longitude: 80.0864 },
+  { id: "north-residence", name: "North Residence Complex", sequence: 8, latitude: 12.9458, longitude: 80.1352 },
+  { id: "hostel-village", name: "Hostel Village", sequence: 9, latitude: 12.9015, longitude: 80.0984 },
+  { id: "library", name: "Central Library Stop", sequence: 10, latitude: 12.9381, longitude: 80.1369 },
+  { id: "metro-central", name: "Metro Central Station", sequence: 11, latitude: 12.9249, longitude: 80.1275 },
+  { id: "south-lot", name: "South Commuter Lot Stop", sequence: 12, latitude: 12.8955, longitude: 80.0864 },
+  { id: "student-center", name: "Student Center Stop", sequence: 13, latitude: 12.9422, longitude: 80.1378 },
 ];
 
 export function listCampusLocations() {
@@ -153,14 +160,22 @@ export function listCampusStops(): CampusStop[] {
 }
 
 export function listCampusRoutes(): CampusRoute[] {
-  return getBuses().map((bus) => ({
-    id: `route-${bus.id}`,
-    name: bus.routeLabel,
-    busId: bus.id,
-    busNumber: bus.busNumber,
-    destination: bus.destination,
-    stopIds: (getStops(bus.id) ?? []).sort((a, b) => a.sequence - b.sequence).map((stop) => stop.id),
-  }));
+  const adminRoutes = listRoutes().filter((route) => route.active);
+  const buses = getBuses();
+
+  return adminRoutes.map((route) => {
+    const assignedBus = buses.find(
+      (bus) => bus.routeId === route.id || route.assignedBusIds.includes(bus.id),
+    );
+    return {
+      id: route.id,
+      name: route.name,
+      busId: assignedBus?.id ?? (route.assignedBusIds[0] || ""),
+      busNumber: assignedBus?.busNumber ?? "",
+      destination: route.destination,
+      stopIds: [...route.stopIds],
+    };
+  });
 }
 
 export function getDestination(id: string) {
@@ -199,9 +214,7 @@ export function calculateNavigation(input: {
         busNumber: bus.busNumber,
         destination: bus.destination,
         etaMinutes: calculateEtaMinutes(bus.currentLocation, relevantStop),
-        occupancy: bus.currentOccupancy,
         capacity: bus.capacity,
-        seatsAvailable: Math.max(0, bus.capacity - bus.currentOccupancy),
         status: bus.status,
       }));
 

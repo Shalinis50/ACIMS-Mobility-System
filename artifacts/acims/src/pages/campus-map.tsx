@@ -5,11 +5,14 @@ import { divIcon } from 'leaflet';
 import { Link, useLocation } from 'wouter';
 import { getListBusesQueryKey, useListBuses, useListCampusLocations, getListCampusLocationsQueryKey, useListCampusStops, getListCampusStopsQueryKey, useListCampusRoutes, getListCampusRoutesQueryKey } from '@workspace/api-client-react';
 import { EmptyState, ErrorState, LoadingRows, PageHeading, statusLabel } from '@/components/acims-ui';
+import { useNetworkStatus } from '@/hooks/use-network';
+import { OfflineMobilityView } from '@/components/offline-mobility-view';
 import 'leaflet/dist/leaflet.css';
 
 const COLLEGE_CENTER: [number, number] = [12.9407, 80.1393];
 
 export default function CampusMapPage() {
+  const { isOnline } = useNetworkStatus();
   const [, setNavLocation] = useLocation();
   const [search, setSearch] = useState('');
   const [selectedRouteId, setSelectedRouteId] = useState('');
@@ -18,10 +21,16 @@ export default function CampusMapPage() {
   const [userCoords, setUserCoords] = useState<[number, number] | null>(null);
   const [locationStatus, setLocationStatus] = useState<string>('');
 
-  const locationsQuery = useListCampusLocations({ query: { queryKey: getListCampusLocationsQueryKey() } });
-  const stopsQuery = useListCampusStops({ query: { queryKey: getListCampusStopsQueryKey() } });
-  const routesQuery = useListCampusRoutes({ query: { queryKey: getListCampusRoutesQueryKey() } });
-  const busesQuery = useListBuses({ query: { queryKey: getListBusesQueryKey(), refetchInterval: 15000 } });
+  const locationsQuery = useListCampusLocations({ query: { enabled: isOnline, queryKey: getListCampusLocationsQueryKey() } });
+  const stopsQuery = useListCampusStops({ query: { enabled: isOnline, queryKey: getListCampusStopsQueryKey() } });
+  const routesQuery = useListCampusRoutes({ query: { enabled: isOnline, queryKey: getListCampusRoutesQueryKey() } });
+  const busesQuery = useListBuses({ query: { enabled: isOnline, queryKey: getListBusesQueryKey(), refetchInterval: 15000 } });
+
+  // OFFLINE MODE: When internet is not available, cleanly switch to Offline Mobility Information
+  if (!isOnline) {
+    return <OfflineMobilityView initialTab="locations" />;
+  }
+
 
   const locations = locationsQuery.data ?? [];
   const stops = stopsQuery.data ?? [];
