@@ -1,29 +1,49 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
+import cors from "cors";
+import router from "./artifacts/api-server/src/routes/index";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const bundlePath = path.resolve(__dirname, "server.bundle.js");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// In Cloud Run (K_SERVICE is set) or when bundled server exists, ensure NODE_ENV is production
-if (process.env.K_SERVICE || fs.existsSync(bundlePath)) {
-  if (!process.env.NODE_ENV) {
-    process.env.NODE_ENV = "production";
-  }
-}
+async function startServer() {
+  const app = express();
+  const port = Number(process.env.PORT) || 3000;
+  const isProd = process.env.NODE_ENV === "production";
 
-async function main() {
-  if (fs.existsSync(bundlePath)) {
-    const { startServer } = await import("./server.bundle.js");
-    await startServer();
+  app.use(cors());
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+
+  // API routes
+  app.use("/api", router);
+
+  if (!isProd) {
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+        host: "0.0.0.0",
+      },
+      appType: "spa",
+      root: path.resolve(__dirname, "artifacts/acims"),
+    });
+    app.use(vite.middlewares);
   } else {
-    // Development fallback
-    const { startServer } = await import("./server-app.ts");
-    await startServer();
+    const distPath = path.resolve(__dirname, "artifacts/acims/dist");
+    app.use(express.static(distPath));
+    app.get("*", (_req, res) => {
+      res.sendFile(path.resolve(distPath, "index.html"));
+    });
   }
+
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`ACIMS Mobility System server listening on http://0.0.0.0:${port}`);
+  });
 }
 
-main().catch((err: unknown) => {
+startServer().catch((err) => {
   console.error("Failed to start server:", err);
   process.exit(1);
 });

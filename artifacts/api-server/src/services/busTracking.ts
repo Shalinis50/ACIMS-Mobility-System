@@ -1,13 +1,12 @@
-import { calculateEtaMinutes } from "./eta";
+import { transportDb, type Bus, type Coordinate, type LiveLocation, type Stop } from "./transportDb";
+import { calculateEtaMinutes, distanceInKilometers } from "./eta";
 
-export type Coordinate = {
-  latitude: number;
-  longitude: number;
-};
+export type { Coordinate, Bus, LiveLocation };
 
 export type BusStop = Coordinate & {
   id: string;
   name: string;
+  code: string;
   sequence: number;
   minutesFromPrevious: number;
 };
@@ -18,285 +17,109 @@ export type BusLocation = Coordinate & {
   nextStop: string;
   etaMinutes: number;
   status: string;
+  trackingStatus: "TRACKING_ACTIVE" | "TRACKING_STALE" | "OFFLINE";
   updatedAt: Date;
   source: string;
+  accuracy: number;
+  speed: number;
+  heading: number;
+  lastUpdateSecondsAgo: number;
+  isRealPhoneGps: boolean;
 };
-
-export type Bus = {
-  id: string;
-  busNumber: string;
-  origin: string;
-  destination: string;
-  routeLabel: string;
-  capacity: number;
-  currentLocation: Coordinate;
-  nextStop: string;
-  nextStopId: string;
-  etaMinutes: number;
-  status: string;
-  updatedAt: Date;
-  active: boolean;
-  routeId: string;
-  driverId?: string;
-};
-
-const defaultStops: BusStop[] = [
-  {
-    id: "vandalur",
-    name: "Vandalur",
-    latitude: 12.8924,
-    longitude: 80.0812,
-    sequence: 0,
-    minutesFromPrevious: 0,
-  },
-  {
-    id: "perungalathur",
-    name: "Perungalathur",
-    latitude: 12.9055,
-    longitude: 80.0918,
-    sequence: 1,
-    minutesFromPrevious: 5,
-  },
-  {
-    id: "tambaram",
-    name: "Tambaram",
-    latitude: 12.9249,
-    longitude: 80.1275,
-    sequence: 2,
-    minutesFromPrevious: 8,
-  },
-  {
-    id: "college",
-    name: "College",
-    latitude: 12.9407,
-    longitude: 80.1393,
-    sequence: 3,
-    minutesFromPrevious: 6,
-  },
-];
-
-const fleetState: Bus[] = [
-  {
-    id: "bus-12",
-    busNumber: "12",
-    origin: "Vandalur Transit Hub",
-    destination: "Academic Quad",
-    routeLabel: "Campus Loop A",
-    capacity: 40,
-    currentLocation: { latitude: 12.9161, longitude: 80.1119 },
-    nextStop: "Tambaram Terminal",
-    nextStopId: "tambaram",
-    etaMinutes: 3,
-    status: "On Time",
-    updatedAt: new Date(),
-    active: true,
-    routeId: "route-bus-12",
-    driverId: "driver-arun",
-  },
-  {
-    id: "bus-4b",
-    busNumber: "4B",
-    origin: "North Residence Complex",
-    destination: "Tech & Innovation Park",
-    routeLabel: "Engineering Express",
-    capacity: 45,
-    currentLocation: { latitude: 12.9312, longitude: 80.1215 },
-    nextStop: "Bio-Engineering Center",
-    nextStopId: "bio-center",
-    etaMinutes: 5,
-    status: "Delayed (+6 min)",
-    updatedAt: new Date(Date.now() - 1000 * 45),
-    active: true,
-    routeId: "route-bus-4b",
-    driverId: "driver-suresh",
-  },
-  {
-    id: "bus-7",
-    busNumber: "7",
-    origin: "Hostel Village",
-    destination: "Central Library & Union",
-    routeLabel: "North Campus Shuttle",
-    capacity: 35,
-    currentLocation: { latitude: 12.9015, longitude: 80.0984 },
-    nextStop: "Athletic Pavilion",
-    nextStopId: "athletics",
-    etaMinutes: 2,
-    status: "On Time",
-    updatedAt: new Date(Date.now() - 1000 * 20),
-    active: true,
-    routeId: "route-bus-7",
-    driverId: "driver-venkat",
-  },
-  {
-    id: "bus-18",
-    busNumber: "18",
-    origin: "Metro Central Station",
-    destination: "Medical Sciences Center",
-    routeLabel: "Metro Connector Feeder",
-    capacity: 50,
-    currentLocation: { latitude: 12.9287, longitude: 80.1352 },
-    nextStop: "Hospital Gate North",
-    nextStopId: "hospital-gate",
-    etaMinutes: 9,
-    status: "Delayed (+10 min)",
-    updatedAt: new Date(Date.now() - 1000 * 90),
-    active: true,
-    routeId: "route-bus-18",
-    driverId: "driver-rajesh",
-  },
-  {
-    id: "bus-21",
-    busNumber: "21",
-    origin: "South Commuter Lot",
-    destination: "Main Auditorium",
-    routeLabel: "South Perimeter Circle",
-    capacity: 30,
-    currentLocation: { latitude: 12.8955, longitude: 80.0864 },
-    nextStop: "Faculty Enclave",
-    nextStopId: "faculty-enclave",
-    etaMinutes: 4,
-    status: "Boarding",
-    updatedAt: new Date(Date.now() - 1000 * 30),
-    active: true,
-    routeId: "route-bus-21",
-    driverId: "driver-karthik",
-  },
-];
-
-let segmentIndex = 1;
-let segmentProgress = 0.45;
-
-function roundCoordinate(value: number) {
-  return Number(value.toFixed(6));
-}
-
-function interpolate(start: Coordinate, end: Coordinate, progress: number) {
-  return {
-    latitude: roundCoordinate(
-      start.latitude + (end.latitude - start.latitude) * progress,
-    ),
-    longitude: roundCoordinate(
-      start.longitude + (end.longitude - start.longitude) * progress,
-    ),
-  };
-}
-
-function updateDerivedState(bus: Bus, source: string, timestamp = new Date()) {
-  bus.updatedAt = timestamp;
-  return {
-    busId: bus.id,
-    ...bus.currentLocation,
-    nextStopId: bus.nextStopId,
-    nextStop: bus.nextStop,
-    etaMinutes: bus.etaMinutes,
-    status: bus.status,
-    updatedAt: timestamp,
-    source,
-    currentStop: bus.origin,
-  };
-}
 
 export function getBuses(): Bus[] {
-  return fleetState.map((bus) => ({ ...bus, currentLocation: { ...bus.currentLocation } }));
+  return transportDb.getAllBuses();
 }
 
 export function getBus(id: string): Bus | undefined {
-  const bus = fleetState.find((candidate) => candidate.id === id);
-  return bus ? { ...bus, currentLocation: { ...bus.currentLocation } } : undefined;
+  return transportDb.getBus(id);
 }
 
-export function createBusInFleet(bus: Bus): Bus {
-  fleetState.push(bus);
-  return { ...bus, currentLocation: { ...bus.currentLocation } };
+export function getStops(busId: string): BusStop[] {
+  const bus = transportDb.getBus(busId);
+  if (!bus) return [];
+  // Find trip / route for this bus
+  const activeTrips = transportDb.getActiveTrips();
+  const trip = activeTrips.find((t) => t.busId === busId);
+  const route = trip
+    ? transportDb.getRoute(trip.routeId)
+    : transportDb.getAllRoutes().find((r) => r.assignedBusIds.includes(busId));
+
+  if (!route) {
+    // Return all stops on primary route if none specifically bound
+    const firstRoute = transportDb.getAllRoutes()[0];
+    return firstRoute ? transportDb.getRouteStops(firstRoute.id) : [];
+  }
+
+  return transportDb.getRouteStops(route.id);
 }
 
-export function updateBusInFleet(id: string, updates: Partial<Bus>): Bus | undefined {
-  const bus = fleetState.find((candidate) => candidate.id === id);
+export function getLocation(busId: string): BusLocation | undefined {
+  const bus = transportDb.getBus(busId);
   if (!bus) return undefined;
-  Object.assign(bus, updates);
-  bus.updatedAt = new Date();
-  return { ...bus, currentLocation: { ...bus.currentLocation } };
-}
 
-export function deactivateBusInFleet(id: string): Bus | undefined {
-  const bus = fleetState.find((candidate) => candidate.id === id);
-  if (!bus) return undefined;
-  bus.active = !bus.active;
-  bus.status = bus.active ? "Standby" : "Inactive";
-  bus.updatedAt = new Date();
-  return { ...bus, currentLocation: { ...bus.currentLocation } };
-}
+  const live = transportDb.getLiveLocation(busId);
+  if (!live) return undefined;
 
-export function getStops(id: string): BusStop[] {
-  return defaultStops.map((stop) => ({ ...stop }));
-}
+  const stops = getStops(busId);
+  // Calculate nearest next stop
+  let nextStop = stops.find((s) => s.id === bus.nextStopId) ?? stops[stops.length - 1];
+  let calculatedEta = bus.etaMinutes;
 
-export function getLocation(id: string) {
-  const bus = fleetState.find((candidate) => candidate.id === id);
-  if (!bus) return undefined;
-  return updateDerivedState(bus, "simulated");
+  if (nextStop) {
+    const distKm = distanceInKilometers({ latitude: live.latitude, longitude: live.longitude }, nextStop);
+    const speed = live.speed > 5 ? live.speed : 25; // actual speed or average 25 km/h
+    calculatedEta = Math.max(1, Math.ceil((distKm / speed) * 60));
+  }
+
+  const trackingStatus = transportDb.getTrackingStatus(busId);
+  const lastUpdateSecondsAgo = Math.max(0, Math.round((Date.now() - live.recordedAt.getTime()) / 1000));
+
+  return {
+    busId: bus.id,
+    latitude: live.latitude,
+    longitude: live.longitude,
+    nextStopId: bus.nextStopId,
+    nextStop: bus.nextStop,
+    etaMinutes: calculatedEta,
+    status: bus.status,
+    trackingStatus,
+    updatedAt: live.recordedAt,
+    source: live.source,
+    accuracy: live.accuracy ?? 10,
+    speed: live.speed,
+    heading: live.heading,
+    lastUpdateSecondsAgo,
+    isRealPhoneGps: live.source.includes("phone") || live.source.includes("driver"),
+  };
 }
 
 export function updateLocation(
-  id: string,
+  busId: string,
   location: Coordinate,
-  source = "driver-device",
-  timestamp = new Date(),
+  source = "driver-phone-gps",
+  timestamp: Date | string = new Date(),
+  speed?: number,
+  heading?: number,
+  accuracy?: number,
+  driverId?: string,
+  driverName?: string,
 ) {
-  const bus = fleetState.find((candidate) => candidate.id === id);
+  const bus = transportDb.getBus(busId);
   if (!bus) return undefined;
-  bus.currentLocation = {
+
+  transportDb.recordLiveLocation({
+    busId,
     latitude: location.latitude,
     longitude: location.longitude,
-  };
-  return updateDerivedState(bus, source, timestamp);
+    speed,
+    heading,
+    source,
+    accuracy,
+    recordedAt: timestamp,
+    driverId,
+    driverName,
+  });
+
+  return getLocation(busId);
 }
-
-export function advanceSimulation() {
-  const bus = fleetState.find((b) => b.id === "bus-12") ?? fleetState[0];
-
-  // Advance along the route segment (~4 ticks per segment)
-  segmentProgress += 0.25;
-
-  const totalSegments = defaultStops.length - 1;
-  if (segmentProgress >= 1.0) {
-    segmentIndex = (segmentIndex + 1) % totalSegments;
-    segmentProgress = 0.05;
-  }
-
-  const current = defaultStops[segmentIndex] ?? defaultStops[0];
-  const next = defaultStops[segmentIndex + 1] ?? defaultStops[1];
-
-  let etaMinutes: number;
-  let status: string;
-
-  if (segmentProgress < 0.35) {
-    etaMinutes = 3;
-    status = "On Time";
-  } else if (segmentProgress < 0.65) {
-    etaMinutes = 2;
-    status = "On Time";
-  } else if (segmentProgress < 0.90) {
-    etaMinutes = 1;
-    status = "On Time";
-  } else {
-    etaMinutes = 0;
-    status = "Arriving now";
-  }
-
-  bus.nextStop = next.name;
-  bus.nextStopId = next.id;
-  bus.etaMinutes = etaMinutes;
-  bus.status = status;
-  bus.currentLocation = interpolate(current, next, Math.min(1, segmentProgress));
-  bus.updatedAt = new Date();
-
-  return updateDerivedState(bus, "simulated");
-}
-
-export function startSimulation(onTick: () => void) {
-  const timer = setInterval(onTick, 10_000);
-  timer.unref();
-  return () => clearInterval(timer);
-}
-

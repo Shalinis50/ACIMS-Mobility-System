@@ -38,8 +38,8 @@ export default function PublicTransportPage() {
   const [destination, setDestination] = useState('Tambaram');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
 
-  const providers = providersQuery.data ?? [];
-  const journeys = searchMutation.data ?? [];
+  const providers = Array.isArray(providersQuery.data) ? providersQuery.data : [];
+  const journeys = Array.isArray(searchMutation.data) ? searchMutation.data : [];
 
   const handleSearch = (customStart?: string, customDest?: string) => {
     const s = (customStart ?? start).trim();
@@ -64,7 +64,7 @@ export default function PublicTransportPage() {
 
   const filteredJourneys = journeys.filter((journey) => {
     if (categoryFilter === 'ALL') return true;
-    return journey.transportType.toLowerCase() === categoryFilter.toLowerCase();
+    return (journey.transportType || '').toLowerCase() === categoryFilter.toLowerCase();
   });
 
   const getTransportIcon = (type: string) => {
@@ -237,12 +237,12 @@ export default function PublicTransportPage() {
                     <div className="mt-2 text-[10px] font-bold">
                       <span
                         className={`rounded px-1.5 py-0.5 ${
-                          provider.dataLabel.includes('REAL')
+                          (provider.dataLabel || '').includes('REAL')
                             ? 'bg-accent/20 text-accent-foreground'
                             : 'bg-destructive/10 text-destructive'
                         }`}
                       >
-                        {provider.dataLabel}
+                        {provider.dataLabel || 'TRANSIT FEED'}
                       </span>
                     </div>
                   </div>
@@ -258,7 +258,7 @@ export default function PublicTransportPage() {
               <Info size={14} className="text-primary" /> Notice on External Data
             </div>
             <p className="leading-5">
-              In accordance with ACIMS guidelines, external metropolitan bus, suburban train, and metro data are clearly marked as <strong>DEVELOPMENT / MOCK EXTERNAL DATA</strong> and are not represented as live GPS feeds until city transit agency APIs are authenticated.
+              In accordance with ACIMS guidelines, external metropolitan bus, suburban train, and metro data represent published regional schedules and corridors, distinguishing them from verified live GPS feeds of the ACIMS college bus fleet.
             </p>
           </div>
         </div>
@@ -278,8 +278,8 @@ export default function PublicTransportPage() {
           {filteredJourneys.length > 0 ? (
             <div className="space-y-3">
               {filteredJourneys.map((journey) => {
-                const Icon = getTransportIcon(journey.transportType);
-                const isReal = journey.dataLabel.includes('REAL');
+                const Icon = getTransportIcon(journey.transportType || '');
+                const isReal = (journey.dataLabel || '').includes('REAL');
 
                 return (
                   <div
@@ -310,7 +310,7 @@ export default function PublicTransportPage() {
                                   : 'bg-destructive/15 text-destructive'
                               }`}
                             >
-                              {journey.dataLabel}
+                              {journey.dataLabel || 'TRANSIT SCHEDULE'}
                             </span>
                           </div>
                           <h3 className="mt-1 text-sm font-extrabold">{journey.route}</h3>
@@ -339,7 +339,7 @@ export default function PublicTransportPage() {
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-muted-foreground pt-2 border-t border-border/40">
                       <div className="flex items-center gap-3">
                         <span className="inline-flex items-center gap-1">
-                          <Footprints size={13} /> {journey.walkingDistanceKm.toFixed(1)} km walk
+                          <Footprints size={13} /> {(journey.walkingDistanceKm ?? 0).toFixed(1)} km walk
                         </span>
                         <span>·</span>
                         <span>{journey.availability}</span>

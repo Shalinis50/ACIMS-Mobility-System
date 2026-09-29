@@ -5,15 +5,13 @@ import {
   Clock3, 
   AlertTriangle, 
   CheckCircle2, 
-  Users, 
   Search, 
   RotateCw, 
   MapPin, 
   ChevronRight, 
   ArrowRight,
   Sparkles,
-  Gauge,
-  WifiOff
+  Radio
 } from 'lucide-react';
 import type { Bus } from '@workspace/api-client-react';
 import { 
@@ -22,8 +20,6 @@ import {
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { selectBus, useSelectedBusId, formatUpdatedAt } from '@/components/acims-ui';
-import { useNetworkStatus } from '@/hooks/use-network';
-import { getOfflineRoutes, getLastKnownBusSnapshots } from '@/lib/offline-storage';
 
 export type DelaySeverity = 'on_time' | 'minor_delay' | 'major_delay' | 'boarding' | 'unknown';
 
@@ -75,43 +71,16 @@ interface BusStatusProps {
 export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
   const queryClient = useQueryClient();
   const selectedBusId = useSelectedBusId();
-  const { isOnline } = useNetworkStatus();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'on_time' | 'delayed'>('all');
 
-  const offlineRoutes = useMemo(() => getOfflineRoutes(), []);
-  const snapshots = useMemo(() => getLastKnownBusSnapshots(), [isOnline]);
-
-  const { data: buses = [], isLoading, isError, refetch, isRefetching } = useListBuses({
+  const { data: rawBuses, isLoading, isError, refetch, isRefetching } = useListBuses({
     query: {
-      enabled: isOnline,
       queryKey: getListBusesQueryKey(),
-      refetchInterval: isOnline ? 15000 : false,
+      refetchInterval: 15000,
     },
   });
-
-  const effectiveBuses: Bus[] = useMemo(() => {
-    if (buses && buses.length > 0) return buses;
-    return offlineRoutes.map((route) => {
-      const snap = snapshots[route.id];
-      return {
-        id: route.id,
-        busNumber: route.busNumber,
-        origin: route.origin,
-        destination: route.destination,
-        routeLabel: route.routeLabel,
-        capacity: snap?.capacity ?? 40,
-        currentLocation: { latitude: 12.9407, longitude: 80.1393 },
-        nextStop: snap?.lastStop ?? route.stops?.[2]?.name ?? 'Campus Main Gate',
-        nextStopId: 'stop-cached',
-        etaMinutes: snap?.etaMinutes ?? 5,
-        status: snap?.status ?? 'Scheduled route',
-        updatedAt: new Date(),
-        active: true,
-        routeId: route.id,
-      } as Bus;
-    });
-  }, [buses, offlineRoutes, snapshots]);
+  const buses = Array.isArray(rawBuses) ? rawBuses : [];
 
   const handleSelect = (busId: string) => {
     selectBus(busId);
@@ -119,7 +88,7 @@ export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
   };
 
   const filteredBuses = useMemo(() => {
-    return effectiveBuses.filter((bus) => {
+    return buses.filter((bus) => {
       const delayInfo = getDelayDetails(bus.status);
 
       if (filterType === 'on_time' && delayInfo.isDelayed) return false;
@@ -127,30 +96,30 @@ export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
 
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
-        const matchesNumber = bus.busNumber.toLowerCase().includes(query);
-        const matchesRoute = bus.routeLabel?.toLowerCase().includes(query);
-        const matchesDest = bus.destination?.toLowerCase().includes(query);
-        const matchesOrigin = bus.origin?.toLowerCase().includes(query);
-        const matchesStop = bus.nextStop?.toLowerCase().includes(query);
+        const matchesNumber = (bus.busNumber || '').toLowerCase().includes(query);
+        const matchesRoute = (bus.routeLabel || '').toLowerCase().includes(query);
+        const matchesDest = (bus.destination || '').toLowerCase().includes(query);
+        const matchesOrigin = (bus.origin || '').toLowerCase().includes(query);
+        const matchesStop = (bus.nextStop || '').toLowerCase().includes(query);
         return matchesNumber || matchesRoute || matchesDest || matchesOrigin || matchesStop;
       }
 
       return true;
     });
-  }, [effectiveBuses, filterType, searchQuery]);
+  }, [buses, filterType, searchQuery]);
 
   const counts = useMemo(() => {
     let onTimeCount = 0;
     let delayedCount = 0;
 
-    effectiveBuses.forEach((b) => {
+    buses.forEach((b) => {
       const delay = getDelayDetails(b.status);
       if (delay.isDelayed) delayedCount++;
       else onTimeCount++;
     });
 
-    return { total: effectiveBuses.length, onTimeCount, delayedCount };
-  }, [effectiveBuses]);
+    return { total: buses.length, onTimeCount, delayedCount };
+  }, [buses]);
 
   return (
     <section 
@@ -162,61 +131,41 @@ export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <div className="mono text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            {isOnline ? 'Live Fleet Monitor' : 'Fleet Monitor (Offline Mode)'}
+            Live Fleet Monitor
           </div>
           <div className="mt-1 flex items-center gap-3">
             <h2 className="display-font text-2xl font-extrabold text-foreground sm:text-3xl">
               Bus Status & Route Health
             </h2>
-            {isOnline ? (
-              <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                {counts.total} Active Routes
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-300">
-                <WifiOff size={11} />
-                Offline mode · {counts.total} Cached Routes
-              </span>
-            )}
+            <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+              {counts.total} Active Routes
+            </span>
           </div>
           <p className="mt-1 max-w-xl text-xs leading-5 text-muted-foreground">
-            {isOnline
-              ? 'Real-time headway, current delay status, and active routing across campus lines.'
-              : 'Cached timetable headways, route itineraries, and vehicle specs saved on this device.'}
+            Real-time headway, driver signal verification, and verified arrival estimates across college routes.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          {isOnline ? (
-            <>
-              <button
-                type="button"
-                onClick={() => void refetch()}
-                disabled={isRefetching}
-                aria-label="Refresh route status"
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border bg-muted/60 px-3 text-xs font-bold text-foreground transition hover:bg-muted disabled:opacity-50"
-              >
-                <RotateCw size={13} className={isRefetching ? 'animate-spin' : ''} />
-                <span>{isRefetching ? 'Updating…' : 'Refresh'}</span>
-              </button>
-              <Link
-                href="/map"
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground transition hover:opacity-90"
-              >
-                <span>Live Map View</span>
-                <ArrowRight size={13} />
-              </Link>
-            </>
-          ) : (
-            <Link
-              href="/offline"
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 text-xs font-bold text-amber-800 dark:text-amber-200 transition hover:bg-amber-500/20"
-            >
-              <WifiOff size={13} />
-              <span>Offline Desk</span>
-            </Link>
-          )}
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            disabled={isRefetching}
+            aria-label="Refresh route status"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border bg-muted/60 px-3 text-xs font-bold text-foreground transition hover:bg-muted disabled:opacity-50"
+          >
+            <RotateCw size={13} className={isRefetching ? 'animate-spin' : ''} />
+            <span>{isRefetching ? 'Updating…' : 'Refresh'}</span>
+          </button>
+
+          <Link
+            href="/map"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground transition hover:opacity-90"
+          >
+            <span>Live Map View</span>
+            <ArrowRight size={13} />
+          </Link>
         </div>
       </div>
 
@@ -323,7 +272,6 @@ export function BusStatus({ className = '', onSelectBus }: BusStatusProps) {
               bus={bus}
               isSelected={bus.id === selectedBusId}
               onSelect={() => handleSelect(bus.id)}
-              isOnline={isOnline}
             />
           ))}
         </div>
@@ -336,10 +284,9 @@ interface BusStatusCardProps {
   bus: Bus;
   isSelected: boolean;
   onSelect: () => void;
-  isOnline?: boolean;
 }
 
-function BusStatusCard({ bus, isSelected, onSelect, isOnline = true }: BusStatusCardProps) {
+function BusStatusCard({ bus, isSelected, onSelect }: BusStatusCardProps) {
   const delay = getDelayDetails(bus.status);
 
   return (
@@ -385,9 +332,7 @@ function BusStatusCard({ bus, isSelected, onSelect, isOnline = true }: BusStatus
           <div className="text-right">
             <div
               className={`inline-flex items-center gap-1.5 text-xs font-extrabold ${
-                !isOnline
-                  ? 'text-amber-600 dark:text-amber-400'
-                  : delay.severity === 'major_delay'
+                delay.severity === 'major_delay'
                   ? 'text-rose-600 dark:text-rose-400'
                   : delay.severity === 'minor_delay'
                   ? 'text-amber-600 dark:text-amber-400'
@@ -396,22 +341,17 @@ function BusStatusCard({ bus, isSelected, onSelect, isOnline = true }: BusStatus
                   : 'text-emerald-600 dark:text-emerald-400'
               }`}
             >
-              {!isOnline ? (
-                <>
-                  <Clock3 size={13} className="shrink-0" />
-                  <span>Scheduled</span>
-                </>
-              ) : delay.isDelayed ? (
+              {delay.isDelayed ? (
                 <AlertTriangle size={13} className="shrink-0" />
               ) : delay.severity === 'boarding' ? (
                 <Clock3 size={13} className="shrink-0" />
               ) : (
                 <CheckCircle2 size={13} className="shrink-0" />
               )}
-              {isOnline && <span>{delay.label}</span>}
+              <span>{delay.label}</span>
             </div>
             <div className="text-[10px] text-muted-foreground">
-              {isOnline ? 'ETA' : 'Last known ETA'}: <span className="font-mono font-bold tabular-nums text-foreground">{bus.etaMinutes} min</span>
+              ETA: <span className="font-mono font-bold tabular-nums text-foreground">{bus.etaMinutes} min</span>
             </div>
           </div>
         </div>
@@ -431,13 +371,14 @@ function BusStatusCard({ bus, isSelected, onSelect, isOnline = true }: BusStatus
           </div>
         </div>
 
-        {/* Status / Updated */}
+        {/* Service Signal Info */}
         <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
-          <span>Vehicle spec: {bus.capacity} seats</span>
+          <span className="flex items-center gap-1">
+            <Radio size={12} className="text-emerald-600 dark:text-emerald-400" />
+            <span>Driver Signal Active</span>
+          </span>
           <span className="text-[10px]">
-            {isOnline
-              ? formatUpdatedAt(typeof bus.updatedAt === 'string' ? bus.updatedAt : undefined)
-              : 'Offline cached reading'}
+            {formatUpdatedAt(typeof bus.updatedAt === 'string' ? bus.updatedAt : undefined)}
           </span>
         </div>
       </div>
@@ -457,23 +398,14 @@ function BusStatusCard({ bus, isSelected, onSelect, isOnline = true }: BusStatus
         </button>
 
         <Link
-          href="/queue"
-          onClick={onSelect}
-          className="rounded-xl border border-border bg-card p-2 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          title="Boarding queue for this bus"
-          aria-label={`Queue for bus ${bus.busNumber}`}
-        >
-          <Users size={15} />
-        </Link>
-
-        <Link
           href="/map"
           onClick={onSelect}
-          className="rounded-xl border border-border bg-card p-2 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          className="inline-flex items-center gap-1 rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold text-muted-foreground transition hover:bg-muted hover:text-foreground"
           title="Track bus on live map"
           aria-label={`Track bus ${bus.busNumber}`}
         >
-          <ChevronRight size={15} />
+          <span>Live Map</span>
+          <ChevronRight size={14} />
         </Link>
       </div>
     </article>

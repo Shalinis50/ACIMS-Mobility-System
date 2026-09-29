@@ -13,37 +13,19 @@ export type Notification = {
 
 const notifications: Notification[] = [
   {
-    id: "alert-approaching-tambaram",
-    type: "APPROACHING_STOP",
-    title: "Approaching your stop",
-    message: "Bus 12 is approaching Tambaram.",
-    createdAt: new Date(Date.now() - 1000 * 60 * 2),
-    read: false,
-    busId: "bus-12",
-  },
-  {
-    id: "alert-boarding-queue",
-    type: "QUEUE_OPEN",
-    title: "Boarding queue open",
-    message: "Boarding queue for Bus 12 is now active for upcoming stops.",
-    createdAt: new Date(Date.now() - 1000 * 60 * 8),
-    read: false,
-    busId: "bus-12",
-  },
-  {
-    id: "alert-started",
-    type: "BUS_STARTED",
-    title: "Route started",
-    message: "Bus 12 has started its route.",
-    createdAt: new Date(Date.now() - 1000 * 60 * 22),
+    id: "alert-service-active",
+    type: "SERVICE_ACTIVE",
+    title: "Campus Transit Active",
+    message: "Morning college routes connecting to REC Main Gate are operating normally.",
+    createdAt: new Date(Date.now() - 1000 * 60 * 15),
     read: true,
-    busId: "bus-12",
+    busId: "bus-24",
   },
 ];
 
 let lastState = {
-  nextStop: "Tambaram",
-  etaMinutes: 3,
+  nextStop: "",
+  etaMinutes: 0,
 };
 
 function addNotification(
@@ -86,26 +68,26 @@ export function syncBusNotifications(
   bus: Bus,
   queueEntry?: QueueEntry | null,
 ) {
-  if (bus.nextStop !== lastState.nextStop) {
+  if (bus.nextStop && bus.nextStop !== lastState.nextStop) {
     addNotification(
       "APPROACHING_STOP",
-      "Approaching your stop",
+      "Approaching stop",
       `Bus ${bus.busNumber} is approaching ${bus.nextStop}.`,
       bus.id,
     );
   }
 
-  if (bus.etaMinutes <= 3 && bus.nextStop === "Tambaram") {
+  if (bus.etaMinutes <= 3 && bus.nextStop) {
     addNotification(
       "NEARBY",
       "Your bus is nearby",
-      `Bus ${bus.busNumber} is ${bus.etaMinutes} minutes away from Tambaram.`,
+      `Bus ${bus.busNumber} is ${bus.etaMinutes} minutes away from ${bus.nextStop}.`,
       bus.id,
     );
   }
 
   if (queueEntry) {
-    const message = `You are #${queueEntry.queuePosition} in the overflow queue.`;
+    const message = `You are #${queueEntry.queuePosition} in line for boarding.`;
     const latestQueueAlert = notifications.find(
       (notification) => notification.type === "QUEUE_UPDATE" && !notification.read,
     );

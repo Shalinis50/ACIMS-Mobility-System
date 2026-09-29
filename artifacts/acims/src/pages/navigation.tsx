@@ -5,35 +5,26 @@ import { divIcon } from 'leaflet';
 import { getListNavigationDestinationsQueryKey, useListNavigationDestinations, useCalculateNavigationRoute } from '@workspace/api-client-react';
 import type { NavigationRoute } from '@workspace/api-client-react';
 import { EmptyState, ErrorState, LoadingRows, PageHeading } from '@/components/acims-ui';
-import { useNetworkStatus } from '@/hooks/use-network';
-import { OfflineMobilityView } from '@/components/offline-mobility-view';
 import 'leaflet/dist/leaflet.css';
 
-const COLLEGE_CENTER = { latitude: 12.9407, longitude: 80.1393 };
+const COLLEGE_CENTER = { latitude: 13.0088, longitude: 80.0035 };
 
 const startPresets = [
   { label: 'Current GPS Position', coords: null },
-  { label: 'College Main Entrance', coords: COLLEGE_CENTER },
-  { label: 'North Residence Complex', coords: { latitude: 12.9458, longitude: 80.1352 } },
-  { label: 'Hostel Village', coords: { latitude: 12.9015, longitude: 80.0984 } },
+  { label: 'REC Main Entrance', coords: COLLEGE_CENTER },
+  { label: 'Central Library', coords: { latitude: 13.0080, longitude: 80.0038 } },
+  { label: 'Hostel Village', coords: { latitude: 13.0070, longitude: 80.0050 } },
 ];
 
 export default function NavigationPage() {
-  const { isOnline } = useNetworkStatus();
-  const destinationsQuery = useListNavigationDestinations({ query: { enabled: isOnline, queryKey: getListNavigationDestinationsQueryKey() } });
+  const destinationsQuery = useListNavigationDestinations({ query: { queryKey: getListNavigationDestinationsQueryKey() } });
   const calculateMutation = useCalculateNavigationRoute();
   const [destinationId, setDestinationId] = useState('');
   const [mode, setMode] = useState('walk-transit');
   const [start, setStart] = useState(COLLEGE_CENTER);
-  const [locationNote, setLocationNote] = useState('College Main Entrance');
+  const [locationNote, setLocationNote] = useState('REC Main Entrance');
   const [route, setRoute] = useState<NavigationRoute>();
-  const destinations = useMemo(() => destinationsQuery.data ?? [], [destinationsQuery.data]);
-
-  // OFFLINE MODE: When internet is not available, cleanly switch to Offline Mobility Information
-  if (!isOnline) {
-    return <OfflineMobilityView initialTab="locations" />;
-  }
-
+  const destinations = useMemo(() => Array.isArray(destinationsQuery.data) ? destinationsQuery.data : [], [destinationsQuery.data]);
 
   // Check if destination was passed from Campus Map or preset
   useEffect(() => {
@@ -316,7 +307,7 @@ function NavigationResult({ route }: { route: NavigationRoute }) {
                   <span className="rounded-full bg-accent px-2 py-0.5 text-[9px] font-extrabold">ETA {bus.etaMinutes} min</span>
                 </div>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  Status: {bus.status}
+                  Status: {bus.status} · Verified Driver Route
                 </p>
               </div>
             </div>

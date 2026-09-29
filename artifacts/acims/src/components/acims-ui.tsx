@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
-import { Bell, Bot, BusFront, ChevronDown, CircleHelp, Clock3, Compass, Map, Menu, Navigation, Route, ShieldCheck, TrainFront, UsersRound, WifiOff, Wrench } from 'lucide-react';
+import { Bell, Bot, BusFront, ChevronDown, CircleHelp, Clock3, Compass, Map, Menu, Navigation, Route, ShieldCheck, TrainFront, UsersRound, Wrench } from 'lucide-react';
 import { useListBuses, getListBusesQueryKey } from '@workspace/api-client-react';
 import type { Bus } from '@workspace/api-client-react';
-import { useNetworkStatus } from '@/hooks/use-network';
-import { getOfflineRoutes, saveLastKnownBusSnapshot } from '@/lib/offline-storage';
 
 export const demoStudentId = 'student-20418';
 
@@ -36,30 +34,13 @@ export function RouteMark({ small = false }: { small?: boolean }) {
 }
 
 function BusPicker() {
-  const { isOnline } = useNetworkStatus();
-  const { data: buses, isLoading } = useListBuses({ query: { enabled: isOnline, queryKey: getListBusesQueryKey() } });
+  const { data: rawBuses, isLoading } = useListBuses({ query: { queryKey: getListBusesQueryKey() } });
+  const buses = Array.isArray(rawBuses) ? rawBuses : [];
   const selectedBusId = useSelectedBusId();
-  const offlineRoutes = useMemo(() => getOfflineRoutes(), []);
-
-  const effectiveBuses = useMemo(() => {
-    if (buses && buses.length > 0) {
-      return buses.map((b) => ({ id: b.id, busNumber: b.busNumber, destination: b.destination }));
-    }
-    return offlineRoutes.map((r) => ({ id: r.id, busNumber: r.busNumber, destination: r.destination }));
-  }, [buses, offlineRoutes]);
-
-  const selected = effectiveBuses.find((bus) => bus.id === selectedBusId) ?? effectiveBuses[0];
-  
+  const selected = buses.find((bus) => bus.id === selectedBusId) ?? buses[0];
   useEffect(() => {
     if (!selectedBusId && selected?.id) selectBus(selected.id);
   }, [selected?.id, selectedBusId]);
-
-  useEffect(() => {
-    if (buses?.length) {
-      buses.forEach((b) => saveLastKnownBusSnapshot(b));
-    }
-  }, [buses]);
-
   return (
     <div className="relative">
       <select
@@ -67,14 +48,11 @@ function BusPicker() {
         data-testid="select-bus-route"
         value={selected?.id ?? ''}
         onChange={(event) => selectBus(event.target.value)}
-        className="h-10 max-w-[210px] appearance-none rounded-full border border-border bg-card pl-3 pr-8 text-xs font-bold text-foreground outline-none transition focus:ring-2 focus:ring-ring"
+        className="h-10 max-w-[190px] appearance-none rounded-full border border-border bg-card pl-3 pr-8 text-xs font-bold text-foreground outline-none transition focus:ring-2 focus:ring-ring"
       >
         {isLoading && <option value="">Loading route…</option>}
-        {effectiveBuses.map((bus) => (
-          <option key={bus.id} value={bus.id}>
-            #{bus.busNumber} · {bus.destination} {!isOnline ? '(Cached)' : ''}
-          </option>
-        ))}
+        {!isLoading && !buses.length && <option value="">No active routes</option>}
+        {buses.map((bus) => <option key={bus.id} value={bus.id}>#{bus.busNumber} · {bus.destination}</option>)}
       </select>
       <ChevronDown className="pointer-events-none absolute right-2.5 top-3 text-muted-foreground" size={14} />
     </div>
@@ -82,31 +60,29 @@ function BusPicker() {
 }
 
 const navItems = [
-  { href: '/dashboard', label: 'Today', icon: Clock3 },
+  { href: '/', label: 'Today', icon: Clock3 },
   { href: '/map', label: 'Live map', icon: Map },
-  { href: '/queue', label: 'Queue', icon: UsersRound },
+  { href: '/driver', label: 'Driver GPS Mode', icon: BusFront },
   { href: '/alerts', label: 'Alerts', icon: Bell },
   { href: '/campus-map', label: 'Campus map', icon: Compass },
   { href: '/navigation', label: 'Navigation', icon: Navigation },
   { href: '/safety', label: 'Safety', icon: ShieldCheck },
   { href: '/public-transport', label: 'Public transport', icon: TrainFront },
-  { href: '/offline', label: 'Offline desk', icon: WifiOff },
   { href: '/ai-agent', label: 'AI mobility desk', icon: Bot },
+  { href: '/admin', label: 'Operations', icon: Wrench },
 ];
 
 export function AcimsLayout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { isOnline, isSimulatedOffline, toggleSimulatedOffline } = useNetworkStatus();
-
   return (
     <div className="noise app-shell">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[238px] flex-col border-r border-border bg-primary px-4 py-5 text-primary-foreground lg:flex">
         <div className="px-3"><RouteMark /></div>
         <div className="mt-12 px-3 text-[10px] font-bold uppercase tracking-[0.22em] text-primary-foreground/45">Your commute</div>
-        <nav className="mt-3 space-y-1">
+       <nav className="mt-3 space-y-1">
           {navItems.map(({ href, label, icon: Icon }) => {
-            const active = href === '/dashboard' ? (location === '/dashboard' || location === '/') : location.startsWith(href);
+            const active = href === '/' ? location === '/' : location.startsWith(href);
             return <Link key={href} href={href} data-testid={`link-nav-${label.toLowerCase().replace(' ', '-')}`} className={`group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold transition ${active ? 'bg-accent text-accent-foreground' : 'text-primary-foreground/65 hover:bg-primary-foreground/10 hover:text-primary-foreground'}`}>
               <Icon size={18} strokeWidth={active ? 2.5 : 2} /><span>{label}</span>{label === 'Alerts' && <UnreadDot />}
             </Link>;
@@ -114,17 +90,8 @@ export function AcimsLayout({ children }: { children: ReactNode }) {
         </nav>
         <div className="mt-auto rounded-2xl border border-primary-foreground/10 bg-primary-foreground/5 p-4">
           <div className="flex items-center gap-2 text-xs font-bold"><Navigation size={14} className="text-accent" /> Campus loop</div>
-          <p className="mt-2 text-[11px] leading-5 text-primary-foreground/55">
-            {isOnline ? 'Live service updates are based on the latest driver signal.' : 'Operating in Offline Mode using cached schedule data.'}
-          </p>
-          <div className="mt-3 flex items-center justify-between border-t border-primary-foreground/10 pt-2 text-[11px]">
-            <Link href="/offline" data-testid="link-sidebar-offline" className="font-extrabold text-accent">
-              Offline Guide →
-            </Link>
-            <Link href="/login" data-testid="link-sidebar-student-session" className="text-primary-foreground/50 hover:text-primary-foreground font-bold">
-              Sign out
-            </Link>
-          </div>
+          <p className="mt-2 text-[11px] leading-5 text-primary-foreground/55">Live service updates are based on the latest driver signal.</p>
+          <Link href="/alerts" data-testid="link-sidebar-alerts" className="mt-3 inline-flex items-center gap-1 text-[11px] font-extrabold text-accent">View service notes <span aria-hidden>→</span></Link>
         </div>
       </aside>
       <div className="lg:pl-[238px]">
@@ -132,61 +99,26 @@ export function AcimsLayout({ children }: { children: ReactNode }) {
           <button type="button" onClick={() => setMobileOpen((value) => !value)} aria-label="Open navigation" data-testid="button-open-navigation" className="rounded-lg p-2 text-muted-foreground hover:bg-muted lg:hidden"><Menu size={20} /></button>
           <div className="lg:hidden"><RouteMark small /></div>
           <div className="ml-auto flex items-center gap-3 sm:gap-4">
-            {/* Online / Offline Status & Interactive Testing Toggle */}
-            {isOnline ? (
-              <button
-                type="button"
-                onClick={toggleSimulatedOffline}
-                title="Service Live"
-                data-testid="toggle-simulate-offline"
-                className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground transition hover:bg-muted"
-              >
-                <span className="pulse-dot h-2 w-2 rounded-full bg-accent-foreground" />
-                <span>Service Live</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={toggleSimulatedOffline}
-                title="Offline Mode"
-                data-testid="toggle-restore-online"
-                className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-extrabold text-amber-800 dark:text-amber-200 transition hover:bg-amber-500/25"
-              >
-                <WifiOff size={13} className="text-amber-600 dark:text-amber-400" />
-                <span>Offline Mode</span>
-              </button>
-            )}
-
+            <Link
+              href="/driver"
+              data-testid="link-header-driver-mode"
+              className="hidden items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-extrabold text-emerald-600 dark:text-emerald-400 transition hover:bg-emerald-500/20 md:inline-flex"
+            >
+              <BusFront size={13} />
+              <span>Driver Terminal (Phone 2)</span>
+            </Link>
             <BusPicker />
             <Link href="/alerts" data-testid="link-header-alerts" aria-label="Open alerts" className="relative rounded-full border border-border bg-card p-2.5 text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground"><Bell size={17} /><UnreadDot /></Link>
             <div className="hidden h-9 w-9 place-items-center rounded-full bg-secondary text-xs font-extrabold text-secondary-foreground sm:grid">MP</div>
           </div>
         </header>
-
-        {/* Global Offline Persistent Status Strip */}
-        {!isOnline && (
-          <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2.5 sm:px-8">
-            <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-100">
-                <WifiOff size={14} className="text-amber-600 dark:text-amber-400" />
-                <span>Offline Mode: Live updates paused. Showing saved mobility information.</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <Link href="/offline" className="font-extrabold text-amber-800 dark:text-amber-200 underline">
-                  Open Offline Desk
-                </Link>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {mobileOpen && <div className="absolute left-3 right-3 top-[80px] z-40 max-h-[calc(100dvh-100px)] overflow-y-auto rounded-2xl border border-border bg-card p-2 soft-shadow lg:hidden">{navItems.map(({ href, label, icon: Icon }) => <Link key={href} href={href} onClick={() => setMobileOpen(false)} data-testid={`link-mobile-${label.toLowerCase().replaceAll(' ', '-')}`} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold hover:bg-muted"><Icon size={17} />{label}</Link>)}</div>}
+         {mobileOpen && <div className="absolute left-3 right-3 top-[80px] z-40 max-h-[calc(100dvh-100px)] overflow-y-auto rounded-2xl border border-border bg-card p-2 soft-shadow lg:hidden">{navItems.map(({ href, label, icon: Icon }) => <Link key={href} href={href} onClick={() => setMobileOpen(false)} data-testid={`link-mobile-${label.toLowerCase().replaceAll(' ', '-')}`} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold hover:bg-muted"><Icon size={17} />{label}</Link>)}</div>}
         <main className="mx-auto max-w-[1440px] px-4 py-7 pb-28 sm:px-8 sm:py-10 lg:pb-12">{children}</main>
       </div>
       <nav className="fixed bottom-0 left-0 right-0 z-30 flex h-[72px] items-center justify-around border-t border-border bg-card/95 px-3 backdrop-blur-lg lg:hidden">
-        {navItems.slice(0, 5).map(({ href, label, icon: Icon }) => {
-          const active = href === '/dashboard' ? (location === '/dashboard' || location === '/') : location.startsWith(href);
-          return <Link key={href} href={href} data-testid={`link-bottom-${label.toLowerCase().replace(' ', '-')}`} className={`flex min-w-[56px] flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-bold transition ${active ? 'text-foreground' : 'text-muted-foreground'}`}><span className={`rounded-xl px-2.5 py-1 ${active ? 'bg-accent text-accent-foreground' : ''}`}><Icon size={16} /></span>{label}</Link>;
+         {navItems.slice(0, 5).map(({ href, label, icon: Icon }) => {
+          const active = href === '/' ? location === '/' : location.startsWith(href);
+          return <Link key={href} href={href} data-testid={`link-bottom-${label.toLowerCase().replace(' ', '-')}`} className={`flex min-w-[56px] flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-bold transition ${active ? 'text-foreground' : 'text-muted-foreground'}`}><span className={`rounded-xl px-3 py-1.5 ${active ? 'bg-accent text-accent-foreground' : ''}`}><Icon size={17} /></span>{label}</Link>;
         })}
       </nav>
     </div>
@@ -209,6 +141,7 @@ export function LoadingRows({ count = 3 }: { count?: number }) {
   return <div className="space-y-3" aria-label="Loading"><span className="sr-only">Loading</span>{Array.from({ length: count }).map((_, index) => <div key={index} className="skeleton h-16 rounded-2xl" />)}</div>;
 }
 
+
 export function formatUpdatedAt(date?: string) {
   if (!date) return 'recently';
   const minutes = Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 60000));
@@ -223,7 +156,8 @@ export function statusLabel(status?: string) {
   return 'On route';
 }
 
-export function BusMiniRoute({ bus }: { bus: Bus }) {
+export function BusMiniRoute({ bus }: { bus?: Bus | null }) {
+  if (!bus) return null;
   return <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground"><span className="rounded-md bg-muted px-2 py-1 text-foreground">#{bus.busNumber}</span><Route size={13} /><span>{bus.origin}</span><span className="text-border">→</span><span>{bus.destination}</span></div>;
 }
 

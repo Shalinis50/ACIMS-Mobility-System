@@ -6,7 +6,6 @@ import {
   UpdateBusLocationBody,
 } from "@workspace/api-zod";
 import {
-  advanceSimulation,
   getBus,
   getBuses,
   getLocation,
@@ -35,7 +34,7 @@ router.get("/buses/:busId/location", (req, res) => {
   const { busId } = GetBusLocationParams.parse(req.params);
   const location = getLocation(busId);
   if (!location) {
-    res.status(404).json({ error: "Bus not found" });
+    res.status(404).json({ error: "Live location unavailable" });
     return;
   }
   const bus = getBus(busId);
@@ -46,8 +45,8 @@ router.get("/buses/:busId/location", (req, res) => {
 router.get("/buses/:busId/stops", (req, res) => {
   const { busId } = ListBusStopsParams.parse(req.params);
   const busStops = getStops(busId);
-  if (!busStops) {
-    res.status(404).json({ error: "Bus not found" });
+  if (!busStops || !busStops.length) {
+    res.status(404).json({ error: "No stops registered for this bus" });
     return;
   }
   res.json(busStops);
@@ -70,12 +69,24 @@ router.post("/bus/location", (req, res) => {
   res.json(bus);
 });
 
-export function startBusSimulation() {
-  return setInterval(() => {
-    const location = advanceSimulation();
-    const bus = getBus(location.busId);
-    if (bus) syncBusNotifications(bus);
-  }, 10_000);
-}
+router.post("/buses/:busId/location", (req, res) => {
+  const { busId } = GetBusLocationParams.parse(req.params);
+  const { latitude, longitude, speed, heading, source } = req.body;
+  const location = updateLocation(
+    busId,
+    { latitude, longitude },
+    source ?? "driver-device",
+    new Date(),
+    speed,
+    heading,
+  );
+  if (!location) {
+    res.status(404).json({ error: "Bus not found" });
+    return;
+  }
+  const bus = getBus(busId);
+  if (bus) syncBusNotifications(bus);
+  res.json(location);
+});
 
 export default router;
