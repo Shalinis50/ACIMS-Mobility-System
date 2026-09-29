@@ -18,6 +18,7 @@ import { ProtectedAdminRoute } from '@/components/protected-admin-route';
 import AiAgentPage from '@/pages/ai-agent';
 import PublicTransportPage from '@/pages/public-transport';
 import OfflinePage from '@/pages/offline';
+import DriverTrackingPage from '@/pages/driver';
 import { AcimsLayout } from '@/components/acims-ui';
 import { isAdminAuthenticated } from '@/lib/adminAuth';
 import {
@@ -44,6 +45,7 @@ function Router() {
         {/* Entry & Authentication Pages (Clean standalone views) */}
         <Route path="/" component={EntryPage} />
         <Route path="/login" component={StudentLoginPage} />
+        <Route path="/driver" component={DriverTrackingPage} />
         <Route path="/admin/login" component={AdminLoginPage} />
         <Route path="/admin" component={ProtectedAdminRoute} />
         <Route path="/admin/*" component={ProtectedAdminRoute} />

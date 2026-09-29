@@ -65,16 +65,24 @@ export default function EntryPage() {
         </div>
       </div>
 
-      {/* Footer with Unobtrusive Staff Portal Link */}
+      {/* Footer with Unobtrusive Staff & Driver Portal Links */}
       <footer className="w-full max-w-md pt-8 text-center space-y-2">
         <div className="text-[11px] text-muted-foreground">
           Protected campus transport environment · Rajalakshmi Engineering College
         </div>
-        <div>
+        <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground/75">
+          <Link
+            href="/driver"
+            data-testid="link-driver-portal"
+            className="hover:text-foreground transition underline underline-offset-4 decoration-border hover:decoration-foreground"
+          >
+            Driver GPS Console (Phone B)
+          </Link>
+          <span>·</span>
           <Link
             href="/admin/login"
             data-testid="link-staff-portal"
-            className="text-xs text-muted-foreground/75 hover:text-foreground transition underline underline-offset-4 decoration-border hover:decoration-foreground"
+            className="hover:text-foreground transition underline underline-offset-4 decoration-border hover:decoration-foreground"
           >
             Staff Portal
           </Link>

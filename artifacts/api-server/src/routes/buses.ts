@@ -82,11 +82,10 @@ router.post("/bus/location", (req, res) => {
 });
 
 export function startBusSimulation() {
-  return setInterval(() => {
-    const location = advanceSimulation();
-    const bus = getBus(location.busId);
-    if (bus) syncBusNotifications(bus);
-  }, 5_000);
+  // Real two-phone architecture: No simulated movement.
+  // Bus location updates only when the real driver phone transmits GPS to /api/bus/location.
+  return null;
 }
 
 export default router;
+

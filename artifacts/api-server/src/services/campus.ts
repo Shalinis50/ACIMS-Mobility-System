@@ -174,5 +174,6 @@ export function calculateNavigation(input: {
     walkingMinutes,
     relevantStop,
     routeCoordinates: walkingResult?.pathWaypoints ?? [start, destination],
+    busOptions: [],
   };
 }
