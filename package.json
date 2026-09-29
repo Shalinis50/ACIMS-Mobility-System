@@ -11,14 +11,16 @@
   ],
   "scripts": {
     "dev": "tsx server.ts",
-    "start": "tsx server.ts",
-    "build": "vite build --config artifacts/acims/vite.config.ts",
+    "start": "node server.ts",
+    "build": "vite build --config artifacts/acims/vite.config.ts && esbuild server-app.ts --bundle --platform=node --format=esm --external:express --external:cors --external:pino --external:pino-http --external:vite --outfile=server.bundle.js",
     "lint": "tsc --noEmit",
     "typecheck:libs": "tsc --build",
     "typecheck": "npm run typecheck:libs"
   },
   "dependencies": {
+    "@radix-ui/react-tooltip": "^1.2.16",
     "cors": "^2.8.5",
+    "esbuild": "^0.28.2",
     "express": "^5.0.0",
     "pino": "^9.6.0",
     "pino-http": "^10.4.0",
