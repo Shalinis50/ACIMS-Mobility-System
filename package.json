@@ -14,9 +14,13 @@
     "start": "node server.ts",
     "transit:sync": "tsx scripts/sync-transit.ts",
     "build": "vite build --config artifacts/acims/vite.config.ts && esbuild server-app.ts --bundle --platform=node --format=esm --external:express --external:cors --external:pino --external:pino-http --external:vite --outfile=server.bundle.js",
+    "gcp-build": "npm run build",
     "lint": "tsc --noEmit",
     "typecheck:libs": "tsc --build",
     "typecheck": "npm run typecheck:libs"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@radix-ui/react-tooltip": "^1.2.16",

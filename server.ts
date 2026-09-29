@@ -6,14 +6,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const bundlePath = path.resolve(__dirname, "server.bundle.js");
 const distPath = path.resolve(__dirname, "artifacts/acims/dist/index.html");
 
-const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.K_SERVICE)) && fs.existsSync(distPath);
+const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION);
 
 async function main() {
-  if (isProduction && fs.existsSync(bundlePath)) {
+  if (fs.existsSync(bundlePath)) {
     const { startServer } = await import("./server.bundle.js");
     await startServer();
   } else {
-    // Development or dynamic Vite server
+    // Development or dynamic Vite server (executed via tsx in dev)
     const { startServer } = await import("./server-app.ts");
     await startServer();
   }
