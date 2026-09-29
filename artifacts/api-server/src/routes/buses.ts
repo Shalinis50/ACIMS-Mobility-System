@@ -6,10 +6,12 @@ import {
   UpdateBusLocationBody,
 } from "@workspace/api-zod";
 import {
+  advanceSimulation,
   getBus,
   getBuses,
   getLocation,
   getStops,
+  getRouteDetails,
   updateLocation,
 } from "../services/busTracking";
 import { syncBusNotifications } from "../services/notificationEngine";
@@ -34,7 +36,7 @@ router.get("/buses/:busId/location", (req, res) => {
   const { busId } = GetBusLocationParams.parse(req.params);
   const location = getLocation(busId);
   if (!location) {
-    res.status(404).json({ error: "Live location unavailable" });
+    res.status(404).json({ error: "Bus not found" });
     return;
   }
   const bus = getBus(busId);
@@ -45,11 +47,21 @@ router.get("/buses/:busId/location", (req, res) => {
 router.get("/buses/:busId/stops", (req, res) => {
   const { busId } = ListBusStopsParams.parse(req.params);
   const busStops = getStops(busId);
-  if (!busStops || !busStops.length) {
-    res.status(404).json({ error: "No stops registered for this bus" });
+  if (!busStops) {
+    res.status(404).json({ error: "Bus not found" });
     return;
   }
   res.json(busStops);
+});
+
+router.get("/buses/:busId/route", (req, res) => {
+  const { busId } = GetBusParams.parse(req.params);
+  const route = getRouteDetails(busId);
+  if (!route) {
+    res.status(404).json({ error: "Route not found" });
+    return;
+  }
+  res.json(route);
 });
 
 router.post("/bus/location", (req, res) => {
@@ -57,7 +69,7 @@ router.post("/bus/location", (req, res) => {
   const location = updateLocation(
     input.busId,
     { latitude: input.latitude, longitude: input.longitude },
-    "driver-device",
+    "driver-gps",
     input.timestamp,
   );
   if (!location) {
@@ -69,24 +81,12 @@ router.post("/bus/location", (req, res) => {
   res.json(bus);
 });
 
-router.post("/buses/:busId/location", (req, res) => {
-  const { busId } = GetBusLocationParams.parse(req.params);
-  const { latitude, longitude, speed, heading, source } = req.body;
-  const location = updateLocation(
-    busId,
-    { latitude, longitude },
-    source ?? "driver-device",
-    new Date(),
-    speed,
-    heading,
-  );
-  if (!location) {
-    res.status(404).json({ error: "Bus not found" });
-    return;
-  }
-  const bus = getBus(busId);
-  if (bus) syncBusNotifications(bus);
-  res.json(location);
-});
+export function startBusSimulation() {
+  return setInterval(() => {
+    const location = advanceSimulation();
+    const bus = getBus(location.busId);
+    if (bus) syncBusNotifications(bus);
+  }, 5_000);
+}
 
 export default router;

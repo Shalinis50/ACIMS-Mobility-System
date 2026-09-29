@@ -22,7 +22,7 @@ export default function AiAgentPage() {
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string; sources?: string[]; time: string }>>([
     {
       role: 'assistant',
-      text: 'Hello! I am your ACIMS Mobility Assistant. I can check live bus locations, delays, walking times, and safety alerts to help guide your commute.',
+      text: 'Hello! I am your ACIMS Mobility Assistant. I can check live bus locations, delays, passenger capacity, walking times, and safety alerts to help guide your commute.',
       sources: ['ACIMS Live Network State'],
       time: 'Just now',
     },
@@ -60,9 +60,7 @@ export default function AiAgentPage() {
   if (contextQuery.isError) return <ErrorState onRetry={() => void contextQuery.refetch()} label="The mobility assistant could not load its current context." />;
   if (!context) return <EmptyState icon={Bot} title="Assistant context unavailable" message="ACIMS cannot answer without a current mobility context." />;
 
-  const primaryBus = Array.isArray(context.buses) ? context.buses[0] : undefined;
-  const destinations = Array.isArray(context.destinations) ? context.destinations : [];
-  const buses = Array.isArray(context.buses) ? context.buses : [];
+  const primaryBus = context.buses[0];
 
   return (
     <div className="page-in">
@@ -72,7 +70,7 @@ export default function AiAgentPage() {
         description="A data-grounded campus mobility companion combining live vehicle telemetry, delays, queues, walking networks, and safety awareness."
         action={
           <div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-[11px] font-bold">
-            <span className="pulse-dot h-2 w-2 rounded-full bg-accent-foreground" /> Grounded in {buses.length} active fleet buses
+            <span className="pulse-dot h-2 w-2 rounded-full bg-accent-foreground" /> Grounded in {context.buses.length} active fleet buses
           </div>
         }
       />
@@ -89,7 +87,7 @@ export default function AiAgentPage() {
               className="mt-3 h-11 w-full rounded-xl border border-input bg-background px-3 text-xs font-bold outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">General campus mobility (No destination selected)</option>
-              {destinations.map((d) => (
+              {context.destinations.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name} ({d.type})
                 </option>
@@ -97,7 +95,7 @@ export default function AiAgentPage() {
             </select>
             {selectedDestinationId && (
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Questions will be answered specifically in relation to {destinations.find((d) => d.id === selectedDestinationId)?.name}.
+                Questions will be answered specifically in relation to {context.destinations.find((d) => d.id === selectedDestinationId)?.name}.
               </p>
             )}
           </div>
@@ -138,7 +136,7 @@ export default function AiAgentPage() {
               <ContextStat
                 icon={UsersRound}
                 label="Queue Outlook"
-                value={context.queue.joined ? `Position #${context.queue.entry?.queuePosition}` : `${context.queue.queueLength ?? 0} in line`}
+                value={context.queue.joined ? `Position #${context.queue.entry?.queuePosition}` : (context.queue.message || 'Queue open')}
               />
               <ContextStat icon={ShieldAlert} label="Safety Notices" value={`${context.safetyAlerts.length} active`} />
               <ContextStat icon={Compass} label="Landmarks" value={`${context.destinations.length} mapped`} />

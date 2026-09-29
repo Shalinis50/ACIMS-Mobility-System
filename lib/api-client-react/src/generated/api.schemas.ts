@@ -50,13 +50,12 @@ export interface BusOccupancyInput {
 export interface Bus {
   id: string;
   busNumber: string;
-  plateNumber?: string;
   origin: string;
   destination: string;
   routeLabel: string;
-  capacity?: number;
-  currentOccupancy?: number;
-  currentLocation?: Coordinate;
+  capacity: number;
+  currentOccupancy: number;
+  currentLocation: Coordinate;
   nextStop: string;
   nextStopId: string;
   etaMinutes: number;

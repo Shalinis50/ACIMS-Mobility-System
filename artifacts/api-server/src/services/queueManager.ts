@@ -9,7 +9,32 @@ export type QueueEntry = {
   status: string;
 };
 
-const entries: QueueEntry[] = [];
+const entries: QueueEntry[] = [
+  {
+    studentId: "student-014",
+    busId: "bus-12",
+    boardingStop: "Tambaram",
+    queuePosition: 1,
+    joinedAt: new Date(Date.now() - 1000 * 60 * 14),
+    status: "waiting",
+  },
+  {
+    studentId: "student-027",
+    busId: "bus-12",
+    boardingStop: "Perungalathur",
+    queuePosition: 2,
+    joinedAt: new Date(Date.now() - 1000 * 60 * 11),
+    status: "waiting",
+  },
+  {
+    studentId: "student-031",
+    busId: "bus-12",
+    boardingStop: "Tambaram",
+    queuePosition: 3,
+    joinedAt: new Date(Date.now() - 1000 * 60 * 7),
+    status: "waiting",
+  },
+];
 
 function entriesForBus(busId: string) {
   return entries.filter((entry) => entry.busId === busId && entry.status === "waiting");
@@ -21,24 +46,27 @@ function resequence(busId: string) {
   });
 }
 
-export function getQueueStatus(bus: Bus, studentId = "student-20418") {
+export function getQueueStatus(bus: Bus, studentId = "demo-student-001") {
   const entry = entries.find(
     (candidate) =>
       candidate.busId === bus.id &&
       candidate.studentId === studentId &&
       candidate.status === "waiting",
   );
-  const queueLength = entriesForBus(bus.id).length;
+  const busEntries = entriesForBus(bus.id);
+  const estimatedAvailabilityMinutes = entry
+    ? Math.max(2, entry.queuePosition * 3)
+    : Math.max(3, (busEntries.length + 1) * 3);
 
   return {
     joined: Boolean(entry),
     entry: entry ? { ...entry } : null,
     busId: bus.id,
-    queueLength,
-    estimatedWaitMinutes: entry ? entry.queuePosition * 3 : 0,
+    capacity: bus.capacity,
+    estimatedAvailabilityMinutes,
     message: entry
-      ? `You are #${entry.queuePosition} in line for boarding at ${entry.boardingStop}.`
-      : "Boarding line is open.",
+      ? `You are #${entry.queuePosition} in line for Bus #${bus.busNumber} at ${entry.boardingStop}.`
+      : `Select your stop to reserve a position in the boarding queue for Bus #${bus.busNumber}.`,
   };
 }
 

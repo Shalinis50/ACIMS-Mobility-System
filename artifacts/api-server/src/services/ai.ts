@@ -15,16 +15,17 @@ export type AiContext = {
 export function getAiContext(): AiContext {
   const buses = getBuses();
   const primaryBus = buses[0] ?? {
-    id: "bus-24",
-    busNumber: "24",
-    plateNumber: "TN-21-BH-4024",
-    origin: "Tambaram Sanatorium / MEPZ",
-    destination: "REC Main Gate / Thandalam",
-    routeLabel: "Route 24 (Tambaram → REC)",
-    nextStop: "Porur Junction",
-    nextStopId: "stop-porur",
-    etaMinutes: 6,
-    status: "Moving",
+    id: "bus-12",
+    busNumber: "12",
+    origin: "Vandalur Transit Hub",
+    destination: "Academic Quad",
+    routeLabel: "Campus Loop A",
+    capacity: 40,
+    currentLocation: { latitude: 12.9161, longitude: 80.1119 },
+    nextStop: "Tambaram Terminal",
+    nextStopId: "tambaram",
+    etaMinutes: 3,
+    status: "On Time",
     updatedAt: new Date(),
   };
 
@@ -156,8 +157,8 @@ export class DeterministicMobilityEngine implements IAiMobilityEngine {
     // Default grounded mobility summary
     const queue = context.queue;
     const queueNote = queue.joined
-      ? `You are at position #${queue.entry?.queuePosition} in line for boarding.`
-      : "Boarding line is open.";
+      ? `You are at position #${queue.entry?.queuePosition} in the boarding queue.`
+      : `Boarding queue is open for Bus #${primaryBus.busNumber}.`;
 
     let answer = `ACIMS live status: Bus #${primaryBus.busNumber} is ${primaryBus.etaMinutes} min from ${primaryBus.nextStop} traveling toward ${primaryBus.destination} (${primaryBus.status}). ${queueNote}`;
     if (targetName) {

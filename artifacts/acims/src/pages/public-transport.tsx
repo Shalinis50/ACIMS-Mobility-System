@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   ArrowRight,
   BusFront,
@@ -10,356 +10,763 @@ import {
   Route as RouteIcon,
   Search,
   TrainFront,
-  Zap,
+  LocateFixed,
+  AlertTriangle,
+  RefreshCw,
+  Sparkles,
+  Database,
+  Building2,
+  CheckCircle2,
+  Calendar,
+  Layers,
+  HelpCircle,
 } from 'lucide-react';
-import {
-  getListBusesQueryKey,
-  getListTransportProvidersQueryKey,
-  useListBuses,
-  useListTransportProviders,
-  useSearchTransport,
-} from '@workspace/api-client-react';
-import type { PublicTransportJourney } from '@workspace/api-client-react';
-import { EmptyState, ErrorState, LoadingRows, PageHeading } from '@/components/acims-ui';
+import { PageHeading } from '@/components/acims-ui';
+import { useNetworkStatus } from '@/hooks/use-network';
+
+interface TransitJourneyOption {
+  agency: string;
+  agencyId: string;
+  routeNumber: string;
+  routeName: string;
+  routeType: string;
+  origin: string;
+  destination: string;
+  boardingStop: string;
+  boardingTime: string;
+  alightingStop: string;
+  alightingTime: string;
+  durationMinutes: number;
+  stopsCount: number;
+  status: 'Scheduled';
+  dataSource: string;
+}
+
+interface TransitStop {
+  id: string;
+  agency_id: string;
+  stop_id: string;
+  stop_name: string;
+  latitude: number;
+  longitude: number;
+  agency_name?: string;
+  distanceMeters?: number;
+}
+
+interface TransitRoute {
+  id: string;
+  agency_id: string;
+  route_id: string;
+  route_short_name: string;
+  route_long_name: string;
+  route_type: number;
+  route_color: string;
+  origin: string;
+  destination: string;
+  source: string;
+  agency_name?: string;
+}
+
+interface MissedBusAlternative {
+  category: 'MTC Bus' | 'Chennai Metro' | 'Suburban Rail';
+  stopName: string;
+  distanceMeters: number;
+  walkingMinutes: number;
+  agency: string;
+  routes: string[];
+  scheduledNextDeparture: string;
+  status: 'Scheduled';
+  source: string;
+}
 
 const PRESETS = [
-  { start: 'College', destination: 'Tambaram', label: 'College → Tambaram' },
-  { start: 'College', destination: 'Chennai Central', label: 'College → Chennai Central' },
-  { start: 'College', destination: 'Airport Metro', label: 'College → Airport Metro' },
-  { start: 'Student Center', destination: 'Perungalathur', label: 'Student Center → Perungalathur' },
+  { start: 'Tambaram', destination: 'Chennai Beach', label: 'Tambaram ↔ Chennai Beach (Suburban EMU)' },
+  { start: 'Airport', destination: 'Wimco Nagar', label: 'Airport ↔ Wimco Nagar (CMRL Blue Line)' },
+  { start: 'Tambaram', destination: 'Broadway', label: 'Tambaram ↔ Broadway (MTC 500 / 29A)' },
+  { start: 'Thandalam', destination: 'Poonamallee', label: 'Thandalam (REC) ↔ Poonamallee (MTC Bus)' },
 ];
 
 export default function PublicTransportPage() {
-  const providersQuery = useListTransportProviders({ query: { queryKey: getListTransportProvidersQueryKey() } });
-  const busesQuery = useListBuses({ query: { queryKey: getListBusesQueryKey(), refetchInterval: 15000 } });
-  const searchMutation = useSearchTransport();
+  const { isOnline } = useNetworkStatus();
 
-  const [start, setStart] = useState('College');
-  const [destination, setDestination] = useState('Tambaram');
-  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  // Active View Tab
+  const [activeTab, setActiveTab] = useState<'search' | 'nearby' | 'routes' | 'missed_bus' | 'provenance'>('search');
 
-  const providers = Array.isArray(providersQuery.data) ? providersQuery.data : [];
-  const journeys = Array.isArray(searchMutation.data) ? searchMutation.data : [];
+  // Journey Search State
+  const [start, setStart] = useState('Tambaram');
+  const [destination, setDestination] = useState('Chennai Beach');
+  const [agencyFilter, setAgencyFilter] = useState('ALL');
+  const [journeys, setJourneys] = useState<TransitJourneyOption[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
-  const handleSearch = (customStart?: string, customDest?: string) => {
-    const s = (customStart ?? start).trim();
-    const d = (customDest ?? destination).trim();
-    if (s && d) {
-      searchMutation.mutate({ data: { start: s, destination: d } });
-    }
-  };
+  // Nearby Stops State
+  const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [nearbyStops, setNearbyStops] = useState<TransitStop[]>([]);
+  const [isLocating, setIsLocating] = useState(false);
+  const [locatingError, setLocatingError] = useState<string | null>(null);
 
-  // Run initial search for College -> Tambaram on mount
+  // Route Directory State
+  const [routeSearchQuery, setRouteSearchQuery] = useState('29A');
+  const [matchingRoutes, setMatchingRoutes] = useState<TransitRoute[]>([]);
+  const [isRouteSearching, setIsRouteSearching] = useState(false);
+
+  // Missed Bus Assistant State
+  const [missedBusAlternatives, setMissedBusAlternatives] = useState<MissedBusAlternative[]>([]);
+  const [isCheckingMissedBus, setIsCheckingMissedBus] = useState(false);
+
+  // Dataset Provenance
+  const [syncStatus, setSyncStatus] = useState<any>(null);
+
+  // Load sync status on mount
   useEffect(() => {
-    if (!searchMutation.data && !searchMutation.isPending) {
-      handleSearch('College', 'Tambaram');
-    }
+    fetch('/api/transit/sync-status')
+      .then((r) => r.json())
+      .then((data) => setSyncStatus(data))
+      .catch(() => {});
   }, []);
 
-  const selectPreset = (preset: typeof PRESETS[0]) => {
-    setStart(preset.start);
-    setDestination(preset.destination);
-    handleSearch(preset.start, preset.destination);
-  };
-
-  const filteredJourneys = journeys.filter((journey) => {
-    if (categoryFilter === 'ALL') return true;
-    return (journey.transportType || '').toLowerCase() === categoryFilter.toLowerCase();
-  });
-
-  const getTransportIcon = (type: string) => {
-    switch (type.toLowerCase()) {
-      case 'college bus':
-      case 'public bus':
-        return BusFront;
-      case 'train':
-      case 'metro':
-        return TrainFront;
-      case 'walking':
-        return Footprints;
-      default:
-        return RouteIcon;
+  // Perform Journey Search
+  const handleJourneySearch = async (fromText = start, toText = destination) => {
+    if (!fromText.trim() || !toText.trim()) return;
+    setIsSearching(true);
+    setSearchError(null);
+    try {
+      const url = `/api/transit/search?from=${encodeURIComponent(fromText.trim())}&to=${encodeURIComponent(toText.trim())}&agencyId=${agencyFilter}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setJourneys(data);
+      } else {
+        setSearchError('No direct public transit options found for this corridor.');
+      }
+    } catch {
+      setSearchError('Unable to connect to transit database.');
+    } finally {
+      setIsSearching(false);
     }
   };
 
-  const loading = providersQuery.isLoading || busesQuery.isLoading;
+  // Perform Route Search in Directory
+  const handleRouteSearch = async (query = routeSearchQuery) => {
+    if (!query.trim()) return;
+    setIsRouteSearching(true);
+    try {
+      const res = await fetch(`/api/transit/routes?query=${encodeURIComponent(query.trim())}&limit=25`);
+      if (res.ok) {
+        const data = await res.json();
+        setMatchingRoutes(data);
+      }
+    } finally {
+      setIsRouteSearching(false);
+    }
+  };
 
-  if (loading) return <LoadingRows count={5} />;
-  if (providersQuery.isError || busesQuery.isError) {
-    return (
-      <ErrorState
-        onRetry={() => {
-          void providersQuery.refetch();
-          void busesQuery.refetch();
-        }}
-        label="Transport provider feeds could not be loaded."
-      />
+  // Trigger Nearby Search based on Coordinates
+  const fetchNearby = async (lat: number, lon: number) => {
+    setIsLocating(true);
+    setLocatingError(null);
+    try {
+      const res = await fetch(`/api/transit/nearby?lat=${lat}&lon=${lon}&radiusKm=3.5`);
+      if (res.ok) {
+        const data = await res.json();
+        setNearbyStops(data);
+      }
+    } catch {
+      setLocatingError('Failed to fetch nearby transit stops.');
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
+  // Acquire Browser GPS
+  const handleLocateMe = () => {
+    if (!navigator.geolocation) {
+      setLocatingError('Browser does not support geolocation.');
+      return;
+    }
+    setIsLocating(true);
+    setLocatingError('Acquiring real device GPS…');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        setUserCoords(coords);
+        setLocatingError(null);
+        void fetchNearby(coords.lat, coords.lon);
+      },
+      (err) => {
+        // Fallback to REC campus coordinates
+        const fallback = { lat: 13.0084, lon: 80.0033 };
+        setUserCoords(fallback);
+        setLocatingError(`Device GPS unavailable (${err.message}). Using REC Thandalam campus coordinates.`);
+        void fetchNearby(fallback.lat, fallback.lon);
+      },
+      { timeout: 7000 }
     );
-  }
+  };
+
+  // Trigger Missed Bus Assistant
+  const handleMissedBusCheck = async () => {
+    setIsCheckingMissedBus(true);
+    const lat = userCoords?.lat || 13.0084; // REC Thandalam
+    const lon = userCoords?.lon || 80.0033;
+    try {
+      const res = await fetch(`/api/transit/missed-bus-alternatives?lat=${lat}&lon=${lon}`);
+      if (res.ok) {
+        const data = await res.json();
+        setMissedBusAlternatives(data);
+      }
+    } finally {
+      setIsCheckingMissedBus(false);
+    }
+  };
+
+  // Run initial searches on mount
+  useEffect(() => {
+    handleJourneySearch('Tambaram', 'Chennai Beach');
+    handleRouteSearch('29A');
+    handleLocateMe();
+  }, []);
 
   return (
-    <div className="page-in">
+    <div className="page-in space-y-6">
       <PageHeading
-        eyebrow="Multi-modal public transit integration"
-        title="Compare the complete journey."
-        description="Connect ACIMS college buses with municipal buses, suburban rail, metro lines, and walking corridors across the regional network."
+        eyebrow="Chennai Public Transport Layer"
+        title="Real Chennai Public Transit"
+        description="Authoritative schedules and network data for Metropolitan Transport Corporation (MTC) buses, Chennai Metro (CMRL), and Southern Railway suburban rail."
         action={
-          <div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-[11px] font-bold">
-            <Radio size={13} className="text-accent-foreground" />
-            <span>5 Transit Adapters Active</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
+              <Database size={13} />
+              <span>4,627 Real Routes Loaded</span>
+            </span>
+            <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+              <CheckCircle2 size={13} />
+              <span>CUMTA / MTC GTFS Verified</span>
+            </span>
           </div>
         }
       />
 
-      {/* SEARCH / TRIP INPUT SECTION */}
-      <section className="rounded-[28px] border border-border bg-card p-5 sm:p-7 shadow-sm">
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <span className="mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground mr-1">
-            Quick Scenarios:
-          </span>
-          {PRESETS.map((p) => (
+      {/* Navigation Mode Tabs */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
+        {[
+          { id: 'search', label: 'Journey Search & Timetables', icon: Search },
+          { id: 'nearby', label: 'Nearby Real Stops & Stations', icon: LocateFixed },
+          { id: 'routes', label: 'MTC & Metro Route Directory', icon: RouteIcon },
+          { id: 'missed_bus', label: 'Missed Bus Assistant', icon: AlertTriangle },
+          { id: 'provenance', label: 'Data Provenance & Source', icon: Database },
+        ].map((tab) => {
+          const Icon = tab.icon;
+          return (
             <button
-              key={p.label}
+              key={tab.id}
               type="button"
-              data-testid={`preset-transit-${p.destination.toLowerCase()}`}
-              onClick={() => selectPreset(p)}
-              className={`rounded-full border px-3 py-1.5 text-xs font-extrabold transition ${
-                start === p.start && destination === p.destination
-                  ? 'border-primary bg-primary text-primary-foreground shadow-sm'
-                  : 'border-border bg-background hover:bg-muted text-foreground'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
-          <label className="text-xs font-extrabold">
-            Origin / Starting Point
-            <input
-              data-testid="input-transport-start"
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
-              placeholder="e.g. College Main Entrance"
-              className="mt-2 h-12 w-full rounded-xl border border-input bg-background px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-ring"
-            />
-          </label>
-          <label className="text-xs font-extrabold">
-            Target Destination
-            <input
-              data-testid="input-transport-destination"
-              value={destination}
-              onChange={(e) => setDestination(e.target.value)}
-              placeholder="e.g. Tambaram Bus Stop"
-              className="mt-2 h-12 w-full rounded-xl border border-input bg-background px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-ring"
-            />
-          </label>
-          <button
-            type="button"
-            data-testid="button-search-transport"
-            onClick={() => handleSearch()}
-            disabled={searchMutation.isPending || !start.trim() || !destination.trim()}
-            className="flex h-12 items-center justify-center gap-2 rounded-xl bg-accent px-6 text-sm font-extrabold text-accent-foreground transition hover:-translate-y-0.5 disabled:opacity-50"
-          >
-            {searchMutation.isPending ? 'Searching transit adapters…' : (
-              <>
-                <Search size={16} /> Find Travel Options
-              </>
-            )}
-          </button>
-        </div>
-
-        {searchMutation.isError && (
-          <p className="mt-3 text-xs font-bold text-destructive">
-            The external transport provider search failed. Active college buses are still available below.
-          </p>
-        )}
-      </section>
-
-      {/* CATEGORY FILTER BAR */}
-      {journeys.length > 0 && (
-        <div className="mt-6 flex flex-wrap items-center gap-2">
-          <span className="mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground mr-1">Filter mode:</span>
-          {['ALL', 'College bus', 'Public bus', 'Train', 'Metro', 'Walking'].map((cat) => (
-            <button
-              key={cat}
-              type="button"
-              data-testid={`filter-mode-${cat.toLowerCase().replaceAll(' ', '-')}`}
-              onClick={() => setCategoryFilter(cat)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-extrabold transition ${
-                categoryFilter === cat
+              onClick={() => {
+                setActiveTab(tab.id as any);
+                if (tab.id === 'missed_bus' && missedBusAlternatives.length === 0) {
+                  handleMissedBusCheck();
+                }
+              }}
+              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-extrabold transition ${
+                activeTab === tab.id
                   ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'bg-card border border-border text-muted-foreground hover:bg-muted hover:text-foreground'
+                  : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
             >
-              {cat === 'ALL' ? 'All Modes (Combined)' : cat}
+              <Icon size={14} />
+              <span>{tab.label}</span>
             </button>
-          ))}
+          );
+        })}
+      </div>
+
+      {/* --------------------------------------------------------------------- */}
+      {/* TAB 1: JOURNEY SEARCH & REAL SCHEDULES */}
+      {/* --------------------------------------------------------------------- */}
+      {activeTab === 'search' && (
+        <div className="space-y-6">
+          {/* Quick Presets */}
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-4">
+            <span className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground mr-1">
+              Common Corridors:
+            </span>
+            {PRESETS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => {
+                  setStart(p.start);
+                  setDestination(p.destination);
+                  handleJourneySearch(p.start, p.destination);
+                }}
+                className="rounded-lg border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-muted"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Search Inputs */}
+          <section className="rounded-[28px] border border-border bg-card p-6 shadow-sm">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="mono block text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                  From (Origin)
+                </label>
+                <input
+                  type="text"
+                  value={start}
+                  onChange={(e) => setStart(e.target.value)}
+                  placeholder="e.g. Tambaram, Broadway, Thandalam"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-input bg-background px-3.5 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              <div>
+                <label className="mono block text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                  To (Destination)
+                </label>
+                <input
+                  type="text"
+                  value={destination}
+                  onChange={(e) => setDestination(e.target.value)}
+                  placeholder="e.g. Chennai Beach, Poonamallee, Central"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-input bg-background px-3.5 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              <div>
+                <label className="mono block text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                  Agency Filter
+                </label>
+                <select
+                  value={agencyFilter}
+                  onChange={(e) => setAgencyFilter(e.target.value)}
+                  className="mt-1.5 h-11 w-full rounded-xl border border-input bg-background px-3 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="ALL">All Chennai Public Transit</option>
+                  <option value="MTC">MTC Buses Only</option>
+                  <option value="CMRL">Chennai Metro (CMRL)</option>
+                  <option value="CSR">Southern Railway Suburban & MRTS</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
+              <span className="text-[11px] text-muted-foreground">
+                Retrieving real scheduled timings from the CUMTA GTFS database.
+              </span>
+              <button
+                type="button"
+                onClick={() => handleJourneySearch(start, destination)}
+                disabled={isSearching}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-50"
+              >
+                <Search size={14} />
+                <span>{isSearching ? 'Searching Database…' : 'Find Real Public Transit'}</span>
+              </button>
+            </div>
+          </section>
+
+          {/* Results Display */}
+          {isSearching ? (
+            <div className="rounded-2xl border border-border bg-card p-12 text-center text-sm font-bold text-muted-foreground">
+              Querying Chennai transit schedule database…
+            </div>
+          ) : journeys.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-8 text-center">
+              <BusFront size={28} className="mx-auto text-muted-foreground" />
+              <div className="mt-2 text-sm font-bold text-foreground">No direct schedule found for this corridor</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Try searching for main hubs such as &ldquo;Tambaram&rdquo;, &ldquo;Beach&rdquo;, &ldquo;Broadway&rdquo;, or &ldquo;Poonamallee&rdquo;.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {journeys.map((option, idx) => (
+                <article
+                  key={`${option.routeNumber}-${idx}`}
+                  className="flex flex-col justify-between rounded-2xl border border-border bg-card p-5 shadow-sm transition hover:border-primary/40"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl font-black text-white ${
+                          option.routeType === 'Metro'
+                            ? 'bg-emerald-600'
+                            : option.routeType === 'Suburban Rail'
+                            ? 'bg-rose-600'
+                            : 'bg-primary'
+                        }`}>
+                          {option.routeType === 'Metro' || option.routeType === 'Suburban Rail' ? (
+                            <TrainFront size={20} />
+                          ) : (
+                            <BusFront size={20} />
+                          )}
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-base font-black text-foreground">
+                              {option.routeNumber}
+                            </span>
+                            <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-extrabold text-secondary-foreground">
+                              {option.routeType}
+                            </span>
+                          </div>
+                          <div className="text-xs font-semibold text-muted-foreground truncate max-w-[220px]">
+                            {option.agency}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Explicit Scheduled Badge (Rule 8: Never fake live data) */}
+                      <span className="flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-[10px] font-black text-blue-700 dark:text-blue-300">
+                        <Calendar size={11} />
+                        <span>Scheduled Timetable</span>
+                      </span>
+                    </div>
+
+                    {/* Route Corridor */}
+                    <div className="mt-4 rounded-xl bg-muted/40 p-3 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between font-bold text-foreground">
+                        <span className="truncate">{option.boardingStop}</span>
+                        <ArrowRight size={13} className="text-muted-foreground shrink-0 mx-2" />
+                        <span className="truncate">{option.alightingStop}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>Dep: <strong className="text-foreground">{option.boardingTime}</strong></span>
+                        <span>Arr: <strong className="text-foreground">{option.alightingTime}</strong></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between border-t border-border pt-3 text-[11px] text-muted-foreground">
+                    <span>{option.stopsCount} intermediate stops · ~{option.durationMinutes} min trip</span>
+                    <span className="mono text-[10px] text-slate-500 font-semibold">{option.dataSource}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* CONTENT GRID */}
-      <section className="mt-5 grid gap-5 xl:grid-cols-[.78fr_1.22fr]">
-        {/* Left: Providers Status & Architecture */}
+      {/* --------------------------------------------------------------------- */}
+      {/* TAB 2: NEARBY REAL STOPS & STATIONS */}
+      {/* --------------------------------------------------------------------- */}
+      {activeTab === 'nearby' && (
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-5">
+            <div>
+              <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                Geographic Proximity Engine
+              </div>
+              <h3 className="mt-0.5 text-lg font-black text-foreground">
+                Real Stops Near You ({nearbyStops.length})
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Calculated using true spherical haversine distance from your GPS coordinates to actual public transit nodes.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleLocateMe}
+              disabled={isLocating}
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-extrabold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            >
+              <LocateFixed size={14} className={isLocating ? 'animate-pulse' : ''} />
+              <span>{isLocating ? 'Acquiring GPS…' : 'Update My Location'}</span>
+            </button>
+          </div>
+
+          {locatingError && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
+              {locatingError}
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {nearbyStops.map((stop) => {
+              const isMetro = stop.agency_id === 'CMRL';
+              const isRail = stop.agency_id === 'CSR';
+              const walkingMins = Math.max(1, Math.round((stop.distanceMeters || 100) / 80));
+
+              return (
+                <div key={stop.id} className="rounded-2xl border border-border bg-card p-4 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-black text-white ${
+                        isMetro ? 'bg-emerald-600' : isRail ? 'bg-rose-600' : 'bg-primary'
+                      }`}>
+                        {isMetro ? 'Metro Station' : isRail ? 'Suburban Station' : 'MTC Bus Stop'}
+                      </span>
+                      <span className="mono text-xs font-black text-primary dark:text-accent">
+                        {stop.distanceMeters}m
+                      </span>
+                    </div>
+
+                    <h4 className="mt-2 text-sm font-black text-foreground">
+                      {stop.stop_name}
+                    </h4>
+                    <div className="text-[11px] text-muted-foreground">
+                      {stop.agency_name}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between border-t border-border/80 pt-2 text-[11px] text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Footprints size={12} className="text-primary" />
+                      <span>~{walkingMins} min walk</span>
+                    </span>
+                    <span className="mono text-[10px]">
+                      {stop.latitude.toFixed(4)}, {stop.longitude.toFixed(4)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* TAB 3: MTC & METRO ROUTE DIRECTORY */}
+      {/* --------------------------------------------------------------------- */}
+      {activeTab === 'routes' && (
         <div className="space-y-5">
           <div className="rounded-[28px] border border-border bg-card p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <div className="mono text-[10px] uppercase tracking-[.18em] text-muted-foreground">Provider Architecture</div>
-                <h2 className="mt-1 text-xl font-extrabold">Transit Adapters</h2>
+                <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                  Official Transit Feed Explorer
+                </div>
+                <h3 className="mt-0.5 text-lg font-black text-foreground">
+                  Browse 4,627 Real Routes
+                </h3>
               </div>
-              <Radio size={18} className="text-accent-foreground" />
             </div>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              Modular adapter pipeline (<span className="font-mono text-[11px]">IPublicTransportProvider</span>) allows adding external transit APIs without altering frontend logic.
-            </p>
 
-            <div className="mt-4 space-y-2.5">
-              {providers.length ? (
-                providers.map((provider) => (
-                  <div key={provider.id} data-testid={`row-provider-${provider.id}`} className="rounded-xl border border-border bg-muted/40 p-3.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="text-xs font-extrabold">{provider.name}</div>
-                        <div className="mono text-[10px] text-muted-foreground mt-0.5">{provider.category}</div>
-                      </div>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
-                          provider.status === 'live'
-                            ? 'bg-secondary text-secondary-foreground'
-                            : 'bg-card border border-border text-muted-foreground'
-                        }`}
-                      >
-                        {provider.status.toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="mt-2 text-[10px] font-bold">
-                      <span
-                        className={`rounded px-1.5 py-0.5 ${
-                          (provider.dataLabel || '').includes('REAL')
-                            ? 'bg-accent/20 text-accent-foreground'
-                            : 'bg-destructive/10 text-destructive'
-                        }`}
-                      >
-                        {provider.dataLabel || 'TRANSIT FEED'}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <EmptyState icon={Radio} title="No providers registered" message="No transport providers are reporting." />
-              )}
+            <div className="mt-4 flex gap-2">
+              <input
+                type="text"
+                value={routeSearchQuery}
+                onChange={(e) => setRouteSearchQuery(e.target.value)}
+                placeholder="Search route number: 29A, 500, 55K, Blue Line, MSB-TBM…"
+                className="h-11 flex-1 rounded-xl border border-input bg-background px-3.5 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <button
+                type="button"
+                onClick={() => handleRouteSearch(routeSearchQuery)}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground hover:opacity-90"
+              >
+                <Search size={14} /> Search
+              </button>
             </div>
           </div>
 
-          <div className="rounded-[28px] bg-secondary/50 border border-border p-5 text-xs text-muted-foreground space-y-2">
-            <div className="flex items-center gap-1.5 font-extrabold text-foreground">
-              <Info size={14} className="text-primary" /> Notice on External Data
-            </div>
-            <p className="leading-5">
-              In accordance with ACIMS guidelines, external metropolitan bus, suburban train, and metro data represent published regional schedules and corridors, distinguishing them from verified live GPS feeds of the ACIMS college bus fleet.
-            </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {matchingRoutes.map((route) => (
+              <div key={route.id} className="rounded-2xl border border-border bg-card p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-base font-black text-foreground">
+                      {route.route_short_name}
+                    </span>
+                    <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[10px] font-black text-secondary-foreground">
+                      {route.agency_id}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs font-bold text-muted-foreground">
+                    {route.route_long_name}
+                  </div>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between border-t border-border pt-2 text-[10px] text-muted-foreground">
+                  <span>From: {route.origin || 'Terminal'}</span>
+                  <span>To: {route.destination || 'Destination'}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
+      )}
 
-        {/* Right: Journey Options Comparison */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="mono text-[10px] uppercase tracking-[.18em] text-muted-foreground">Options Found</div>
-              <h2 className="mt-1 text-2xl font-extrabold">Available Mobility Routes</h2>
+      {/* --------------------------------------------------------------------- */}
+      {/* TAB 4: MISSED BUS ASSISTANT (Rule 11) */}
+      {/* --------------------------------------------------------------------- */}
+      {activeTab === 'missed_bus' && (
+        <div className="space-y-5">
+          <div className="rounded-[28px] border-2 border-amber-500/30 bg-amber-500/5 p-6 shadow-sm">
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-amber-500 text-white shrink-0">
+                <AlertTriangle size={22} />
+              </span>
+              <div>
+                <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-amber-800 dark:text-amber-300">
+                  ACIMS Missed Bus Assistant
+                </div>
+                <h3 className="mt-0.5 text-xl font-black text-foreground">
+                  Your ACIMS College Bus Has Departed
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  If you missed your assigned college bus, ACIMS automatically identifies real nearby public transport alternatives (MTC buses, CMRL metro stations, or suburban EMU trains) based on your live GPS location.
+                </p>
+              </div>
             </div>
-            <span className="rounded-full bg-secondary px-3 py-1 text-xs font-extrabold">
-              {filteredJourneys.length} option{filteredJourneys.length === 1 ? '' : 's'}
-            </span>
+
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleMissedBusCheck}
+                disabled={isCheckingMissedBus}
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={isCheckingMissedBus ? 'animate-spin' : ''} />
+                <span>{isCheckingMissedBus ? 'Scanning Nearby Transit…' : 'Scan Real Alternatives Near Me'}</span>
+              </button>
+            </div>
           </div>
 
-          {filteredJourneys.length > 0 ? (
-            <div className="space-y-3">
-              {filteredJourneys.map((journey) => {
-                const Icon = getTransportIcon(journey.transportType || '');
-                const isReal = (journey.dataLabel || '').includes('REAL');
+          <div className="space-y-3">
+            <h4 className="mono text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
+              Nearby Public Transport Alternatives ({missedBusAlternatives.length})
+            </h4>
 
-                return (
-                  <div
-                    key={journey.id}
-                    data-testid={`card-external-journey-${journey.id}`}
-                    className={`rounded-[24px] border p-5 transition shadow-sm ${
-                      isReal ? 'border-primary/50 bg-card hover:border-primary' : 'border-border bg-card hover:border-muted-foreground/40'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`grid h-11 w-11 place-items-center rounded-2xl ${
-                            isReal ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
-                          }`}
-                        >
-                          <Icon size={20} />
+            {missedBusAlternatives.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-xs font-semibold text-muted-foreground">
+                No public-transport alternative found in the available data.
+              </div>
+            ) : (
+              missedBusAlternatives.map((alt, idx) => (
+                <div
+                  key={`${alt.stopName}-${idx}`}
+                  className="rounded-2xl border border-border bg-card p-5 shadow-sm flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl font-black text-white ${
+                      alt.category === 'Chennai Metro'
+                        ? 'bg-emerald-600'
+                        : alt.category === 'Suburban Rail'
+                        ? 'bg-rose-600'
+                        : 'bg-primary'
+                    }`}>
+                      {alt.category === 'Chennai Metro' || alt.category === 'Suburban Rail' ? (
+                        <TrainFront size={20} />
+                      ) : (
+                        <BusFront size={20} />
+                      )}
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-black text-foreground">
+                          {alt.category}: {alt.stopName}
                         </span>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-extrabold uppercase tracking-wide text-primary">
-                              {journey.transportType}
-                            </span>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
-                                isReal
-                                  ? 'bg-secondary text-secondary-foreground'
-                                  : 'bg-destructive/15 text-destructive'
-                              }`}
-                            >
-                              {journey.dataLabel || 'TRANSIT SCHEDULE'}
-                            </span>
-                          </div>
-                          <h3 className="mt-1 text-sm font-extrabold">{journey.route}</h3>
-                        </div>
-                      </div>
-
-                      <div className="text-right shrink-0">
-                        <div className="text-base font-extrabold text-foreground">{journey.durationMinutes} min</div>
-                        <div className="text-[10px] text-muted-foreground">{journey.transfers} transfer{journey.transfers === 1 ? '' : 's'}</div>
-                      </div>
-                    </div>
-
-                    {/* Departure & Arrival details */}
-                    <div className="mt-4 grid gap-2 sm:grid-cols-2 rounded-xl bg-muted/50 p-3 text-xs">
-                      <div>
-                        <span className="mono text-[9px] uppercase tracking-wider text-muted-foreground block">Departure</span>
-                        <span className="font-extrabold">{journey.departure}</span>
-                      </div>
-                      <div>
-                        <span className="mono text-[9px] uppercase tracking-wider text-muted-foreground block">Arrival / Destination</span>
-                        <span className="font-extrabold">{journey.arrival}</span>
-                      </div>
-                    </div>
-
-                    {/* Metadata Footer */}
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-muted-foreground pt-2 border-t border-border/40">
-                      <div className="flex items-center gap-3">
-                        <span className="inline-flex items-center gap-1">
-                          <Footprints size={13} /> {(journey.walkingDistanceKm ?? 0).toFixed(1)} km walk
+                        <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-extrabold">
+                          {alt.distanceMeters}m (~{alt.walkingMinutes} min walk)
                         </span>
-                        <span>·</span>
-                        <span>{journey.availability}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <span className="text-[11px] text-muted-foreground mr-1">Routes:</span>
+                        {alt.routes.map((r) => (
+                          <span key={r} className="rounded-md bg-muted px-2 py-0.5 text-[10px] font-black text-foreground">
+                            {r}
+                          </span>
+                        ))}
                       </div>
                     </div>
                   </div>
-                );
-              })}
+
+                  <div className="text-right sm:border-l sm:border-border sm:pl-5">
+                    <div className="mono text-[10px] uppercase text-muted-foreground">Frequency</div>
+                    <div className="text-xs font-black text-primary dark:text-accent">
+                      {alt.scheduledNextDeparture}
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-semibold">{alt.status}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* TAB 5: DATA PROVENANCE & SOURCE AUDIT (Rule 16) */}
+      {/* --------------------------------------------------------------------- */}
+      {activeTab === 'provenance' && (
+        <div className="space-y-5">
+          <div className="rounded-[28px] border border-border bg-card p-6 shadow-sm">
+            <div className="flex items-center gap-2 text-primary font-black text-base">
+              <Database size={20} />
+              <span>Authoritative Data Provenance Log</span>
             </div>
-          ) : (
-            <div className="rounded-[28px] border border-dashed border-border bg-card p-8 text-center">
-              <RouteIcon size={28} className="mx-auto text-muted-foreground" />
-              <p className="mt-3 text-base font-extrabold">No transit options for this category</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Try switching the mode filter above to &quot;All Modes&quot; or enter another origin/destination.
+            <p className="mt-1 text-xs text-muted-foreground">
+              Every public transport schedule in ACIMS is traceable to official state and municipal open data feeds.
+            </p>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-xl border border-border bg-muted/30 p-4">
+                <div className="mono text-[10px] uppercase font-bold text-muted-foreground">MTC Buses</div>
+                <div className="mt-1 text-base font-black text-foreground">Metropolitan Transport Corp</div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  4,611 routes and 5,580 real stops with verified geographic coordinates across Chennai & Thandalam.
+                </div>
+                <a
+                  href="https://mtcbus.tn.gov.in/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-flex items-center gap-1 text-[11px] font-extrabold text-primary hover:underline"
+                >
+                  mtcbus.tn.gov.in <ExternalLink size={11} />
+                </a>
+              </div>
+
+              <div className="rounded-xl border border-border bg-muted/30 p-4">
+                <div className="mono text-[10px] uppercase font-bold text-muted-foreground">Chennai Metro</div>
+                <div className="mt-1 text-base font-black text-foreground">CMRL Official GTFS</div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  Blue & Green Lines (44 stations, timetable frequencies, first/last train service).
+                </div>
+                <a
+                  href="https://chennaimetrorail.org/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-flex items-center gap-1 text-[11px] font-extrabold text-primary hover:underline"
+                >
+                  chennaimetrorail.org <ExternalLink size={11} />
+                </a>
+              </div>
+
+              <div className="rounded-xl border border-border bg-muted/30 p-4">
+                <div className="mono text-[10px] uppercase font-bold text-muted-foreground">Suburban & MRTS</div>
+                <div className="mt-1 text-base font-black text-foreground">Southern Railway (CSR)</div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  13 lines connecting Chennai Beach, Tambaram, Chengalpattu, Central, and Velachery.
+                </div>
+                <a
+                  href="http://www.sr.indianrailways.gov.in"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-flex items-center gap-1 text-[11px] font-extrabold text-primary hover:underline"
+                >
+                  sr.indianrailways.gov.in <ExternalLink size={11} />
+                </a>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl bg-secondary/30 p-4 text-xs space-y-2">
+              <div className="font-extrabold text-foreground flex items-center gap-2">
+                <Info size={14} className="text-primary" />
+                <span>Scheduled Timetables vs. Live Vehicle Telemetry</span>
+              </div>
+              <p className="text-[11px] leading-5 text-muted-foreground">
+                All external transit schedules from CUMTA GTFS are displayed strictly as <strong>Scheduled</strong>. ACIMS does not fabricate live GPS vehicle positions for public MTC buses. In contrast, ACIMS College Buses feature continuous real-time telemetry powered by the driver&apos;s physical device GPS.
               </p>
             </div>
-          )}
+          </div>
         </div>
-      </section>
+      )}
     </div>
   );
 }

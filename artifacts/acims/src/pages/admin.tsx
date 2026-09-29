@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock,
   Edit2,
+  LogOut,
   MapPin,
   Plus,
   Power,
@@ -41,10 +42,13 @@ import {
 } from '@workspace/api-client-react';
 import type { AdminBus, AdminRoute, Driver, SafetyReport } from '@workspace/api-client-react';
 import { EmptyState, ErrorState, LoadingRows, PageHeading } from '@/components/acims-ui';
+import { useLocation } from 'wouter';
+import { adminLogout } from '@/lib/adminAuth';
 
 type AdminTab = 'monitoring' | 'buses' | 'routes' | 'drivers' | 'queues' | 'safety';
 
 export default function AdminPage() {
+  const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<AdminTab>('monitoring');
 
@@ -67,9 +71,11 @@ export default function AdminPage() {
   const [busNumber, setBusNumber] = useState('');
   const [busRouteId, setBusRouteId] = useState('');
   const [busDriverId, setBusDriverId] = useState('');
+  const [capacity, setCapacity] = useState('40');
 
   // Edit Bus state
   const [editingBus, setEditingBus] = useState<AdminBus | null>(null);
+  const [editBusCapacity, setEditBusCapacity] = useState('');
   const [editBusRouteId, setEditBusRouteId] = useState('');
   const [editBusDriverId, setEditBusDriverId] = useState('');
 
@@ -95,11 +101,11 @@ export default function AdminPage() {
   const [updatingReportId, setUpdatingReportId] = useState<string | null>(null);
 
   const dashboard = dashboardQuery.data;
-  const buses = Array.isArray(busesQuery.data) ? busesQuery.data : [];
-  const drivers = Array.isArray(driversQuery.data) ? driversQuery.data : [];
-  const routes = Array.isArray(routesQuery.data) ? routesQuery.data : [];
-  const queues = Array.isArray(queuesQuery.data) ? queuesQuery.data : [];
-  const safety = Array.isArray(safetyQuery.data) ? safetyQuery.data : [];
+  const buses = busesQuery.data ?? [];
+  const drivers = driversQuery.data ?? [];
+  const routes = routesQuery.data ?? [];
+  const queues = queuesQuery.data ?? [];
+  const safety = safetyQuery.data ?? [];
 
   const invalidate = (keys: readonly unknown[]) => void queryClient.invalidateQueries({ queryKey: keys });
 
@@ -115,7 +121,7 @@ export default function AdminPage() {
   const submitBus = () => {
     if (!busNumber.trim() || !busRouteId) return;
     createBus.mutate(
-      { data: { busNumber: busNumber.trim(), routeId: busRouteId, driverId: busDriverId || undefined, active: true } },
+      { data: { busNumber: busNumber.trim(), routeId: busRouteId, driverId: busDriverId || undefined, capacity: Number(capacity), active: true } },
       {
         onSuccess: () => {
           setBusNumber('');
@@ -130,15 +136,17 @@ export default function AdminPage() {
 
   const handleSaveEditBus = () => {
     if (!editingBus) return;
+    const patchData: Record<string, unknown> = {
+      busNumber: editingBus.busNumber,
+      routeId: editBusRouteId || editingBus.routeId,
+      driverId: editBusDriverId || editingBus.driverId,
+      capacity: Number(editBusCapacity) || editingBus.capacity,
+      active: editingBus.active,
+    };
     updateBus.mutate(
       {
         busId: editingBus.id,
-        data: {
-          busNumber: editingBus.busNumber,
-          routeId: editBusRouteId || editingBus.routeId,
-          driverId: editBusDriverId || editingBus.driverId,
-          active: editingBus.active,
-        },
+        data: patchData as any,
       },
       {
         onSuccess: () => {
@@ -305,6 +313,19 @@ export default function AdminPage() {
               <span className="mr-2 inline-block h-2 w-2 rounded-full bg-accent-foreground" />
               {dashboard?.systemStatus ?? 'Operational'}
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                adminLogout();
+                setLocation('/admin/login', { replace: true });
+              }}
+              data-testid="button-admin-logout"
+              title="End admin session"
+              className="inline-flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-3.5 py-2 text-xs font-bold text-destructive hover:bg-destructive/20 transition"
+            >
+              <LogOut size={13} />
+              <span>Logout</span>
+            </button>
           </div>
         }
       />
@@ -370,7 +391,7 @@ export default function AdminPage() {
                       <BusFront size={16} className="text-primary" /> Bus #{bus.busNumber}
                     </span>
                     <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
-                      (bus.status || '').toLowerCase().includes('delay') ? 'bg-destructive/15 text-destructive' : 'bg-secondary text-secondary-foreground'
+                      bus.status.toLowerCase().includes('delay') ? 'bg-destructive/15 text-destructive' : 'bg-secondary text-secondary-foreground'
                     }`}>
                       {bus.status}
                     </span>
@@ -380,7 +401,7 @@ export default function AdminPage() {
                   </div>
                   <div className="mt-1 flex items-center justify-between text-xs font-bold">
                     <span>Driver: {drivers.find((d) => d.id === bus.driverId)?.name ?? 'Assigned Pool'}</span>
-                    <span className="mono text-[10px] text-muted-foreground">{bus.status}</span>
+                    <span>Cap: {bus.capacity}</span>
                   </div>
                 </div>
               ))}
@@ -410,7 +431,7 @@ export default function AdminPage() {
                       </span>
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      Route: {routes.find((r) => r.id === bus.routeId)?.name ?? bus.routeId} · Driver: {drivers.find((d) => d.id === bus.driverId)?.name ?? 'None'}
+                      Route: {routes.find((r) => r.id === bus.routeId)?.name ?? bus.routeId} · Driver: {drivers.find((d) => d.id === bus.driverId)?.name ?? 'None'} · Capacity: {bus.capacity}
                     </div>
                   </div>
 
@@ -420,6 +441,7 @@ export default function AdminPage() {
                       data-testid={`button-edit-bus-${bus.id}`}
                       onClick={() => {
                         setEditingBus(bus);
+                        setEditBusCapacity(String(bus.capacity));
                         setEditBusRouteId(bus.routeId);
                         setEditBusDriverId(bus.driverId ?? '');
                       }}
@@ -475,6 +497,16 @@ export default function AdminPage() {
                       ))}
                     </select>
                   </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-muted-foreground">Vehicle Capacity (Seats)</label>
+                    <input
+                      type="number"
+                      data-testid="input-edit-bus-capacity"
+                      value={editBusCapacity}
+                      onChange={(e) => setEditBusCapacity(e.target.value)}
+                      className="admin-input mt-1"
+                    />
+                  </div>
                 </div>
                 <div className="flex justify-end gap-2">
                   <button type="button" onClick={() => setEditingBus(null)} className="rounded-xl px-4 py-2 text-xs font-bold">Cancel</button>
@@ -506,6 +538,10 @@ export default function AdminPage() {
                   <option value="">Driver Optional</option>
                   {drivers.map((d) => (<option key={d.id} value={d.id}>{d.name}</option>))}
                 </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold">Passenger Capacity</label>
+                <input data-testid="input-admin-capacity" type="number" min="10" value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="40" className="admin-input mt-1" />
               </div>
               <button
                 type="button"
@@ -714,39 +750,40 @@ export default function AdminPage() {
                 <h2 className="mt-1 text-2xl font-extrabold">Active Boarding Queues</h2>
               </div>
               <span className="rounded-full bg-secondary px-3 py-1 text-xs font-bold">
-                {buses.filter((b) => b.active).length} Active Fleet Lines
+                {queues.filter((q) => q.queueSize > 0).length} Lines with Waitlist
               </span>
             </div>
 
             <div className="mt-6 space-y-3">
-              {buses.map((bus) => (
-                <div
-                  key={bus.id}
-                  data-testid={`row-admin-queue-${bus.id}`}
-                  className="rounded-2xl border border-border bg-card p-4 flex flex-wrap items-center justify-between gap-4"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-muted text-foreground">
-                      <UsersRound size={18} />
-                    </span>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-extrabold">Bus #{bus.busNumber}</span>
-                        <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[9px] font-extrabold text-secondary-foreground">
-                          {bus.status}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        Route: {routes.find((r) => r.id === bus.routeId)?.name ?? bus.routeId} · Driver: {drivers.find((d) => d.id === bus.driverId)?.name ?? 'Assigned Pool'}
+              {queues.map((queue) => {
+                const hasWaitlist = queue.queueSize > 0;
+                return (
+                  <div
+                    key={queue.busId}
+                    data-testid={`row-admin-queue-${queue.busId}`}
+                    className={`rounded-2xl border p-4 flex flex-wrap items-center justify-between gap-4 ${
+                      hasWaitlist ? 'border-primary/40 bg-card' : 'border-border bg-card'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`grid h-10 w-10 place-items-center rounded-xl ${hasWaitlist ? 'bg-secondary text-secondary-foreground' : 'bg-muted text-foreground'}`}>
+                        <UsersRound size={18} />
+                      </span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-extrabold">Bus #{queue.busNumber}</span>
+                          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[9px] font-extrabold text-secondary-foreground">
+                            {queue.status}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Vehicle capacity: {queue.capacity} seats · {queue.queueSize} waiting in boarding queue
+                        </div>
                       </div>
                     </div>
                   </div>
-
-                  <span className="text-xs font-bold text-muted-foreground">
-                    Operating
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </section>
