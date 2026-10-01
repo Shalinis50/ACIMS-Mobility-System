@@ -7,9 +7,10 @@ const bundlePath = path.resolve(__dirname, "server.bundle.js");
 const distPath = path.resolve(__dirname, "artifacts/acims/dist/index.html");
 
 const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION);
+const isProd = process.env.NODE_ENV === "production" || isCloudRun;
 
 async function main() {
-  if (fs.existsSync(bundlePath)) {
+  if (isProd && fs.existsSync(bundlePath)) {
     const { startServer } = await import("./server.bundle.js");
     await startServer();
   } else {

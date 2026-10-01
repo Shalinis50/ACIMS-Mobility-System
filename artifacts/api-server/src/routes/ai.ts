@@ -4,15 +4,20 @@ import { getStudentProfile, updateStudentProfile } from "../services/studentProf
 
 const router: IRouter = Router();
 
-router.get("/ai/context", (req, res) => {
-  const studentId = typeof req.query.studentId === "string" ? req.query.studentId : "student-20418";
-  res.json(getAiContext(studentId));
+router.get("/ai/context", async (req, res) => {
+  try {
+    const studentId = typeof req.query.studentId === "string" ? req.query.studentId : "student-20418";
+    const context = await getAiContext(studentId);
+    res.json(context);
+  } catch (err: any) {
+    res.status(500).json({ error: "Failed to load AI context" });
+  }
 });
 
-router.post("/ai/chat", (req, res) => {
+router.post("/ai/chat", async (req, res) => {
   try {
     const { studentId = "student-20418", message = "", destinationId, deviceCoords, history } = req.body;
-    const response = answerMobilityQuestion(
+    const response = await answerMobilityQuestion(
       message,
       destinationId,
       studentId,

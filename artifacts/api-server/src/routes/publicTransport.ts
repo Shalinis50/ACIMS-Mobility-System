@@ -8,6 +8,8 @@ import {
   searchRoutes,
   searchStops,
   getMissedBusAlternatives,
+  getRoutesForStop,
+  getStopDepartures,
 } from "../services/publicTransitService";
 import {
   getPersonalizedTransit,
@@ -19,6 +21,65 @@ const router: IRouter = Router();
 // ============================================================================
 // PERSONALIZED PUBLIC TRANSPORT ENDPOINTS (Section 1-18)
 // ============================================================================
+
+router.get("/public-transport/nearby-stops", (req, res) => {
+  try {
+    const lat = parseFloat((req.query.lat || req.query.latitude) as string);
+    const lon = parseFloat((req.query.lon || req.query.longitude) as string);
+
+    if (isNaN(lat) || isNaN(lon)) {
+      return res.status(400).json({ error: "Valid latitude and longitude required" });
+    }
+
+    const radiusKm = req.query.radiusKm ? parseFloat(req.query.radiusKm as string) : 5;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+
+    const stops = getNearbyStops({
+      latitude: lat,
+      longitude: lon,
+      radiusKm,
+      limit,
+    });
+
+    const enriched = stops.map((s) => ({
+      stop_id: s.id,
+      stop_name: s.stop_name,
+      latitude: s.latitude,
+      longitude: s.longitude,
+      distance_meters: s.distanceMeters || 0,
+      walking_minutes: Math.max(1, Math.round((s.distanceMeters || 100) / 80)),
+      agency_id: s.agency_id,
+      agency_name: s.agency_name,
+      routes_serving_stop: getRoutesForStop(s.id).map((r) => r.route_short_name),
+      source: s.source,
+      schedule_status: "Scheduled",
+      realtime_bus_location: "LIVE MTC BUS LOCATION UNAVAILABLE",
+    }));
+
+    res.json(enriched);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/public-transport/stops/:stopId/routes", (req, res) => {
+  try {
+    const routes = getRoutesForStop(req.params.stopId);
+    res.json(routes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/public-transport/stops/:stopId/departures", (req, res) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 15;
+    const departures = getStopDepartures(req.params.stopId, limit);
+    res.json(departures);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.get(["/public-transport/personalized", "/public-transport/nearby"], (req, res) => {
   try {

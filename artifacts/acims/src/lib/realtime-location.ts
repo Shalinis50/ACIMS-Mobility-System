@@ -30,58 +30,91 @@ export type RouteDetails = {
 
 export type EnrichedBusLocation = {
   busId: string;
+  busNumber?: string;
+  driverId?: string;
   latitude: number;
   longitude: number;
+  accuracy?: number | null;
+  speed?: number | null;
+  heading?: number | null;
+  altitude?: number | null;
   nextStopId: string;
   nextStop: string;
   previousStopId?: string;
   previousStop?: string;
-  currentStop?: string;
   isAtStop?: boolean;
+  isApproachingStop?: boolean;
+  stopSequenceIndex?: number;
   etaMinutes: number;
   formattedEta?: string;
+  etaLabel?: "LIVE ETA" | "ESTIMATED ETA" | "SCHEDULED" | "UNAVAILABLE";
+  etaConfidence?: "HIGH" | "MEDIUM" | "LOW" | "UNAVAILABLE";
   remainingDistanceKm?: number;
   status: string;
-  updatedAt: string;
-  source: string; // "simulated" | "driver-gps"
-  isSimulated?: boolean;
+  freshness: "LIVE" | "RECENT" | "STALE" | "UNAVAILABLE" | "OFFLINE";
+  isLive: boolean;
+  trackingStatus?: "ACTIVE" | "PAUSED" | "ENDED" | "IDLE";
+  recordedAt: string;
+  receivedAt?: string;
+  networkDelayMs?: number;
+  secondsAgo?: number;
+  quality?: "HIGH" | "ACCEPTABLE" | "POOR" | "INVALID";
+  source: string;
   routeId?: string;
   routeName?: string;
-  busNumber?: string;
   origin?: string;
   destination?: string;
   pathIndex?: number;
+  updatedAt: string; // for backward compatibility with older UI widgets
 };
 
 export type FreshnessState = {
   isLive: boolean;
+  isRecent: boolean;
   isStale: boolean;
   isUnavailable: boolean;
   secondsAgo: number;
   freshnessLabel: string;
-  statusBadge: "LIVE" | "STALE" | "UNAVAILABLE";
+  statusBadge: "LIVE" | "RECENT" | "STALE" | "UNAVAILABLE";
 };
 
-export function computeFreshness(updatedAtString?: string | Date): FreshnessState {
-  if (!updatedAtString) {
+export function computeFreshness(
+  recordedAtString?: string | Date,
+  trackingStatus: string = "ACTIVE"
+): FreshnessState {
+  if (!recordedAtString || trackingStatus === "ENDED" || trackingStatus === "IDLE") {
     return {
       isLive: false,
+      isRecent: false,
       isStale: false,
       isUnavailable: true,
       secondsAgo: Infinity,
-      freshnessLabel: "Location unavailable",
+      freshnessLabel: trackingStatus === "ENDED" ? "Trip ended" : "Location unavailable",
       statusBadge: "UNAVAILABLE",
     };
   }
 
-  const date = typeof updatedAtString === "string" ? new Date(updatedAtString) : updatedAtString;
+  const date = typeof recordedAtString === "string" ? new Date(recordedAtString) : recordedAtString;
   const now = Date.now();
   const diffMs = Math.max(0, now - date.getTime());
   const secondsAgo = Math.floor(diffMs / 1000);
 
+  if (trackingStatus === "PAUSED") {
+    return {
+      isLive: false,
+      isRecent: false,
+      isStale: true,
+      isUnavailable: false,
+      secondsAgo,
+      freshnessLabel: `Tracking paused · ${secondsAgo}s ago`,
+      statusBadge: "STALE",
+    };
+  }
+
   if (secondsAgo <= 30) {
     return {
       isLive: true,
+      isRecent: false,
       isStale: false,
       isUnavailable: false,
       secondsAgo,
@@ -90,9 +123,22 @@ export function computeFreshness(updatedAtString?: string | Date): FreshnessStat
     };
   }
 
-  if (secondsAgo <= 120) {
+  if (secondsAgo <= 90) {
     return {
       isLive: false,
+      isRecent: true,
+      isStale: false,
+      isUnavailable: false,
+      secondsAgo,
+      freshnessLabel: `Recent GPS · ${secondsAgo} sec ago`,
+      statusBadge: "RECENT",
+    };
+  }
+
+  if (secondsAgo <= 300) {
+    return {
+      isLive: false,
+      isRecent: false,
       isStale: true,
       isUnavailable: false,
       secondsAgo,
@@ -103,6 +149,7 @@ export function computeFreshness(updatedAtString?: string | Date): FreshnessStat
 
   return {
     isLive: false,
+    isRecent: false,
     isStale: false,
     isUnavailable: true,
     secondsAgo,
@@ -113,51 +160,107 @@ export function computeFreshness(updatedAtString?: string | Date): FreshnessStat
 
 /**
  * Realtime Bus Location Subscription
- * 
- * Future Supabase architecture:
- * ```ts
- * const channel = supabase.channel(`bus-location:${busId}`)
- *   .on('broadcast', { event: 'location' }, payload => callback(payload.new))
- *   .subscribe();
- * return () => { supabase.removeChannel(channel); }
- * ```
+ * Uses Server-Sent Events (SSE) for instant zero-polling live updates,
+ * with automatic reconnect and background fallback polling.
  */
 export function subscribeToBusLocation(
   busId: string,
   callback: (location: EnrichedBusLocation) => void,
-  options: { intervalMs?: number } = {},
+  onConnectionChange?: (connected: boolean) => void
 ): () => void {
-  const intervalMs = options.intervalMs ?? 3000;
   let active = true;
+  let eventSource: EventSource | null = null;
+  let fallbackTimer: NodeJS.Timeout | null = null;
 
-  const fetchLatest = async () => {
+  // Initial immediate fetch
+  const fetchSnapshot = async () => {
     if (!active) return;
     try {
       const res = await fetch(`/api/buses/${busId}/location`, {
         headers: { Accept: "application/json" },
       });
-      if (res.ok) {
+      if (res.ok && active) {
         const data = (await res.json()) as EnrichedBusLocation;
-        if (active && data) {
-          callback(data);
-        }
+        data.updatedAt = data.recordedAt;
+        callback(data);
       }
     } catch {
-      // In offline or degraded network, callback receives no update
+      // Degraded or offline
     }
   };
 
-  // Immediate fetch
-  void fetchLatest();
+  void fetchSnapshot();
 
-  // Polling stream (serves as realtime bridge until Supabase socket is attached)
-  const timer = setInterval(() => {
-    void fetchLatest();
-  }, intervalMs);
+  // Connect to live SSE channel
+  const connectSSE = () => {
+    if (!active || typeof EventSource === "undefined") {
+      startPolling();
+      return;
+    }
+
+    try {
+      eventSource = new EventSource(`/api/realtime/bus/${busId}`);
+
+      eventSource.addEventListener("location", (e: MessageEvent) => {
+        if (!active) return;
+        try {
+          const telemetry = JSON.parse(e.data) as EnrichedBusLocation;
+          telemetry.updatedAt = telemetry.recordedAt;
+          callback(telemetry);
+        } catch (err) {
+          console.error("Error parsing realtime location event:", err);
+        }
+      });
+
+      eventSource.addEventListener("session_change", (_e: MessageEvent) => {
+        if (!active) return;
+        void fetchSnapshot();
+      });
+
+      eventSource.onopen = () => {
+        if (active) onConnectionChange?.(true);
+      };
+
+      eventSource.onerror = () => {
+        if (active) onConnectionChange?.(false);
+        // Fallback to polling while SSE reconnects
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+        startPolling();
+        // Retry SSE in 8 seconds
+        setTimeout(() => {
+          if (active && !eventSource) {
+            connectSSE();
+          }
+        }, 8000);
+      };
+    } catch {
+      startPolling();
+    }
+  };
+
+  const startPolling = () => {
+    if (fallbackTimer) return;
+    fallbackTimer = setInterval(() => {
+      void fetchSnapshot();
+    }, 4000);
+  };
+
+  connectSSE();
 
   return () => {
     active = false;
-    clearInterval(timer);
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    if (fallbackTimer) {
+      clearInterval(fallbackTimer);
+      fallbackTimer = null;
+    }
+    onConnectionChange?.(false);
   };
 }
 
@@ -183,29 +286,118 @@ export async function fetchRouteDetails(busId: string): Promise<RouteDetails | n
  */
 export async function sendDriverGpsUpdate(
   busId: string,
-  coords: Coordinate,
-): Promise<EnrichedBusLocation | null> {
+  coords: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number | null;
+    altitude?: number | null;
+    altitudeAccuracy?: number | null;
+    speed?: number | null;
+    heading?: number | null;
+    timestamp?: string;
+  },
+  driverId?: string
+): Promise<{ success: boolean; telemetry?: EnrichedBusLocation; error?: string }> {
   try {
+    const payload = {
+      busId,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      accuracy: coords.accuracy,
+      altitude: coords.altitude,
+      altitudeAccuracy: coords.altitudeAccuracy,
+      speed: coords.speed,
+      heading: coords.heading,
+      timestamp: coords.timestamp || new Date().toISOString(),
+      driverId,
+    };
+
     const res = await fetch("/api/bus/location", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        ...(driverId ? { "x-acims-driver-id": driverId } : {}),
       },
-      body: JSON.stringify({
-        busId,
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        timestamp: new Date().toISOString(),
-      }),
+      body: JSON.stringify(payload),
     });
+
     if (res.ok) {
-      return (await res.json()) as EnrichedBusLocation;
+      const data = await res.json();
+      return { success: true, telemetry: data.telemetry };
+    } else {
+      const err = await res.json().catch(() => ({}));
+      return { success: false, error: err.error || `HTTP ${res.status}` };
     }
-    return null;
-  } catch (err) {
-    console.error("Failed to transmit driver GPS coordinates:", err);
-    return null;
+  } catch (err: any) {
+    return { success: false, error: err.message || "Network transmission failed" };
+  }
+}
+
+// -------------------------------------------------------------
+// DRIVER OFFLINE GPS LOCAL QUEUEING
+// -------------------------------------------------------------
+const OFFLINE_GPS_KEY = "acims_offline_gps_queue";
+
+export interface QueuedGpsPoint {
+  busId: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+  altitude?: number | null;
+  altitudeAccuracy?: number | null;
+  speed?: number | null;
+  heading?: number | null;
+  timestamp: string;
+  driverId?: string;
+}
+
+export function enqueueOfflineGpsPoint(point: QueuedGpsPoint) {
+  try {
+    const raw = localStorage.getItem(OFFLINE_GPS_KEY);
+    const queue: QueuedGpsPoint[] = raw ? JSON.parse(raw) : [];
+    queue.push(point);
+    // Keep max 200 points to prevent storage overflow
+    if (queue.length > 200) queue.shift();
+    localStorage.setItem(OFFLINE_GPS_KEY, JSON.stringify(queue));
+  } catch {}
+}
+
+export function getOfflineGpsQueueCount(): number {
+  try {
+    const raw = localStorage.getItem(OFFLINE_GPS_KEY);
+    const queue: QueuedGpsPoint[] = raw ? JSON.parse(raw) : [];
+    return queue.length;
+  } catch {
+    return 0;
+  }
+}
+
+export async function flushOfflineGpsQueue(busId: string): Promise<number> {
+  try {
+    const raw = localStorage.getItem(OFFLINE_GPS_KEY);
+    if (!raw) return 0;
+    const queue: QueuedGpsPoint[] = JSON.parse(raw);
+    if (queue.length === 0) return 0;
+
+    const pointsToUpload = queue.filter((p) => p.busId === busId);
+    if (pointsToUpload.length === 0) return 0;
+
+    const res = await fetch("/api/bus/location/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ busId, points: pointsToUpload }),
+    });
+
+    if (res.ok) {
+      // Remove uploaded points
+      const remaining = queue.filter((p) => p.busId !== busId);
+      localStorage.setItem(OFFLINE_GPS_KEY, JSON.stringify(remaining));
+      return pointsToUpload.length;
+    }
+    return 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -217,6 +409,7 @@ export function useBusRealtimeLocation(busId: string, enabled = true) {
   const [routeDetails, setRouteDetails] = useState<RouteDetails | null>(null);
   const [freshness, setFreshness] = useState<FreshnessState>(() => computeFreshness());
   const [isLoading, setIsLoading] = useState(true);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const locationRef = useRef(location);
   locationRef.current = location;
@@ -247,10 +440,12 @@ export function useBusRealtimeLocation(busId: string, enabled = true) {
       busId,
       (newLocation) => {
         setLocation(newLocation);
-        setFreshness(computeFreshness(newLocation.updatedAt));
+        setFreshness(computeFreshness(newLocation.recordedAt || newLocation.updatedAt, newLocation.trackingStatus));
         setIsLoading(false);
       },
-      { intervalMs: 3000 },
+      (connected) => {
+        setIsRealtimeConnected(connected);
+      }
     );
 
     return () => {
@@ -261,8 +456,13 @@ export function useBusRealtimeLocation(busId: string, enabled = true) {
   // Update freshness tick every second
   useEffect(() => {
     const timer = setInterval(() => {
-      if (locationRef.current?.updatedAt) {
-        setFreshness(computeFreshness(locationRef.current.updatedAt));
+      if (locationRef.current) {
+        setFreshness(
+          computeFreshness(
+            locationRef.current.recordedAt || locationRef.current.updatedAt,
+            locationRef.current.trackingStatus
+          )
+        );
       }
     }, 1000);
     return () => clearInterval(timer);
@@ -271,12 +471,14 @@ export function useBusRealtimeLocation(busId: string, enabled = true) {
   const refresh = useCallback(async () => {
     if (!busId) return;
     try {
-      const data = await customFetch<EnrichedBusLocation>(`/api/buses/${busId}/location`);
-      if (data) {
+      const res = await fetch(`/api/buses/${busId}/location`);
+      if (res.ok) {
+        const data = (await res.json()) as EnrichedBusLocation;
+        data.updatedAt = data.recordedAt;
         setLocation(data);
-        setFreshness(computeFreshness(data.updatedAt));
+        setFreshness(computeFreshness(data.recordedAt, data.trackingStatus));
       }
-    } catch (e) {
+    } catch {
       setError("Could not refresh live location");
     }
   }, [busId]);
@@ -286,6 +488,7 @@ export function useBusRealtimeLocation(busId: string, enabled = true) {
     routeDetails,
     freshness,
     isLoading,
+    isRealtimeConnected,
     error,
     refresh,
   };

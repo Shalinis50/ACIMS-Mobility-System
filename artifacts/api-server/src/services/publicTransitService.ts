@@ -793,3 +793,60 @@ export function getMissedBusAlternatives(input: {
 
   return alternatives;
 }
+
+export function getRoutesForStop(stopId: string) {
+  const db = getDatabase();
+  return db
+    .prepare(
+      `SELECT DISTINCT r.id, r.route_id, r.route_short_name, r.route_long_name, r.origin, r.destination, a.name as agency_name, a.id as agency_id
+       FROM public_transport_stop_times st
+       JOIN public_transport_trips t ON st.trip_id = t.id
+       JOIN public_transport_routes r ON t.route_id = r.id
+       JOIN public_transport_agencies a ON r.agency_id = a.id
+       WHERE st.stop_id = ? OR st.stop_id LIKE ?
+       ORDER BY length(r.route_short_name) ASC, r.route_short_name ASC`,
+    )
+    .all(stopId, `%${stopId}%`) as any[];
+}
+
+export function getStopDepartures(stopId: string, limit = 15) {
+  const db = getDatabase();
+  const now = new Date();
+  const nowTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:00`;
+
+  let departures = db
+    .prepare(
+      `SELECT st.departure_time, st.arrival_time, r.route_short_name, r.route_long_name, r.destination, r.origin, a.name as agency_name, t.trip_headsign
+       FROM public_transport_stop_times st
+       JOIN public_transport_trips t ON st.trip_id = t.id
+       JOIN public_transport_routes r ON t.route_id = r.id
+       JOIN public_transport_agencies a ON r.agency_id = a.id
+       WHERE (st.stop_id = ? OR st.stop_id LIKE ?) AND st.departure_time >= ?
+       ORDER BY st.departure_time ASC
+       LIMIT ?`,
+    )
+    .all(stopId, `%${stopId}%`, nowTime, limit) as any[];
+
+  if (departures.length === 0) {
+    departures = db
+      .prepare(
+        `SELECT st.departure_time, st.arrival_time, r.route_short_name, r.route_long_name, r.destination, r.origin, a.name as agency_name, t.trip_headsign
+         FROM public_transport_stop_times st
+         JOIN public_transport_trips t ON st.trip_id = t.id
+         JOIN public_transport_routes r ON t.route_id = r.id
+         JOIN public_transport_agencies a ON r.agency_id = a.id
+         WHERE st.stop_id = ? OR st.stop_id LIKE ?
+         ORDER BY st.departure_time ASC
+         LIMIT ?`,
+      )
+      .all(stopId, `%${stopId}%`, limit) as any[];
+  }
+
+  return departures.map((d: any) => ({
+    ...d,
+    status: "Scheduled",
+    realtimeLocation: "LIVE MTC BUS LOCATION UNAVAILABLE",
+    source: "Scheduled Timetable (CUMTA / MTC GTFS)",
+  }));
+}
+

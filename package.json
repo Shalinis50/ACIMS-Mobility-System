@@ -13,7 +13,7 @@
     "dev": "tsx server.ts",
     "start": "node server.ts",
     "transit:sync": "tsx scripts/sync-transit.ts",
-    "build": "vite build --config artifacts/acims/vite.config.ts && esbuild server-app.ts --bundle --platform=node --format=esm --external:express --external:cors --external:pino --external:pino-http --external:vite --outfile=server.bundle.js",
+    "build": "vite build --config artifacts/acims/vite.config.ts && esbuild server-app.ts --bundle --platform=node --format=esm --external:express --external:cors --external:pino --external:pino-http --external:vite --external:pg --external:drizzle-orm --external:firebase-admin --outfile=server.bundle.js",
     "gcp-build": "npm run build",
     "lint": "tsc --noEmit",
     "typecheck:libs": "tsc --build",
@@ -25,8 +25,12 @@
   "dependencies": {
     "@radix-ui/react-tooltip": "^1.2.16",
     "cors": "^2.8.5",
+    "drizzle-orm": "^0.45.3",
     "esbuild": "^0.28.2",
     "express": "^5.0.0",
+    "firebase": "^12.19.0",
+    "firebase-admin": "^14.5.0",
+    "pg": "^8.23.1",
     "pino": "^9.6.0",
     "pino-http": "^10.4.0",
     "tsx": "^4.19.2",
@@ -36,6 +40,8 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.0",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
     "prettier": "^3.5.0",
     "typescript": "^5.7.3"
   }

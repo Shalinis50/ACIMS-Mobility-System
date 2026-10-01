@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowUpRight,
   Bell,
@@ -6,8 +6,10 @@ import {
   Clock,
   Compass,
   LocateFixed,
+  MapPin,
   ShieldCheck,
   Sparkles,
+  UsersRound,
   WifiOff,
 } from 'lucide-react';
 import { Link } from 'wouter';
@@ -36,13 +38,66 @@ import {
   saveLastKnownBusSnapshot,
 } from '@/lib/offline-storage';
 import { PersonalizedPublicTransportCard } from '@/components/PersonalizedPublicTransportCard';
+import { useAuth } from '@/lib/auth-context';
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
-  const selectedBusId = useSelectedBusId();
+  const rawSelectedBusId = useSelectedBusId();
+  const { profile } = useAuth();
+  const selectedBusId = profile?.assignedBusId || rawSelectedBusId || 'bus-12';
   const { isOnline } = useNetworkStatus();
 
-  // Polling only runs while online (every 10s to visibly reflect simulated ETA & stop progress)
+  // Student Real Device Location state
+  const [deviceLocation, setDeviceLocation] = useState<{ latitude: number; longitude: number; accuracy?: number } | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<'prompt' | 'granted' | 'denied'>('prompt');
+  const [myQueueStatus, setMyQueueStatus] = useState<{ inQueue: boolean; queue: any } | null>(null);
+
+  // Request Real Device GPS on load
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setGpsStatus('denied');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = {
+          latitude: Number(pos.coords.latitude.toFixed(6)),
+          longitude: Number(pos.coords.longitude.toFixed(6)),
+          accuracy: Math.round(pos.coords.accuracy),
+        };
+        setDeviceLocation(coords);
+        setGpsStatus('granted');
+
+        // Persist to backend /api/me/location
+        fetch('/api/me/location', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studentId: profile?.userId || 'student-20418',
+            ...coords,
+          }),
+        }).catch(() => {});
+      },
+      () => {
+        setGpsStatus('denied');
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
+    );
+  }, [profile?.userId]);
+
+  // Fetch student active queue
+  useEffect(() => {
+    const studentId = profile?.userId || 'student-20418';
+    fetch(`/api/queue/my-active?studentId=${studentId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setMyQueueStatus(data);
+      })
+      .catch(() => {});
+  }, [profile?.userId, isOnline]);
+
+  // Live bus fleet query
   const busesQuery = useListBuses({
     query: {
       enabled: isOnline,
@@ -70,11 +125,11 @@ export default function Dashboard() {
       origin: match?.origin ?? 'Vandalur Transit Hub',
       destination: match?.destination ?? 'Academic Quad',
       routeLabel: match?.routeLabel ?? 'Campus Loop A',
-      capacity: snap?.capacity ?? 40,
+      capacity: snap?.capacity ?? 45,
       currentLocation: { latitude: 12.9161, longitude: 80.1119 },
       nextStop: snap?.lastStop ?? match?.stops?.[2]?.name ?? 'Tambaram Terminal',
       nextStopId: 'tambaram',
-      etaMinutes: snap?.etaMinutes ?? 3,
+      etaMinutes: snap?.etaMinutes ?? 0,
       status: snap?.status ?? 'Scheduled route',
       updatedAt: new Date(),
       active: true,
@@ -96,11 +151,11 @@ export default function Dashboard() {
     query: {
       enabled: isOnline && !!busId,
       queryKey: getGetBusLocationQueryKey(busId),
-      refetchInterval: isOnline ? 10000 : false,
+      refetchInterval: isOnline ? 5000 : false,
     },
   });
 
-  // Automatic Reconnection: when connection returns, refresh bus data from backend & update caches
+  // Automatic Reconnection: refresh live bus queries
   useEffect(() => {
     if (isOnline) {
       void queryClient.invalidateQueries({ queryKey: getListBusesQueryKey() });
@@ -146,21 +201,56 @@ export default function Dashboard() {
     return (
       <EmptyState
         icon={BusFront}
-        title="No campus buses are moving yet"
-        message="When service starts, your selected route will appear here with an arrival estimate."
+        title="My bus is not assigned"
+        message="Please select or update your route in Student Settings."
       />
     );
   }
 
-  // Display ETA: if 0, show "Arriving", else show number + min
-  const rawEta = isOnline
-    ? (location?.etaMinutes ?? currentBus.etaMinutes)
-    : (activeSnapshot?.etaMinutes ?? currentBus.etaMinutes);
-  const etaDisplay = rawEta === 0 ? 'Arriving' : `${rawEta}`;
-  const isArriving = rawEta === 0;
+  const isLiveGps = (location as any)?.freshness === "LIVE";
+  const isStaleGps = (location as any)?.freshness === "STALE";
+  const isUnavailable = !isLiveGps && !isStaleGps;
+
+  const rawEta = location?.etaMinutes ?? currentBus.etaMinutes ?? 0;
+  const etaDisplay = isUnavailable
+    ? '—'
+    : rawEta === 0
+    ? 'Arriving'
+    : `${rawEta}`;
+  const isArriving = rawEta === 0 && !isUnavailable;
 
   return (
     <div className="page-in max-w-4xl mx-auto space-y-6">
+      {/* GPS PERMISSION NOTICE */}
+      {gpsStatus === 'denied' && (
+        <div className="rounded-2xl border border-border bg-card p-4 text-xs font-semibold text-muted-foreground flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <LocateFixed size={16} className="text-amber-500 shrink-0" />
+            <span>Location permission is required for location-based recommendations.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => {
+                    setDeviceLocation({
+                      latitude: Number(pos.coords.latitude.toFixed(6)),
+                      longitude: Number(pos.coords.longitude.toFixed(6)),
+                    });
+                    setGpsStatus('granted');
+                  },
+                  () => setGpsStatus('denied')
+                );
+              }
+            }}
+            className="rounded-lg bg-secondary px-3 py-1 text-xs font-extrabold text-secondary-foreground shrink-0 hover:bg-muted"
+          >
+            Enable GPS
+          </button>
+        </div>
+      )}
+
       {/* AUTOMATIC OFFLINE BANNER */}
       {!isOnline && (
         <div
@@ -206,7 +296,7 @@ export default function Dashboard() {
           isOnline ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
               <span className="pulse-dot h-2 w-2 rounded-full bg-emerald-500" />
-              Service Live
+              {isLiveGps ? "Real Driver GPS Live" : isStaleGps ? "GPS Signal Delayed" : "Awaiting Driver GPS"}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400">
@@ -215,28 +305,48 @@ export default function Dashboard() {
             </span>
           )
         }
-        title="Make the next move."
+        title={profile ? `Welcome back, ${profile.name.split(' ')[0]}.` : "Make the next move."}
         description={
           isOnline
-            ? "Your campus commute at a glance. Verified arrival estimates and route progress."
+            ? `Assigned Route: ${currentBus.routeLabel}. Live Driver GPS telemetry streamed from verified onboard device.`
             : "Displaying cached transit details stored on this device. Live GPS updates paused."
         }
       />
 
-      {/* MAIN SELECTED BUS CARD (Only verified information: Bus number, Route, ETA, Next stop, Service status, Live Tracking CTA) */}
+      {/* ACTIVE QUEUE STATUS BANNER (If student has a spot in line) */}
+      {myQueueStatus?.inQueue && (
+        <div className="rounded-2xl border border-accent/40 bg-accent/15 p-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent text-accent-foreground">
+              <UsersRound size={18} />
+            </span>
+            <div>
+              <div className="text-xs font-bold text-foreground">You are in the Boarding Queue</div>
+              <div className="text-xs text-muted-foreground">
+                Holding place <strong>#{myQueueStatus.queue?.queuePosition}</strong> for Bus #{myQueueStatus.queue?.busNumber} at {myQueueStatus.queue?.boardingStop}
+              </div>
+            </div>
+          </div>
+          <Link href="/queue" className="rounded-lg bg-accent px-3 py-1.5 text-xs font-extrabold text-accent-foreground hover:opacity-90">
+            View Queue
+          </Link>
+        </div>
+      )}
+
+      {/* MAIN SELECTED BUS CARD */}
       <section className="overflow-hidden rounded-[28px] bg-primary p-6 text-primary-foreground soft-shadow sm:p-8">
         {/* Header: Selected Bus & Route */}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="mono text-[10px] uppercase tracking-[0.18em] text-primary-foreground/55">
-              {isOnline ? 'Selected Bus' : 'Selected Bus (Cached)'}
+              My Bus (Assigned)
             </div>
             <div className="mt-2 flex items-center gap-3">
               <span className="grid h-11 w-11 place-items-center rounded-2xl bg-accent text-accent-foreground">
                 <BusFront size={23} />
               </span>
               <div>
-                <h2 className="display-font text-2xl font-extrabold">Bus {currentBus.busNumber}</h2>
+                <h2 className="display-font text-2xl font-extrabold">Bus #{currentBus.busNumber}</h2>
                 <BusMiniRoute bus={currentBus} />
               </div>
             </div>
@@ -244,9 +354,11 @@ export default function Dashboard() {
 
           <div>
             {isOnline ? (
-              <span className="flex items-center gap-2 rounded-full bg-primary-foreground/10 px-3.5 py-1.5 text-xs font-bold">
-                <span className="pulse-dot h-2 w-2 rounded-full bg-accent" />
-                Service Live
+              <span className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-bold ${
+                isLiveGps ? 'bg-emerald-500/20 text-emerald-200' : isStaleGps ? 'bg-amber-500/20 text-amber-200' : 'bg-primary-foreground/10 text-primary-foreground/70'
+              }`}>
+                <span className={`h-2 w-2 rounded-full ${isLiveGps ? 'bg-accent pulse-dot' : isStaleGps ? 'bg-amber-400' : 'bg-muted-foreground'}`} />
+                {isLiveGps ? 'Live Driver GPS' : isStaleGps ? 'Signal Delayed' : 'Tracking Standby'}
               </span>
             ) : (
               <span className="flex items-center gap-1.5 rounded-full bg-amber-500/25 px-3.5 py-1.5 text-xs font-extrabold text-amber-200">
@@ -265,7 +377,7 @@ export default function Dashboard() {
             </div>
             <div className="display-font mt-1 flex items-baseline gap-2 text-[5rem] font-extrabold leading-none tracking-[-0.1em] text-accent sm:text-[5.5rem]">
               <span>{etaDisplay}</span>
-              {!isArriving && (
+              {!isArriving && !isUnavailable && (
                 <span className="text-2xl tracking-normal text-primary-foreground/70">min</span>
               )}
             </div>
@@ -273,7 +385,9 @@ export default function Dashboard() {
               {isOnline ? (
                 <>
                   <Sparkles size={13} className="text-accent" />
-                  <span>Simulated fleet telemetry (updates automatically)</span>
+                  <span>
+                    {(location as any)?.etaLabel || (isLiveGps ? "LIVE ETA" : "UNAVAILABLE")} · {isLiveGps ? "Verified driver GPS coordinates" : isStaleGps ? "GPS delayed" : "Awaiting driver broadcast"}
+                  </span>
                 </>
               ) : (
                 <>
@@ -290,8 +404,8 @@ export default function Dashboard() {
             </div>
             <div className="mt-1 text-base font-extrabold text-primary-foreground sm:text-lg">
               {isOnline
-                ? (location?.nextStop ?? currentBus.nextStop)
-                : (activeSnapshot?.lastStop ?? currentBus.nextStop)}
+                ? (location?.nextStop ?? currentBus.nextStop ?? "Depot")
+                : (activeSnapshot?.lastStop ?? currentBus.nextStop ?? "Depot")}
             </div>
             <div className="mt-1 text-xs text-primary-foreground/60">
               Line: {currentBus.routeLabel}
@@ -312,8 +426,11 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* PERSONALIZED PUBLIC TRANSPORT NEAR YOU (Sections 1-18) */}
-      <PersonalizedPublicTransportCard pickupStopId={currentBus.nextStopId || 'tambaram'} />
+      {/* PERSONALIZED PUBLIC TRANSPORT NEAR YOU (Personalized to student real GPS) */}
+      <PersonalizedPublicTransportCard
+        pickupStopId={profile?.pickupStopId || currentBus.nextStopId || 'tambaram'}
+        studentGps={deviceLocation || undefined}
+      />
 
       {/* QUICK ACTIONS */}
       <section className="space-y-3">
@@ -396,8 +513,8 @@ export default function Dashboard() {
         <div className="flex items-center gap-2">
           {isOnline ? (
             <>
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              <span>Service Live · Simulated campus operations</span>
+              <span className={`h-2 w-2 rounded-full ${isLiveGps ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              <span>{isLiveGps ? 'Service Live · Real driver GPS stream active' : 'Service Standby · Awaiting driver broadcast'}</span>
             </>
           ) : (
             <>

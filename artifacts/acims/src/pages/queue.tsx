@@ -2,11 +2,15 @@ import { useMemo, useState } from 'react';
 import { ArrowRight, CheckCircle2, Clock3, LogOut, Ticket, UsersRound } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getGetQueueStatusQueryKey, getListBusStopsQueryKey, getListBusesQueryKey, useGetQueueStatus, useJoinQueue, useLeaveQueue, useListBusStops, useListBuses } from '@workspace/api-client-react';
-import { demoStudentId, EmptyState, ErrorState, LoadingRows, PageHeading, useSelectedBusId } from '@/components/acims-ui';
+import { EmptyState, ErrorState, LoadingRows, PageHeading, useSelectedBusId } from '@/components/acims-ui';
+import { useAuth } from '@/lib/auth-context';
 
 export default function QueuePage() {
   const queryClient = useQueryClient();
-  const selectedBusId = useSelectedBusId();
+  const rawSelectedBusId = useSelectedBusId();
+  const { profile } = useAuth();
+  const currentStudentId = profile?.userId || 'student-20418';
+  const selectedBusId = profile?.assignedBusId || rawSelectedBusId || 'bus-12';
   const [boardingStop, setBoardingStop] = useState('');
   const busesQuery = useListBuses({ query: { queryKey: getListBusesQueryKey() } });
   const bus = useMemo(() => busesQuery.data?.find((item) => item.id === selectedBusId) ?? busesQuery.data?.[0], [busesQuery.data, selectedBusId]);
@@ -18,16 +22,16 @@ export default function QueuePage() {
   const leaveMutation = useLeaveQueue();
   const queue = queueQuery.data;
   const stops = stopsQuery.data?.slice().sort((a, b) => a.sequence - b.sequence) ?? [];
-  const chosenStop = boardingStop || stops[0]?.name || bus?.nextStop || '';
+  const chosenStop = boardingStop || profile?.pickupStopId || stops[0]?.name || bus?.nextStop || '';
 
   const join = () => {
     if (!busId || !chosenStop) return;
-    joinMutation.mutate({ data: { studentId: demoStudentId, busId, boardingStop: chosenStop } }, { onSuccess: () => void queryClient.invalidateQueries({ queryKey: queueKey }) });
+    joinMutation.mutate({ data: { studentId: currentStudentId, busId, boardingStop: chosenStop } }, { onSuccess: () => void queryClient.invalidateQueries({ queryKey: queueKey }) });
   };
 
   const leave = () => {
     if (!busId) return;
-    leaveMutation.mutate({ data: { studentId: demoStudentId, busId } }, { onSuccess: () => void queryClient.invalidateQueries({ queryKey: queueKey }) });
+    leaveMutation.mutate({ data: { studentId: currentStudentId, busId } }, { onSuccess: () => void queryClient.invalidateQueries({ queryKey: queueKey }) });
   };
 
   if (busesQuery.isLoading) return <LoadingRows count={4} />;

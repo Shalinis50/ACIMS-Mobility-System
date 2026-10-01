@@ -93,6 +93,7 @@ export default function LiveMap() {
     routeDetails,
     freshness,
     isLoading: isLocationLoading,
+    isRealtimeConnected,
     refresh: refreshLocation,
   } = useBusRealtimeLocation(effectiveBusId, isOnline);
 
@@ -108,14 +109,6 @@ export default function LiveMap() {
       saveLastKnownBusSnapshot(bus);
     }
   }, [bus]);
-
-  // OFFLINE MODE: clean switch to offline storage
-  if (!isOnline) {
-    return <OfflineMobilityView initialTab="routes" selectedBusId={effectiveBusId} />;
-  }
-
-  if (busesQuery.isLoading && !bus) return <LoadingRows count={4} />;
-  if (busesQuery.isError) return <ErrorState onRetry={() => void busesQuery.refetch()} />;
 
   const busNumber = location?.busNumber || bus?.busNumber || '18';
   const routeName = location?.routeName || routeDetails?.name || bus?.routeLabel || 'Metro Connector Feeder';
@@ -169,6 +162,14 @@ export default function LiveMap() {
     return path.map((p) => [p.latitude, p.longitude] as [number, number]);
   }, [path]);
 
+  // OFFLINE MODE: clean switch to offline storage (executed after all hooks run unconditionally)
+  if (!isOnline) {
+    return <OfflineMobilityView initialTab="routes" selectedBusId={effectiveBusId} />;
+  }
+
+  if (busesQuery.isLoading && !bus) return <LoadingRows count={4} />;
+  if (busesQuery.isError) return <ErrorState onRetry={() => void busesQuery.refetch()} />;
+
   // Transmit real Browser Geolocation API coordinates as Driver GPS
   const handleTransmitDeviceGps = () => {
     if (!navigator.geolocation) {
@@ -202,7 +203,6 @@ export default function LiveMap() {
     );
   };
 
-  const isSimulated = location?.isSimulated ?? (location?.source === 'simulated' || !location?.source);
   const nextStopName = location?.nextStop || bus?.nextStop || stops[1]?.name || 'Next stop';
   const prevStopName = location?.previousStop || stops[0]?.name;
   const isAtStop = location?.isAtStop ?? false;
@@ -213,20 +213,31 @@ export default function LiveMap() {
     <div className="page-in space-y-6">
       {/* Page Header */}
       <PageHeading
-        eyebrow="Live Campus Transit"
+        eyebrow="Real-Time Campus Transit"
         title="Live Bus Tracking"
-        description="Continuous geographic tracking, real-time stop sequence, and dynamic remaining distance ETA."
+        description="Continuous geographic tracking, real-time stop sequence, and dynamic remaining distance ETA from verified onboard driver GPS."
         action={
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* Live / Stale Freshness Indicator */}
-            {freshness.statusBadge === 'LIVE' ? (
+            {/* Live Realtime / Stale Freshness Indicator */}
+            {isRealtimeConnected && freshness.statusBadge === 'LIVE' ? (
               <div 
                 data-testid="badge-status-live" 
-                className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-3 py-1.5 text-xs font-extrabold text-emerald-800 dark:text-emerald-300"
+                className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-3.5 py-1.5 text-xs font-extrabold text-emerald-800 dark:text-emerald-300 shadow-xs"
               >
                 <span className="pulse-dot h-2 w-2 rounded-full bg-emerald-500" />
-                <span>LIVE</span>
+                <span>LIVE REALTIME</span>
                 <span className="text-[10px] font-medium text-emerald-700/80 dark:text-emerald-400/80">
+                  · {freshness.freshnessLabel}
+                </span>
+              </div>
+            ) : freshness.statusBadge === 'RECENT' ? (
+              <div 
+                data-testid="badge-status-recent" 
+                className="flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/15 px-3 py-1.5 text-xs font-extrabold text-blue-800 dark:text-blue-300"
+              >
+                <Clock3 size={13} className="text-blue-600 dark:text-blue-400" />
+                <span>RECENT GPS</span>
+                <span className="text-[10px] font-medium text-blue-700/80 dark:text-blue-400/80">
                   · {freshness.freshnessLabel}
                 </span>
               </div>
@@ -236,7 +247,7 @@ export default function LiveMap() {
                 className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/15 px-3 py-1.5 text-xs font-extrabold text-amber-800 dark:text-amber-300"
               >
                 <Clock3 size={13} className="text-amber-600 dark:text-amber-400" />
-                <span>STALE</span>
+                <span>LAST KNOWN LOCATION</span>
                 <span className="text-[10px] font-medium text-amber-700/80 dark:text-amber-400/80">
                   · {freshness.freshnessLabel}
                 </span>
@@ -244,38 +255,27 @@ export default function LiveMap() {
             ) : (
               <div 
                 data-testid="badge-status-unavailable" 
-                className="flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs font-extrabold text-destructive"
+                className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-extrabold text-muted-foreground"
               >
-                <AlertTriangle size={13} />
-                <span>Location unavailable</span>
+                <span className="h-2 w-2 rounded-full bg-muted-foreground" />
+                <span>AWAITING DRIVER GPS</span>
               </div>
             )}
 
-            {/* Mode Indicator: Demo Simulation vs Driver GPS */}
-            {isSimulated ? (
-              <div 
-                data-testid="badge-mode-simulated"
-                title="Simulation mode active: Road-following test coordinates (no real GPS hardware attached)"
-                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                <span>Demo Simulation</span>
-              </div>
-            ) : (
-              <div 
-                data-testid="badge-mode-driver-gps"
-                title="Driver GPS active: Receiving coordinates from phone GPS signal"
-                className="inline-flex items-center gap-1.5 rounded-full border border-blue-500/30 bg-blue-500/15 px-3 py-1.5 text-xs font-bold text-blue-700 dark:text-blue-300"
-              >
-                <Smartphone size={13} />
-                <span>Driver GPS Active</span>
-              </div>
-            )}
+            {/* Link to Phone B Driver Console for physical 2-phone test */}
+            <Link
+              href="/driver"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-bold text-foreground hover:bg-muted transition"
+              title="Open Driver Phone Console on Device B"
+            >
+              <Smartphone size={13} className="text-accent-foreground" />
+              <span>Driver Console</span>
+            </Link>
           </div>
         }
       />
 
-      {/* Primary Live Card Banner (As specified in requirement 4) */}
+      {/* Primary Live Card Banner */}
       <section className="rounded-[28px] border-2 border-primary/20 bg-card p-6 shadow-sm sm:p-7">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
@@ -321,10 +321,19 @@ export default function LiveMap() {
 
             <div className="border-l border-border pl-4 sm:pl-8">
               <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                ETA
+                {location?.etaLabel || "ETA"}
               </div>
-              <div className="mt-0.5 text-base font-extrabold text-primary dark:text-accent sm:text-lg">
-                {formattedEta}
+              <div className="mt-0.5 flex items-center gap-2">
+                <span className="text-base font-extrabold text-primary dark:text-accent sm:text-lg">
+                  {formattedEta}
+                </span>
+                {location?.etaConfidence && location.etaConfidence !== "UNAVAILABLE" && (
+                  <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
+                    location.etaConfidence === "HIGH" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-muted text-muted-foreground"
+                  }`}>
+                    {location.etaConfidence}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -340,23 +349,6 @@ export default function LiveMap() {
             )}
           </div>
         </div>
-
-        {/* Disclaimer about Current Simulation Limitation */}
-        {isSimulated && (
-          <div className="mt-4 flex items-center gap-2 rounded-xl bg-amber-500/10 px-3.5 py-2 text-xs text-amber-900 dark:text-amber-200">
-            <Info size={14} className="shrink-0 text-amber-600 dark:text-amber-400" />
-            <span>
-              <strong>Simulation Mode:</strong> Currently moving along road waypoints for testing UI and geographic ETA. In production, driver phone GPS will stream directly here.
-            </span>
-            <button
-              type="button"
-              onClick={() => setDriverModeOpen((prev) => !prev)}
-              className="ml-auto shrink-0 font-extrabold underline text-amber-800 dark:text-amber-100 hover:opacity-80"
-            >
-              {driverModeOpen ? 'Hide GPS Tool' : 'Test Driver GPS'}
-            </button>
-          </div>
-        )}
       </section>
 
       {/* Driver GPS Testing Panel (Transparently implements architecture flow without fake GPS) */}
