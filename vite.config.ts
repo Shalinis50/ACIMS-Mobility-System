@@ -14,17 +14,12 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': path.resolve(import.meta.dirname, 'src'),
-      '@assets': path.resolve(
-        import.meta.dirname,
-        '..',
-        '..',
-        'attached_assets',
-      ),
+      '@': path.resolve(import.meta.dirname, 'artifacts/acims/src'),
+      '@assets': path.resolve(import.meta.dirname, 'attached_assets'),
     },
     dedupe: ['react', 'react-dom'],
   },
-  root: path.resolve(import.meta.dirname),
+  root: path.resolve(import.meta.dirname, 'artifacts/acims'),
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist'),
     emptyOutDir: true,
@@ -33,9 +28,6 @@ export default defineConfig({
     port,
     host: '0.0.0.0',
     allowedHosts: true,
-    fs: {
-      strict: true,
-    },
   },
   preview: {
     port,
