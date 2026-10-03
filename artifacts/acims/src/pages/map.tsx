@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
+import { Link } from 'wouter';
 import { 
   BusFront, 
   LocateFixed, 
@@ -34,7 +35,6 @@ import { OfflineMobilityView } from '@/components/offline-mobility-view';
 import { saveLastKnownBusSnapshot } from '@/lib/offline-storage';
 import { 
   useBusRealtimeLocation, 
-  sendDriverGpsUpdate, 
   type Coordinate, 
   type RouteStop 
 } from '@/lib/realtime-location';
@@ -99,9 +99,6 @@ export default function LiveMap() {
 
   // Map state controls
   const [followBus, setFollowBus] = useState(true);
-  const [driverModeOpen, setDriverModeOpen] = useState(false);
-  const [gpsStatusMessage, setGpsStatusMessage] = useState<string>('');
-  const [isTransmittingGps, setIsTransmittingGps] = useState(false);
 
   // Cache bus state for offline view
   useEffect(() => {
@@ -169,39 +166,6 @@ export default function LiveMap() {
 
   if (busesQuery.isLoading && !bus) return <LoadingRows count={4} />;
   if (busesQuery.isError) return <ErrorState onRetry={() => void busesQuery.refetch()} />;
-
-  // Transmit real Browser Geolocation API coordinates as Driver GPS
-  const handleTransmitDeviceGps = () => {
-    if (!navigator.geolocation) {
-      setGpsStatusMessage('Browser does not support Geolocation.');
-      return;
-    }
-
-    setIsTransmittingGps(true);
-    setGpsStatusMessage('Acquiring device GPS coordinates…');
-
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const coords: Coordinate = {
-          latitude: Number(pos.coords.latitude.toFixed(6)),
-          longitude: Number(pos.coords.longitude.toFixed(6)),
-        };
-        const updated = await sendDriverGpsUpdate(effectiveBusId, coords);
-        setIsTransmittingGps(false);
-        if (updated) {
-          setGpsStatusMessage(`Driver GPS sent: ${coords.latitude}, ${coords.longitude} (Mode: Driver GPS)`);
-          void refreshLocation();
-        } else {
-          setGpsStatusMessage('Failed to ingest driver coordinates to server.');
-        }
-      },
-      (err) => {
-        setIsTransmittingGps(false);
-        setGpsStatusMessage(`GPS acquisition failed: ${err.message}. (Grant permission or test along campus path)`);
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  };
 
   const nextStopName = location?.nextStop || bus?.nextStop || stops[1]?.name || 'Next stop';
   const prevStopName = location?.previousStop || stops[0]?.name;
@@ -350,38 +314,6 @@ export default function LiveMap() {
           </div>
         </div>
       </section>
-
-      {/* Driver GPS Testing Panel (Transparently implements architecture flow without fake GPS) */}
-      {driverModeOpen && (
-        <section className="rounded-2xl border-2 border-dashed border-primary/30 bg-muted/20 p-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 font-bold text-foreground">
-              <Smartphone size={16} className="text-primary" />
-              <span>Driver GPS Ingestion Bridge</span>
-            </div>
-            <span className="mono text-[10px] uppercase text-muted-foreground">Future Driver Flow Tester</span>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Test the future driver pipeline: Driver Phone → Browser Geolocation API → Backend Ingestion (`/api/bus/location`) → Realtime Map.
-          </p>
-
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleTransmitDeviceGps}
-              disabled={isTransmittingGps}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            >
-              <Smartphone size={14} />
-              <span>{isTransmittingGps ? 'Reading GPS…' : 'Transmit My Browser Coordinates'}</span>
-            </button>
-
-            {gpsStatusMessage && (
-              <span className="text-xs font-medium text-foreground">{gpsStatusMessage}</span>
-            )}
-          </div>
-        </section>
-      )}
 
       {/* Map & Stop Context Layout */}
       <section className="grid gap-6 xl:grid-cols-[1.5fr_.7fr]">

@@ -192,7 +192,8 @@ export async function processStudentPickupNotifications(input: {
 
   if (eta.etaMinutes == null) return { sent };
 
-  const hasCoords = eta.gps.latitude != null && eta.gps.longitude != null;
+  const hasCoords = eta.gps.latitude != null && eta.gps.longitude != null
+    && eta.pickup.latitude != null && eta.pickup.longitude != null;
   if (hasCoords) {
     const geofence = evaluatePickupGeofence({
       bus: { latitude: eta.gps.latitude!, longitude: eta.gps.longitude! },

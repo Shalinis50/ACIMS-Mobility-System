@@ -129,6 +129,14 @@ const APP_STATEMENTS = [
     service_days TEXT NOT NULL DEFAULT 'MON,TUE,WED,THU,FRI,SAT',
     is_live BOOLEAN NOT NULL DEFAULT FALSE
   )`,
+  `CREATE TABLE IF NOT EXISTS mobi_query_logs (
+    id TEXT PRIMARY KEY,
+    student_id TEXT NOT NULL,
+    intent TEXT NOT NULL,
+    tools_called TEXT NOT NULL DEFAULT '[]',
+    success BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
 ];
 
 export async function migrateMobilitySchemaColumns() {
@@ -165,16 +173,13 @@ export async function bootstrapAppTables() {
 }
 
 export async function ensureBaselineFleetData() {
-  const { getDbBuses } = await import("./services.ts");
-  let buses: Awaited<ReturnType<typeof getDbBuses>> = [];
+  const { deactivateDummyFleet, promoteOfficialRecFleet } = await import(
+    "../../artifacts/api-server/src/services/recTransport/collegeFleetService.ts"
+  );
   try {
-    buses = await getDbBuses();
-  } catch {
-    return;
+    await deactivateDummyFleet();
+    await promoteOfficialRecFleet();
+  } catch (err) {
+    console.warn("[ACIMS DB] Official college fleet promote skipped:", err);
   }
-  if (buses.length > 0) return;
-
-  const { seedDatabase } = await import("./seed.ts");
-  await seedDatabase();
-  console.log("[ACIMS DB] Seeded baseline fleet/routes (empty database)");
 }

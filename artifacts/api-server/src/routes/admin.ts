@@ -279,7 +279,7 @@ router.get("/admin/buses", async (_req, res) => {
       list.map((b) => ({
         id: b.id,
         busNumber: b.busNumber,
-        routeId: b.routeId || "route-bus-12",
+        routeId: b.routeId || undefined,
         driverId: b.driverId || undefined,
         capacity: 45,
         active: b.active,
@@ -555,10 +555,33 @@ router.post("/admin/routes", async (req, res) => {
   }
 });
 
+async function replaceRouteStops(routeId: string, stopIds: string[]) {
+  await db.delete(busStops).where(eq(busStops.routeId, routeId));
+  for (let i = 0; i < stopIds.length; i++) {
+    const sid = stopIds[i];
+    const label =
+      sid.includes(" ")
+        ? sid
+        : sid.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    await db.insert(busStops).values({
+      id: `${routeId}-stop-${i + 1}`,
+      routeId,
+      stopName: label,
+      latitude: 13.0084 + i * 0.0008,
+      longitude: 80.0033 + i * 0.0008,
+      sequenceNumber: i + 1,
+    });
+  }
+}
+
 router.patch("/admin/routes/:routeId", async (req, res) => {
   try {
     const { routeId } = req.params;
-    const { name, active } = req.body;
+    const { name, active, stopIds } = req.body as {
+      name?: string;
+      active?: boolean;
+      stopIds?: string[];
+    };
 
     const updated = await updateDbRoute(routeId, {
       ...(name ? { routeName: name } : {}),
@@ -569,10 +592,22 @@ router.patch("/admin/routes/:routeId", async (req, res) => {
       return res.status(404).json({ error: "Route not found" });
     }
 
+    if (Array.isArray(stopIds) && stopIds.length > 0) {
+      await replaceRouteStops(routeId, stopIds);
+    }
+
+    const stops = await db
+      .select()
+      .from(busStops)
+      .where(eq(busStops.routeId, routeId))
+      .orderBy(busStops.sequenceNumber);
+
     res.json({
       id: updated.id,
       name: updated.routeName,
       active: updated.active,
+      destination: stops[stops.length - 1]?.stopName || "Campus",
+      stopIds: stops.map((s) => s.stopName),
     });
   } catch (err: any) {
     res.status(400).json({ error: "Failed to update route" });

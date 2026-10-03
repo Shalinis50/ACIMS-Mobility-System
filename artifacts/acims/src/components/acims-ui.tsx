@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
-import { Bell, Bot, BusFront, CircleHelp, Clock3, Compass, Map, Menu, Navigation, Route, ShieldCheck, TrainFront, WifiOff, Wrench } from 'lucide-react';
+import { Bell, BusFront, CircleHelp, Clock3, Map, Menu, Mic, Route, TrainFront, WifiOff } from 'lucide-react';
 import type { Bus } from '@workspace/api-client-react';
 import { useNetworkStatus } from '@/hooks/use-network';
 
@@ -33,24 +33,20 @@ export function RouteMark({ small = false }: { small?: boolean }) {
   );
 }
 
+/** Core student commute: track bus, customize pickup on admin routes, fallback public transit */
 const navItems = [
   { href: '/dashboard', label: 'Today', icon: Clock3 },
   { href: '/my-bus', label: 'My bus', icon: BusFront },
+  { href: '/mobi', label: 'MOBI', icon: Mic },
   { href: '/map', label: 'Live map', icon: Map },
-  { href: '/alerts', label: 'Alerts', icon: Bell },
-  { href: '/campus-map', label: 'Campus map', icon: Compass },
-  { href: '/rec-routes', label: 'REC bus routes', icon: Route },
-  { href: '/navigation', label: 'Navigation', icon: Navigation },
-  { href: '/safety', label: 'Safety', icon: ShieldCheck },
   { href: '/public-transport', label: 'Public transport', icon: TrainFront },
-  { href: '/offline', label: 'Offline desk', icon: WifiOff },
-  { href: '/ai-agent', label: 'AI mobility desk', icon: Bot },
+  { href: '/alerts', label: 'Alerts', icon: Bell },
 ];
 
 export function AcimsLayout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { isOnline, isSimulatedOffline, toggleSimulatedOffline } = useNetworkStatus();
+  const { isOnline } = useNetworkStatus();
 
   return (
     <div className="noise app-shell">
@@ -65,19 +61,11 @@ export function AcimsLayout({ children }: { children: ReactNode }) {
             </Link>;
           })}
         </nav>
-        <div className="mt-auto rounded-2xl border border-primary-foreground/10 bg-primary-foreground/5 p-4">
-          <div className="flex items-center gap-2 text-xs font-bold"><Navigation size={14} className="text-accent" /> Campus loop</div>
-          <p className="mt-2 text-[11px] leading-5 text-primary-foreground/55">
-            {isOnline ? 'Live service updates are based on the latest driver signal.' : 'Operating in Offline Mode using cached schedule data.'}
-          </p>
-          <div className="mt-3 flex items-center justify-between border-t border-primary-foreground/10 pt-2 text-[11px]">
-            <Link href="/offline" data-testid="link-sidebar-offline" className="font-extrabold text-accent">
-              Offline Guide →
-            </Link>
-            <Link href="/login" data-testid="link-sidebar-student-session" className="text-primary-foreground/50 hover:text-primary-foreground font-bold">
-              Sign out
-            </Link>
-          </div>
+        <div className="mt-auto rounded-2xl border border-primary-foreground/10 bg-primary-foreground/5 p-4 text-[11px] leading-5 text-primary-foreground/55">
+          <p>{isOnline ? 'Bus status uses live driver GPS and your pickup on the college route.' : 'Offline — cached schedule only.'}</p>
+          <Link href="/login" data-testid="link-sidebar-student-session" className="mt-3 inline-block font-bold text-accent">
+            Sign out
+          </Link>
         </div>
       </aside>
       <div className="lg:pl-[238px]">
@@ -86,28 +74,11 @@ export function AcimsLayout({ children }: { children: ReactNode }) {
           <div className="lg:hidden"><RouteMark small /></div>
           <div className="ml-auto flex items-center gap-3 sm:gap-4">
             {/* Online / Offline Status & Interactive Testing Toggle */}
-            {isOnline ? (
-              <button
-                type="button"
-                onClick={toggleSimulatedOffline}
-                title="Service Live"
-                data-testid="toggle-simulate-offline"
-                className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground transition hover:bg-muted"
-              >
-                <span className="pulse-dot h-2 w-2 rounded-full bg-accent-foreground" />
-                <span>Service Live</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={toggleSimulatedOffline}
-                title="Offline Mode"
-                data-testid="toggle-restore-online"
-                className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-extrabold text-amber-800 dark:text-amber-200 transition hover:bg-amber-500/25"
-              >
-                <WifiOff size={13} className="text-amber-600 dark:text-amber-400" />
-                <span>Offline Mode</span>
-              </button>
+            {!isOnline && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-bold text-amber-800 dark:text-amber-200">
+                <WifiOff size={13} />
+                Offline
+              </span>
             )}
 
             <Link href="/alerts" data-testid="link-header-alerts" aria-label="Open alerts" className="relative rounded-full border border-border bg-card p-2.5 text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground"><Bell size={17} /><UnreadDot /></Link>

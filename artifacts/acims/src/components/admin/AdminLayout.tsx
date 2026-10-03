@@ -1,12 +1,8 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
-  BarChart3,
   Bell,
-  Bot,
   BusFront,
-  ClipboardList,
-  History,
   LayoutDashboard,
   LogOut,
   Map,
@@ -15,7 +11,6 @@ import {
   Route as RouteIcon,
   Satellite,
   Settings,
-  ShieldAlert,
   Timer,
   UserRound,
   UsersRound,
@@ -38,6 +33,7 @@ export type AdminSectionId =
   | 'students'
   | 'campus'
   | 'mtc'
+  | 'rec-transport'
   | 'navi'
   | 'analytics'
   | 'trip-history'
@@ -49,61 +45,41 @@ export type AdminSectionId =
 type NavItem = { id: AdminSectionId; label: string; icon: LucideIcon };
 type NavGroup = { title: string; items: NavItem[] };
 
+/** Admin nav focused on routes, pickup/drop stops, fleet GPS, and student assignment */
 export const ADMIN_NAV: NavGroup[] = [
   {
-    title: 'Command',
+    title: 'Live ops',
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'map', label: 'Live Map', icon: Map },
-    ],
-  },
-  {
-    title: 'Transport',
-    items: [
-      { id: 'college-route', label: 'College route', icon: RouteIcon },
-      { id: 'buses', label: 'Buses', icon: BusFront },
-      { id: 'drivers', label: 'Drivers', icon: UserRound },
-      { id: 'routes', label: 'Routes', icon: RouteIcon },
-      { id: 'shifts', label: 'Shift Management', icon: MapPin },
-      { id: 'pickups', label: 'Pickup Points', icon: MapPin },
-      { id: 'trips', label: 'Trips', icon: Activity },
-    ],
-  },
-  {
-    title: 'Monitoring',
-    items: [
-      { id: 'gps', label: 'GPS Monitor', icon: Satellite },
-      { id: 'eta-delays', label: 'ETA & Delays', icon: Timer },
+      { id: 'map', label: 'Live map', icon: Map },
+      { id: 'gps', label: 'GPS monitor', icon: Satellite },
+      { id: 'eta-delays', label: 'ETA & delays', icon: Timer },
       { id: 'notifications', label: 'Notifications', icon: Bell },
     ],
   },
   {
-    title: 'People & Campus',
+    title: 'Routes & stops',
     items: [
+      { id: 'college-route', label: 'Active college routes', icon: RouteIcon },
+      { id: 'routes', label: 'Bus routes', icon: RouteIcon },
+      { id: 'pickups', label: 'Pickup / drop stops', icon: MapPin },
+      { id: 'shifts', label: 'Shifts', icon: Timer },
+    ],
+  },
+  {
+    title: 'Fleet & people',
+    items: [
+      { id: 'buses', label: 'Buses', icon: BusFront },
+      { id: 'drivers', label: 'Drivers', icon: UserRound },
       { id: 'students', label: 'Students', icon: UsersRound },
-      { id: 'campus', label: 'Campus', icon: MapPin },
+      { id: 'trips', label: 'Trips', icon: Activity },
     ],
   },
   {
-    title: 'Integrations',
+    title: 'Data',
     items: [
-      { id: 'mtc', label: 'Public Transport', icon: Radio },
-      { id: 'navi', label: 'NAVI AI', icon: Bot },
-    ],
-  },
-  {
-    title: 'Insights',
-    items: [
-      { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-      { id: 'trip-history', label: 'Trip History', icon: History },
-      { id: 'audit', label: 'Admin Activity', icon: ClipboardList },
-    ],
-  },
-  {
-    title: 'Operations',
-    items: [
-      { id: 'queues', label: 'Queues', icon: UsersRound },
-      { id: 'safety', label: 'Safety', icon: ShieldAlert },
+      { id: 'mtc', label: 'Public transit feed', icon: Radio },
+      { id: 'rec-transport', label: 'REC official routes', icon: RouteIcon },
       { id: 'settings', label: 'Settings', icon: Settings },
     ],
   },

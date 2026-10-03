@@ -52,18 +52,20 @@ export async function getOrCreateProfile(
 
     // Create corresponding role table entry
     if (role === 'STUDENT') {
-      let assignedBusId = 'bus-12';
-      let assignedRouteId = 'route-bus-12';
-      let pickupStopId = 'tambaram';
+      let assignedBusId: string | null = null;
+      let assignedRouteId: string | null = null;
+      let pickupStopId: string | null = null;
       try {
-        const { getMvpCollegeRoute } = await import(
+        const { getMvpCollegeRoute, isMvpCollegeRouteActive } = await import(
           '../../artifacts/api-server/src/services/mvpCollegeRouteService.ts'
         );
-        const mvp = getMvpCollegeRoute();
-        assignedBusId = mvp.busId;
-        assignedRouteId = mvp.routeId;
+        if (isMvpCollegeRouteActive()) {
+          const mvp = getMvpCollegeRoute();
+          assignedBusId = mvp.busId;
+          assignedRouteId = mvp.routeId;
+        }
       } catch {
-        /* defaults */
+        /* leave unassigned until student picks an official pickup */
       }
       await db.insert(students).values({
         profileId: newProfile.id,
@@ -75,7 +77,6 @@ export async function getOrCreateProfile(
     } else if (role === 'DRIVER') {
       await db.insert(drivers).values({
         profileId: newProfile.id,
-        assignedBusId: 'bus-12',
       });
     }
 
@@ -155,7 +156,9 @@ export async function bindStudentPickupByUserId(userId: string, pickupPointId: s
 
 export async function getDbBuses() {
   try {
-    return await db.select().from(buses).orderBy(buses.busNumber);
+    const { DUMMY_BUS_IDS } = await import("../../artifacts/api-server/src/services/recTransport/collegeFleetService.ts");
+    const rows = await db.select().from(buses).orderBy(buses.busNumber);
+    return rows.filter((b) => !(DUMMY_BUS_IDS as readonly string[]).includes(b.id));
   } catch (error) {
     console.error('Error fetching buses from DB:', error);
     return [];
@@ -211,7 +214,9 @@ export async function updateDbBus(busId: string, updates: Partial<{
 
 export async function getDbRoutes() {
   try {
-    return await db.select().from(busRoutes).orderBy(busRoutes.routeCode);
+    const { DUMMY_ROUTE_IDS } = await import("../../artifacts/api-server/src/services/recTransport/collegeFleetService.ts");
+    const rows = await db.select().from(busRoutes).orderBy(busRoutes.routeCode);
+    return rows.filter((r) => !(DUMMY_ROUTE_IDS as readonly string[]).includes(r.id));
   } catch (error) {
     console.error('Error fetching routes:', error);
     return [];

@@ -743,44 +743,16 @@ export function toolSearchJourney(input: {
     });
   }
 
-  // If no direct public routes found, check ACIMS college bus
+  // If no direct public routes found, do not invent an ACIMS timetable.
   if (journeyOptions.length === 0) {
-    const acimsRoutes = getAllRoutes();
-    const match = acimsRoutes.find((r) =>
-      r.name.toLowerCase().includes(input.originText.toLowerCase()) ||
-      r.stops.some((s) => s.name.toLowerCase().includes(input.originText.toLowerCase()))
-    ) || acimsRoutes[0];
-
-    journeyOptions.push({
-      optionNumber: 1,
-      summary: `ACIMS Bus #${match.routeNumber} (${match.name}): Direct College Transport`,
-      mode: "Direct ACIMS Bus",
-      departureTime: "07:20 AM",
-      arrivalTime: "08:15 AM",
-      totalDurationMinutes: 55,
-      transfers: 0,
-      steps: [
-        {
-          stepType: "walk",
-          instruction: `Walk to ${match.stops[0].name}`,
-          fromName: input.originText,
-          toName: match.stops[0].name,
-          durationMinutes: 5,
-        },
-        {
-          stepType: "bus",
-          instruction: `Board ACIMS Bus #${match.routeNumber} direct to REC Campus`,
-          fromName: match.stops[0].name,
-          toName: "Rajalakshmi Engineering College (REC)",
-          serviceNumber: match.routeNumber,
-          serviceName: match.name,
-          departureTime: "07:20 AM",
-          arrivalTime: "08:15 AM",
-          durationMinutes: 50,
-        },
-      ],
-      source: "ACIMS Campus Mobility Network",
-    });
+    return {
+      journeyOptions: [],
+      metadata: {
+        source: "No verified journey options in ACIMS or official MTC/CUMTA data",
+        sourceType: "official",
+        lastUpdated: new Date().toISOString(),
+      },
+    };
   }
 
   return {

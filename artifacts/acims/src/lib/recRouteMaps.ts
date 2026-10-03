@@ -1,6 +1,9 @@
 /** Official Rajalakshmi Engineering College outer-city bus route maps (fit25.com). */
 export const REC_OUTER_CITY_ROUTE_MAP_URL = 'https://fit25.com/recroutes/map00C.php';
 
+/** Official REC college-bus timetable (routes, boarding points, start times). Override via env/admin sync URL. */
+export const REC_TRANSPORT_TIMETABLE_URL = 'https://www.rectransport.com/js/146routedec25.php';
+
 export const REC_ROUTE_MAP_LINKS = [
   {
     id: 'outer-city-c',

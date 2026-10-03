@@ -119,7 +119,7 @@ export default function Dashboard() {
       busNumber: match?.busNumber ?? '12',
       origin: match?.origin ?? 'Vandalur Transit Hub',
       destination: match?.destination ?? 'Academic Quad',
-      routeLabel: match?.routeLabel ?? 'Campus Loop A',
+      routeLabel: match?.routeLabel ?? 'College bus',
       capacity: snap?.capacity ?? 45,
       currentLocation: { latitude: 12.9161, longitude: 80.1119 },
       nextStop: snap?.lastStop ?? match?.stops?.[2]?.name ?? 'Tambaram Terminal',
@@ -135,14 +135,30 @@ export default function Dashboard() {
   const busId = activeBus?.id ?? '';
   const pickupStopId = profile?.pickupStopId ?? '';
   const routeId =
-    collegeRouteQuery.data?.routeId || profile?.assignedRouteId || activeBus?.routeId || 'route-bus-12';
+    collegeRouteQuery.data?.routeId || profile?.assignedRouteId || activeBus?.routeId || '';
 
   const pickupPointsQuery = useQuery({
-    queryKey: ['mobility', 'pickup-points', routeId],
+    queryKey: ['mobility', 'pickup-points', profile?.userId, profile?.assignedRouteId],
     queryFn: async () => {
-      const res = await fetch(`/api/mobility/pickup-points?routeId=${encodeURIComponent(routeId)}`);
-      if (!res.ok) throw new Error('pickup points');
-      return (await res.json()) as Array<{ id: string; stopName: string }>;
+      const res = await fetch('/api/student/pickup-point/options', {
+        headers: studentMobilityHeaders(token, profile),
+      });
+      if (!res.ok) {
+        const fallback = await fetch('/api/mobility/pickup-points');
+        if (!fallback.ok) throw new Error('pickup points');
+        return (await fallback.json()) as Array<{
+          id: string;
+          stopName: string;
+          routeId?: string;
+          scheduledTimeDisplay?: string | null;
+        }>;
+      }
+      return (await res.json()) as Array<{
+        id: string;
+        stopName: string;
+        routeId?: string;
+        scheduledTimeDisplay?: string | null;
+      }>;
     },
     enabled: isOnline,
   });
@@ -410,9 +426,16 @@ export default function Dashboard() {
               onChange={(e) => void savePickupPoint(e.target.value)}
               className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-bold"
             >
-              {(pickupPointsQuery.data ?? []).map((p) => (
-                <option key={p.id} value={p.id}>{p.stopName}</option>
-              ))}
+              <option value="">Select official pickup point</option>
+              {(pickupPointsQuery.data ?? []).map((p) => {
+                const routeNo = p.routeId?.startsWith('rec-route-')
+                  ? p.routeId.slice('rec-route-'.length).toUpperCase()
+                  : '';
+                const label = [routeNo, p.stopName, p.scheduledTimeDisplay].filter(Boolean).join(' · ');
+                return (
+                  <option key={p.id} value={p.id}>{label || p.stopName}</option>
+                );
+              })}
             </select>
           </div>
           {pickupEta?.pickupStopName && (

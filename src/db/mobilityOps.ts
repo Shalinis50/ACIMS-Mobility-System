@@ -25,34 +25,42 @@ function shiftsOverlap(
 // ---------- Pickup points ----------
 export async function listPickupPoints(routeId?: string) {
   if (routeId) {
-    return db.select().from(officialPickupPoints).where(eq(officialPickupPoints.routeId, routeId));
+    return db.select().from(officialPickupPoints).where(and(eq(officialPickupPoints.routeId, routeId), eq(officialPickupPoints.active, true)));
   }
-  return db.select().from(officialPickupPoints);
+  return db.select().from(officialPickupPoints).where(eq(officialPickupPoints.active, true));
 }
 
 export async function upsertPickupPoint(input: {
   id: string;
   routeId: string;
   stopName: string;
-  latitude: number;
-  longitude: number;
+  latitude?: number | null;
+  longitude?: number | null;
   sequenceNumber: number;
   geofenceRadiusM?: number;
   expectedOffsetMinutes?: number;
+  scheduledTimeDisplay?: string | null;
+  scheduledTime24?: string | null;
+  source?: string;
   active?: boolean;
 }) {
   const existing = await db.select().from(officialPickupPoints).where(eq(officialPickupPoints.id, input.id));
+  const latitude = input.latitude !== undefined ? input.latitude : existing[0]?.latitude ?? null;
+  const longitude = input.longitude !== undefined ? input.longitude : existing[0]?.longitude ?? null;
   if (existing.length) {
     const updated = await db
       .update(officialPickupPoints)
       .set({
         routeId: input.routeId,
         stopName: input.stopName,
-        latitude: input.latitude,
-        longitude: input.longitude,
+        latitude,
+        longitude,
         sequenceNumber: input.sequenceNumber,
         geofenceRadiusM: input.geofenceRadiusM ?? 150,
         expectedOffsetMinutes: input.expectedOffsetMinutes ?? 0,
+        scheduledTimeDisplay: input.scheduledTimeDisplay !== undefined ? input.scheduledTimeDisplay : existing[0].scheduledTimeDisplay,
+        scheduledTime24: input.scheduledTime24 !== undefined ? input.scheduledTime24 : existing[0].scheduledTime24,
+        source: input.source ?? existing[0].source ?? "ADMIN",
         active: input.active ?? true,
       })
       .where(eq(officialPickupPoints.id, input.id))
@@ -65,11 +73,14 @@ export async function upsertPickupPoint(input: {
       id: input.id,
       routeId: input.routeId,
       stopName: input.stopName,
-      latitude: input.latitude,
-      longitude: input.longitude,
+      latitude,
+      longitude,
       sequenceNumber: input.sequenceNumber,
       geofenceRadiusM: input.geofenceRadiusM ?? 150,
       expectedOffsetMinutes: input.expectedOffsetMinutes ?? 0,
+      scheduledTimeDisplay: input.scheduledTimeDisplay ?? null,
+      scheduledTime24: input.scheduledTime24 ?? null,
+      source: input.source ?? "ADMIN",
       active: input.active ?? true,
     })
     .returning();

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNetworkStatus } from '@/hooks/use-network';
 import { Link } from 'wouter';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BusFront, MapPin, RefreshCw, Settings2 } from 'lucide-react';
+import { AlertTriangle, BusFront, MapPin, RefreshCw, Settings2, TrainFront } from 'lucide-react';
 import { PageHeading, ErrorState } from '@/components/acims-ui';
 import { useAuth } from '@/lib/auth-context';
 import { studentMobilityHeaders } from '@/lib/mobilityApi';
@@ -126,7 +126,9 @@ export default function MyBusPage() {
     }
   }
 
-  async function savePrefs(patch: Partial<{ delayAlerts: boolean; arrivalReminders10Min: boolean }>) {
+  async function savePrefs(
+    patch: Partial<{ delayAlerts: boolean; arrivalReminders10Min: boolean; arrivalReminders5Min: boolean }>,
+  ) {
     await fetch('/api/student/notification-preferences', {
       method: 'PUT',
       headers,
@@ -251,6 +253,27 @@ export default function MyBusPage() {
               </Link>
             </div>
           )}
+
+          {data.stopPassed && (
+            <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                <div className="space-y-2">
+                  <p className="font-semibold text-amber-950 dark:text-amber-100">College bus may have passed your pickup</p>
+                  <p className="text-sm text-amber-900/80 dark:text-amber-200/80">
+                    We can show MTC, metro, and rail options near your current location.
+                  </p>
+                  <Link
+                    href="/public-transport?missed=1"
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground"
+                  >
+                    <TrainFront size={14} />
+                    View public transport options
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -288,7 +311,7 @@ export default function MyBusPage() {
             <input
               type="checkbox"
               checked={prefsQuery.data.arrivalReminders5Min}
-              onChange={(e) => savePrefs({ arrivalReminders10Min: e.target.checked })}
+              onChange={(e) => savePrefs({ arrivalReminders5Min: e.target.checked })}
             />
             5 minutes before arrival
           </label>

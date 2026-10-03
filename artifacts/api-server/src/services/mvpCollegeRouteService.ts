@@ -25,12 +25,12 @@ export type MvpCollegeRouteConfig = {
 const CONFIG_PATH = path.resolve(process.cwd(), "data/college-mvp-route.json");
 
 const DEFAULT_CONFIG: MvpCollegeRouteConfig = {
-  enabled: true,
-  routeId: process.env.ACIMS_MVP_ROUTE_ID ?? "route-bus-12",
-  busId: process.env.ACIMS_MVP_BUS_ID ?? "bus-12",
+  enabled: false,
+  routeId: process.env.ACIMS_MVP_ROUTE_ID ?? "",
+  busId: process.env.ACIMS_MVP_BUS_ID ?? "",
   routeLabel: "College bus route",
-  morningShiftStart: process.env.ACIMS_MVP_SHIFT_START ?? "07:30",
-  morningShiftEnd: process.env.ACIMS_MVP_SHIFT_END ?? "09:30",
+  morningShiftStart: process.env.ACIMS_MVP_SHIFT_START ?? "",
+  morningShiftEnd: process.env.ACIMS_MVP_SHIFT_END ?? "",
 };
 
 let cached: MvpCollegeRouteConfig | null = null;
@@ -52,7 +52,12 @@ export function getMvpCollegeRoute(): MvpCollegeRouteConfig {
 }
 
 export function isMvpCollegeRouteActive(): boolean {
-  return getMvpCollegeRoute().enabled;
+  const config = getMvpCollegeRoute();
+  if (!config.enabled || !config.routeId || !config.busId) return false;
+  if (config.routeId.startsWith("route-bus-") || config.busId.startsWith("bus-12") || config.busId.startsWith("bus-18")) {
+    return false;
+  }
+  return true;
 }
 
 export function isBusOnCollegeRoute(busId: string): boolean {
@@ -131,6 +136,7 @@ async function seedPickupPointsForMvpRoute(config: MvpCollegeRouteConfig) {
   }
   const all = await listPickupPoints();
   for (const p of all) {
+    if (p.source === "REC_TRANSPORT" || p.id.startsWith("rec-stop-")) continue;
     if (p.routeId !== config.routeId && p.active) {
       await upsertPickupPoint({
         id: p.id,

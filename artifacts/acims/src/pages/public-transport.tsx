@@ -218,11 +218,8 @@ export default function PublicTransportPage() {
     );
   };
 
-  // Trigger Missed Bus Assistant
-  const handleMissedBusCheck = async () => {
+  const fetchMissedBusAlternatives = async (lat: number, lon: number) => {
     setIsCheckingMissedBus(true);
-    const lat = userCoords?.lat || 13.0084; // REC Thandalam
-    const lon = userCoords?.lon || 80.0033;
     try {
       const res = await fetch(`/api/transit/missed-bus-alternatives?lat=${lat}&lon=${lon}`);
       if (res.ok) {
@@ -232,6 +229,12 @@ export default function PublicTransportPage() {
     } finally {
       setIsCheckingMissedBus(false);
     }
+  };
+
+  const handleMissedBusCheck = async () => {
+    const lat = userCoords?.lat ?? 13.0084;
+    const lon = userCoords?.lon ?? 80.0033;
+    await fetchMissedBusAlternatives(lat, lon);
   };
 
   useEffect(() => {
@@ -256,48 +259,52 @@ export default function PublicTransportPage() {
       .catch(() => {});
   }, []);
 
-  // Run initial searches on mount
   useEffect(() => {
-    handleJourneySearch('Tambaram', 'Thandalam');
-    handleRouteSearch('S70');
-    handleLocateMe();
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('missed') !== '1') return;
+
+    setActiveTab('missed_bus');
+    if (!navigator.geolocation) {
+      void fetchMissedBusAlternatives(13.0084, 80.0033);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        setUserCoords(coords);
+        void fetchMissedBusAlternatives(coords.lat, coords.lon);
+      },
+      () => {
+        void fetchMissedBusAlternatives(13.0084, 80.0033);
+      },
+      { timeout: 7000 },
+    );
   }, []);
 
   return (
     <div className="page-in space-y-6">
       <PageHeading
-        eyebrow="Chennai Public Transport Layer"
-        title="Real Chennai Public Transit"
-        description="Authoritative schedules and network data for Metropolitan Transport Corporation (MTC) buses, Chennai Metro (CMRL), and Southern Railway suburban rail."
+        eyebrow="Backup commute"
+        title="Public transport"
+        description="If you miss the college bus, plan MTC, metro, or suburban rail from where you are now."
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="flex items-center gap-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
-              <Database size={13} />
-              <span>4,627 Real Routes Loaded</span>
-            </span>
-            <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
-              <CheckCircle2 size={13} />
-              <span>CUMTA / MTC GTFS Verified</span>
-            </span>
-            <Link
-              href="/rec-routes"
-              className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-bold hover:bg-muted"
-            >
-              <RouteIcon size={13} />
-              <span>Official REC outer city map</span>
-            </Link>
-          </div>
+          <Link
+            href="/rec-routes"
+            className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-bold hover:bg-muted"
+          >
+            <RouteIcon size={13} />
+            <span>REC city bus route map</span>
+          </Link>
         }
       />
 
       {/* Navigation Mode Tabs */}
       <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
         {[
-          { id: 'search', label: 'Journey Search & Timetables', icon: Search },
-          { id: 'nearby', label: 'Nearby Real Stops & Stations', icon: LocateFixed },
-          { id: 'routes', label: 'MTC & Metro Route Directory', icon: RouteIcon },
-          { id: 'missed_bus', label: 'Missed Bus Assistant', icon: AlertTriangle },
-          { id: 'provenance', label: 'Data Provenance & Source', icon: Database },
+          { id: 'missed_bus', label: 'Missed college bus', icon: AlertTriangle },
+          { id: 'nearby', label: 'Near me', icon: LocateFixed },
+          { id: 'search', label: 'Plan a trip', icon: Search },
+          { id: 'routes', label: 'Route directory', icon: RouteIcon },
         ].map((tab) => {
           const Icon = tab.icon;
           return (

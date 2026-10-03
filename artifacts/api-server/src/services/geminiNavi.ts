@@ -21,6 +21,26 @@ function markGeminiSuccess() {
   lastGeminiSuccessAt = new Date().toISOString();
 }
 
+const MOBI_SYSTEM_PROMPT = `You are MOBI, the mobility assistant for ACIMS.
+
+You must only provide information supported by the data returned by ACIMS backend tools or explicitly integrated authoritative sources.
+
+Never invent buses, drivers, routes, pickup points, timings, GPS locations, ETAs, delays, campus locations, MTC routes, or availability.
+
+Never estimate a value when the system has not provided enough information.
+
+If required data is unavailable, explicitly state that the information is currently unavailable.
+
+Do not pretend that a backend action was completed unless the backend confirms success.
+
+Do not claim that a bus is moving unless recent GPS data confirms it.
+
+Do not claim that a bus is delayed unless the delay service calculates a delay.
+
+Do not claim that a bus has arrived unless the arrival/geofence system confirms arrival.
+
+Always prefer 'I don't have enough current data to answer that reliably' over guessing.`;
+
 function getModel() {
   const apiKey = getGeminiApiKey();
   if (!apiKey) return null;
@@ -28,9 +48,10 @@ function getModel() {
   const genAI = new GoogleGenerativeAI(apiKey);
   return genAI.getGenerativeModel({
     model: modelName,
+    systemInstruction: MOBI_SYSTEM_PROMPT,
     generationConfig: {
-      temperature: 0.55,
-      maxOutputTokens: 1200,
+      temperature: 0.2,
+      maxOutputTokens: 800,
     },
   });
 }
@@ -39,7 +60,7 @@ function formatHistory(history: NaviHistoryTurn[]): string {
   if (!history.length) return "(no prior turns)";
   return history
     .slice(-8)
-    .map((t) => `${t.role === "user" ? "Student" : "NAVI"}: ${t.text}`)
+    .map((t) => `${t.role === "user" ? "Student" : "MOBI"}: ${t.text}`)
     .join("\n");
 }
 
@@ -58,17 +79,15 @@ export async function enhanceNaviAnswerWithGemini(params: {
   if (!model) return null;
 
   try {
-    const prompt = `You are NAVI, the ACIMS mobility assistant for Rajalakshmi Engineering College (REC), Chennai.
-
-Rewrite VERIFIED_ANSWER for the student in clear, friendly Indian English. Use short paragraphs or bullet lines when helpful. Match the tone of the conversation when CHAT_HISTORY is relevant.
+    const prompt = `Rewrite VERIFIED_ANSWER as MOBI in short, clear spoken Indian English (one or two sentences for simple questions).
 
 STRICT RULES:
-- If the user question is not about transport, commute, campus travel, or ACIMS mobility, respond with exactly: {"answer":"Please ask something related to your transport or daily commute — I can only help with buses, pickup, and campus mobility.","ttsText":"Please ask about your commute or bus.","followUps":[]}
-- Use ONLY facts from VERIFIED_ANSWER. Never invent buses, routes, ETAs, delays, or stop names.
+- Use ONLY facts from VERIFIED_ANSWER. Never invent buses, routes, ETAs, delays, GPS, campus buildings, or MTC data.
 - Keep all numbers, bus numbers, times, and place names exactly as in VERIFIED_ANSWER.
-- If data is unavailable in VERIFIED_ANSWER, say so plainly.
-- ttsText must be one concise sentence for voice readout (under 45 words), same facts only.
-- followUps: 2-3 short suggested next questions the student might ask (strings only), commute-related.
+- If VERIFIED_ANSWER says data is unavailable, keep that honesty. Never fill gaps.
+- Distinguish scheduled vs predicted vs live when both appear.
+- ttsText must be the same facts, under 45 words, no extra information.
+- followUps: 2-3 short commute questions only.
 
 CHAT_HISTORY:
 ${formatHistory(params.history ?? [])}
@@ -104,7 +123,7 @@ Reply with JSON only, no markdown:
         : undefined,
     };
   } catch (err) {
-    console.warn("[NAVI Gemini] enhancement failed:", err instanceof Error ? err.message : err);
+    console.warn("[MOBI Gemini] enhancement failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -123,17 +142,14 @@ export async function generateConversationalNaviReply(params: {
   if (!model) return null;
 
   try {
-    const prompt = `You are NAVI, ACIMS mobility assistant for REC Chennai students.
-
-Respond naturally to the student's message. Be warm, concise, and practical (Indian English).
+    const prompt = `Respond as MOBI. Be short, clear, and helpful.
 
 STRICT RULES:
-- If STUDENT_MESSAGE is not about transport, commute, greetings, thanks, or campus mobility, respond with exactly: {"answer":"Please ask something related to your transport or daily commute — I can only help with buses, pickup, and campus mobility.","ttsText":"Please ask about your commute or bus.","followUps":[]}
 - Use ONLY facts in LIVE_CONTEXT for bus location, ETA, delays, or schedules.
-- Never invent GPS, bus numbers, or times not in LIVE_CONTEXT.
+- Never invent GPS, bus numbers, times, or MTC data not in LIVE_CONTEXT.
 - If they greet you, greet back and offer 2-3 things you can help with (from context).
-- If they thank you or say bye, respond briefly and kindly.
-- followUps: 2-3 short suggested questions they can tap next.
+- If they thank you or say bye, respond briefly.
+- followUps: 2-3 short suggested questions.
 
 STUDENT_NAME: ${params.studentName}
 
@@ -169,7 +185,7 @@ JSON only:
         : undefined,
     };
   } catch (err) {
-    console.warn("[NAVI Gemini] conversational failed:", err instanceof Error ? err.message : err);
+    console.warn("[MOBI Gemini] conversational failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }

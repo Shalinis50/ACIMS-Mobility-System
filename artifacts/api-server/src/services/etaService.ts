@@ -16,8 +16,8 @@ export type StudentPickupEtaResult = {
   pickup: {
     id: string;
     name: string;
-    latitude: number;
-    longitude: number;
+    latitude: number | null;
+    longitude: number | null;
     sequenceNumber: number;
   };
   etaMinutes: number | null;
@@ -48,10 +48,14 @@ export async function computeStudentPickupEta(studentUserId: string): Promise<St
   if (!pickupView) return null;
 
   const mvp = getMvpCollegeRoute();
-  const busId =
-    isMvpCollegeRouteActive() ? mvp.busId : pickupView.assignedBusId;
+  const recPickup = pickupView.routeId.startsWith("rec-route-");
+  const busId = recPickup
+    ? pickupView.assignedBusId
+    : isMvpCollegeRouteActive()
+      ? mvp.busId
+      : pickupView.assignedBusId;
   if (!busId) return null;
-  if (isMvpCollegeRouteActive() && pickupView.assignedRouteId && pickupView.assignedRouteId !== mvp.routeId) {
+  if (!recPickup && isMvpCollegeRouteActive() && pickupView.assignedRouteId && pickupView.assignedRouteId !== mvp.routeId) {
     return null;
   }
 

@@ -48,6 +48,7 @@ import { AdminMobilityPanel } from '@/components/admin/AdminMobilityPanel';
 import { AdminShiftManagement } from '@/components/admin/AdminShiftManagement';
 import { AdminMvpCollegeRoutePanel } from '@/components/admin/AdminMvpCollegeRoutePanel';
 import { AdminMtcPanel } from '@/components/admin/AdminMtcPanel';
+import { AdminRecTransportPanel } from '@/components/admin/AdminRecTransportPanel';
 import { AdminLayout, parseAdminSection, type AdminSectionId } from '@/components/admin/AdminLayout';
 import {
   AdminAnalyticsPanel,
@@ -361,6 +362,7 @@ export default function AdminPage() {
       )}
       {activeSection === 'pickups' && <AdminMobilityPanel buses={buses} drivers={drivers} />}
       {activeSection === 'mtc' && <AdminMtcPanel />}
+      {activeSection === 'rec-transport' && <AdminRecTransportPanel />}
       {activeSection === 'gps' && <AdminGpsMonitor />}
       {activeSection === 'eta-delays' && <AdminEtaDelays />}
       {activeSection === 'notifications' && <AdminNotificationsPanel />}

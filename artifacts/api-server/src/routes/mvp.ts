@@ -4,6 +4,7 @@ import { getDbBuses, getDbRoutes } from "../../../../src/db/services.ts";
 import { listPickupPoints } from "../../../../src/db/mobilityOps.ts";
 import {
   getMvpCollegeRoute,
+  isMvpCollegeRouteActive,
   setMvpCollegeRoute,
 } from "../services/mvpCollegeRouteService.ts";
 import { getRouteForBus } from "../services/routesData.ts";
@@ -12,9 +13,28 @@ import type { AuthRequest } from "../../../../src/middleware/auth.ts";
 
 const router: IRouter = Router();
 
-/** Public: active college route for student app (single-route MVP). */
+/** Public: student transport assignment. Dummy single-route MVP is disabled when official REC fleet exists. */
 router.get("/mvp/college-route", async (_req, res) => {
   const config = getMvpCollegeRoute();
+  if (!isMvpCollegeRouteActive()) {
+    const pickups = (await listPickupPoints()).filter((p) => p.active);
+    return res.json({
+      enabled: false,
+      routeId: null,
+      busId: null,
+      busNumber: null,
+      routeLabel: "Official REC college buses",
+      morningShiftStart: null,
+      morningShiftEnd: null,
+      directionLabel: "Home → College",
+      pickupPoints: pickups.map((p) => ({
+        id: p.id,
+        stopName: p.stopName,
+        sequenceNumber: p.sequenceNumber,
+        scheduledTimeDisplay: p.scheduledTimeDisplay ?? null,
+      })),
+    });
+  }
   const routeDef = getRouteForBus(config.busId);
   const pickups = (await listPickupPoints(config.routeId)).filter((p) => p.active);
   const buses = await getDbBuses();

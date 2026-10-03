@@ -411,8 +411,21 @@ export function getRouteById(routeId: string): RouteDefinition | undefined {
 }
 
 export function getRouteForBus(busId: string): RouteDefinition {
-  const routeId = busToRouteMap[busId] || "route-bus-18";
-  return routeRegistry[routeId] || routeBus18;
+  const routeId = busToRouteMap[busId];
+  const known = routeId ? routeRegistry[routeId] : undefined;
+  if (known) return known;
+  return {
+    id: busId,
+    routeNumber: "",
+    name: "College bus",
+    origin: "",
+    destination: "",
+    stops: [],
+    path: [],
+    cumulativeDistances: [0],
+    totalDistanceKm: 0,
+    averageSpeedKmh: 22,
+  };
 }
 
 export function getAllRoutes(): RouteDefinition[] {

@@ -10,9 +10,11 @@ type PickupPoint = {
   id: string;
   routeId: string;
   stopName: string;
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   sequenceNumber: number;
+  scheduledTimeDisplay?: string | null;
+  source?: string;
 };
 type TripRow = {
   id: string;
@@ -135,15 +137,28 @@ export function AdminMobilityPanel({ buses, drivers }: { buses: AdminBus[]; driv
         <div className="grid gap-5 lg:grid-cols-[1fr_.9fr]">
           <div className="rounded-[28px] border border-border bg-card p-6 max-h-[480px] overflow-y-auto">
             <h3 className="text-lg font-extrabold">Official pickup points</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Names and timings come from REC Transport. Coordinates stay empty until an admin sets them — they are not invented.
+            </p>
             <ul className="mt-4 space-y-2">
               {(pickupsQuery.data ?? []).map((p) => (
                 <li key={p.id} className="rounded-xl border border-border px-4 py-3 text-sm">
                   <span className="font-extrabold">{p.stopName}</span>
                   <div className="text-xs text-muted-foreground">
-                    {p.id} · seq {p.sequenceNumber} · {p.latitude.toFixed(4)}, {p.longitude.toFixed(4)}
+                    {p.routeId.replace(/^rec-route-/, '').toUpperCase()}
+                    {p.scheduledTimeDisplay ? ` · ${p.scheduledTimeDisplay}` : ''}
+                    {' · '}
+                    {p.latitude != null && p.longitude != null
+                      ? `${p.latitude.toFixed(4)}, ${p.longitude.toFixed(4)}`
+                      : 'Coordinates not set'}
                   </div>
                 </li>
               ))}
+              {!(pickupsQuery.data ?? []).length && (
+                <li className="py-6 text-center text-xs text-muted-foreground">
+                  Data not available yet. Sync REC Transport, then update official pickup points.
+                </li>
+              )}
             </ul>
           </div>
           <div className="rounded-[28px] border border-border bg-card p-6 space-y-3">

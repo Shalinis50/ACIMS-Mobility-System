@@ -24,6 +24,8 @@ import {
 import { MapContainer, Marker, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import { divIcon } from 'leaflet';
 import { PageHeading } from '@/components/acims-ui';
+import { useAuth } from '@/lib/auth-context';
+import { studentMobilityHeaders } from '@/lib/mobilityApi';
 import 'leaflet/dist/leaflet.css';
 
 interface MessageCard {
@@ -61,6 +63,11 @@ interface MessageItem {
   ttsText?: string;
   followUps?: string[];
   geminiEnhanced?: boolean;
+  actionPrompt?: {
+    type: 'CHANGE_PICKUP';
+    currentName: string | null;
+    options: Array<{ id: string; name: string }>;
+  };
   time: string;
 }
 
@@ -74,14 +81,15 @@ interface StudentProfileState {
 }
 
 const promptSuggestions = [
-  'Where is my college bus?',
-  "What's my next bus?",
-  'Which buses are near me?',
+  'Where is my bus?',
+  'When will my bus reach my stop?',
+  'Is my bus delayed?',
+  'What time is my bus?',
+  'Where is my pickup point?',
   'I missed my bus. What can I take?',
-  'How do I get to REC from my stop?',
-  'When should I leave home?',
-  'What about public buses?',
-  'Where do I get down?',
+  'Where is the library?',
+  'Find the nearest bus stop.',
+  'How do I get to the auditorium?',
 ];
 
 const INDIAN_ENGLISH_LANG = 'en-IN';
@@ -183,11 +191,12 @@ function LeafletAutoCenter({ center }: { center: [number, number] }) {
 }
 
 export default function AiAgentPage() {
+  const { profile, token } = useAuth();
   const [studentId, setStudentId] = useState(() => {
     try {
-      return sessionStorage.getItem('acmis_student_session') || 'student-20418';
+      return profile?.userId || sessionStorage.getItem('acmis_student_session') || 'student-20418';
     } catch {
-      return 'student-20418';
+      return profile?.userId || 'student-20418';
     }
   });
 
@@ -218,7 +227,7 @@ export default function AiAgentPage() {
   const [messages, setMessages] = useState<MessageItem[]>([
     {
       role: 'assistant',
-      text: 'Hello Ananya! I am your personal ACIMS Mobility Assistant. I can check your college bus GPS, pickup stop timings, nearby MTC buses, Metro/Rail connections, and journey alternatives using verified transport data.',
+      text: "How can I help you? Ask about your bus, ETA, pickup point, campus locations, or MTC options. I only answer from live ACIMS data.",
       sources: ['ACIMS Student Identity & Transit Registry'],
       sourceBadge: {
         label: 'ACIMS Verified Network',
@@ -234,12 +243,19 @@ export default function AiAgentPage() {
   const [speechTranscript, setSpeechTranscript] = useState('');
   const [speechSupported, setSpeechSupported] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const sendQueryRef = useRef<
+    (text?: string, confirmAction?: { action: 'CHANGE_PICKUP'; pickupPointId?: string; confirmed?: boolean }) => Promise<void>
+  >(null);
 
   // Text-To-Speech (TTS) State
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
   const [ttsVoice, setTtsVoice] = useState<SpeechSynthesisVoice | null>(null);
   const [geminiEnabled, setGeminiEnabled] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (profile?.userId) setStudentId(profile.userId);
+  }, [profile?.userId]);
 
   useEffect(() => {
     if (!('speechSynthesis' in window)) return;
@@ -360,6 +376,13 @@ export default function AiAgentPage() {
 
       recognition.onend = () => {
         setIsListening(false);
+        setSpeechTranscript((current) => {
+          const trimmed = current.trim();
+          if (trimmed) {
+            void sendQueryRef.current?.(trimmed);
+          }
+          return current;
+        });
       };
 
       recognitionRef.current = recognition;
@@ -373,9 +396,6 @@ export default function AiAgentPage() {
     if (isListening) {
       recognitionRef.current.stop();
       setIsListening(false);
-      if (speechTranscript.trim()) {
-        sendQuery(speechTranscript.trim());
-      }
     } else {
       setSpeechTranscript('');
       try {
@@ -387,9 +407,12 @@ export default function AiAgentPage() {
   };
 
   // Submit query
-  const sendQuery = async (queryText?: string) => {
-    const textToSend = (queryText || message).trim();
-    if (!textToSend || isSubmitting) return;
+  const sendQuery = async (
+    queryText?: string,
+    confirmAction?: { action: 'CHANGE_PICKUP'; pickupPointId?: string; confirmed?: boolean },
+  ) => {
+    const textToSend = (queryText || message).trim() || (confirmAction ? 'Confirm pickup change' : '');
+    if ((!textToSend && !confirmAction) || isSubmitting) return;
 
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMessage: MessageItem = {
@@ -411,12 +434,13 @@ export default function AiAgentPage() {
     try {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: studentMobilityHeaders(token, profile),
         body: JSON.stringify({
           studentId,
           message: textToSend,
-          deviceCoords: deviceCoords || undefined,
+          deviceCoords: gpsStatus === 'granted' ? deviceCoords || undefined : undefined,
           history: conversationHistory,
+          confirmAction,
         }),
       });
 
@@ -433,19 +457,29 @@ export default function AiAgentPage() {
           ttsText: data.ttsText,
           followUps: data.followUps,
           geminiEnhanced: data.geminiEnhanced,
+          actionPrompt: data.actionPrompt,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
-        setMessages((prev) => [...prev, assistantMessage]);
+        setMessages((prev) => {
+          const next = [...prev, assistantMessage];
+          window.setTimeout(() => {
+            toggleSpeak(assistantMessage.ttsText || assistantMessage.text, next.length - 1);
+          }, 80);
+          return next;
+        });
       } else {
         throw new Error('Server returned an error');
       }
     } catch {
+      const fallback =
+        "I'm unable to retrieve that information right now.";
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          text: "I don't have reliable transport data for that right now. Please verify your connection or try another travel query.",
-          sources: ['ACIMS Fallback Safeguard'],
+          text: fallback,
+          sources: ['ACIMS MOBI'],
+          ttsText: fallback,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -453,6 +487,7 @@ export default function AiAgentPage() {
       setIsSubmitting(false);
     }
   };
+  sendQueryRef.current = sendQuery;
 
   // TTS Read Answer — Indian English (en-IN), female when available on device
   const toggleSpeak = (text: string, index: number) => {
@@ -494,9 +529,9 @@ export default function AiAgentPage() {
     <div className="page-in min-h-[calc(100vh-80px)]">
       {/* Header */}
       <PageHeading
-        eyebrow="Personal Mobility Assistant"
-        title="ACIMS AI"
-        description="Your dedicated transit intelligence companion. Grounded exclusively in verified CUMTA GTFS data, stop-specific timetables, and live college bus telemetry."
+        eyebrow="ACIMS Mobility Assistant"
+        title="MOBI"
+        description="How can I help you? Voice-first answers from live ACIMS buses, pickup points, campus map, and official MTC data — never guessed."
         action={
           <div className="flex flex-wrap items-center gap-2">
             {gpsStatus === 'granted' && deviceCoords ? (
@@ -556,11 +591,11 @@ export default function AiAgentPage() {
           {/* Prominent Voice Assistant Box */}
           <div className="rounded-[28px] border-2 border-accent/70 bg-gradient-to-br from-card to-accent/10 p-6 shadow-md text-center space-y-4">
             <div className="mono text-[10px] uppercase tracking-[0.2em] font-extrabold text-muted-foreground">
-              Voice Assistant
+              MOBI
             </div>
-            <h2 className="text-lg font-extrabold text-foreground">Ask anything about your commute</h2>
+            <h2 className="text-lg font-extrabold text-foreground">How can I help you?</h2>
             <p className="text-xs text-muted-foreground">
-              Tap the microphone to speak naturally. Speech recognition will query live transit schedules and bus telemetry.
+              Speak naturally. MOBI queries ACIMS data first, then answers in voice and text. It will not invent bus locations, ETAs, or MTC routes.
             </p>
             <p className="text-[10px] leading-4 text-muted-foreground">
               {ttsVoice
@@ -592,7 +627,7 @@ export default function AiAgentPage() {
             )}
 
             <div className="text-[11px] font-bold text-muted-foreground">
-              {isListening ? 'Tap mic again to submit query' : '🎙️ Tap to Speak'}
+              {isListening ? 'Listening… tap mic to stop' : '🎙️ Ask MOBI'}
             </div>
           </div>
 
@@ -630,8 +665,8 @@ export default function AiAgentPage() {
                 <Bot size={20} />
               </span>
               <div>
-                <div className="text-sm font-extrabold text-foreground">ACIMS Mobility Intelligence Desk</div>
-                <div className="text-[10px] text-muted-foreground">Personalized commute &amp; multi-modal transit</div>
+                <div className="text-sm font-extrabold text-foreground">MOBI</div>
+                <div className="text-[10px] text-muted-foreground">Real-time AI voice mobility assistant</div>
               </div>
             </div>
             <div className="flex flex-col items-end gap-1">
@@ -762,6 +797,29 @@ export default function AiAgentPage() {
                     </div>
                   )}
 
+                  {item.role === 'assistant' && item.actionPrompt?.type === 'CHANGE_PICKUP' && item.actionPrompt.options.length > 0 && (
+                    <div className="mt-3 space-y-1.5">
+                      <div className="text-[10px] font-bold text-muted-foreground">Confirm pickup change</div>
+                      {item.actionPrompt.options.map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() =>
+                            sendQuery(`Change pickup to ${opt.name}`, {
+                              action: 'CHANGE_PICKUP',
+                              pickupPointId: opt.id,
+                              confirmed: true,
+                            })
+                          }
+                          className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-left text-[11px] font-bold text-foreground hover:border-accent hover:bg-accent/10 disabled:opacity-50"
+                        >
+                          Confirm: {opt.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {item.role === 'assistant' && item.followUps && item.followUps.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {item.followUps.map((prompt) => (
@@ -818,8 +876,8 @@ export default function AiAgentPage() {
                 </span>
                 <div className="rounded-2xl bg-muted px-4 py-3 text-xs text-muted-foreground animate-pulse border border-border/50">
                   {geminiEnabled
-                    ? 'NAVI is checking live bus data, then shaping a natural reply with Gemini…'
-                    : 'Querying CUMTA GTFS schedules, student stop matrices, and live bus GPS…'}
+                    ? 'MOBI is querying ACIMS tools, then speaking a grounded reply…'
+                    : 'MOBI is querying ACIMS live data…'}
                 </div>
               </div>
             )}
@@ -851,7 +909,7 @@ export default function AiAgentPage() {
               data-testid="input-ai-message"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="Ask anything (e.g. When is my next bus? Did I miss my bus? Buses near me?)"
+              placeholder="Ask MOBI (e.g. Where is my bus?)"
               className="h-12 flex-1 rounded-xl border border-input bg-background px-4 text-xs font-medium text-foreground outline-none focus:ring-2 focus:ring-ring"
             />
 

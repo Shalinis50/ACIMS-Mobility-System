@@ -90,6 +90,11 @@ function Router() {
             <SafetyPage />
           </AcimsLayout>
         </Route>
+        <Route path="/mobi">
+          <AcimsLayout>
+            <AiAgentPage />
+          </AcimsLayout>
+        </Route>
         <Route path="/ai-agent">
           <AcimsLayout>
             <AiAgentPage />

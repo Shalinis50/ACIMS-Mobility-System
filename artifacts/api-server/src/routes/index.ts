@@ -15,6 +15,7 @@ import mobilityRouter from "./mobility";
 import mtcRouter from "./mtc";
 import studentTransportRouter from "./studentTransport";
 import mvpRouter from "./mvp";
+import recTransportRouter from "./recTransport";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use(mobilityRouter);
 router.use(mtcRouter);
 router.use(studentTransportRouter);
 router.use(mvpRouter);
+router.use(recTransportRouter);
 
 export default router;
