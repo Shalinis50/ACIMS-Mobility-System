@@ -1,8 +1,16 @@
 import { Router, type IRouter } from "express";
 import { answerMobilityQuestion, getAiContext } from "../services/ai";
+import { isGeminiConfigured } from "../services/geminiNavi";
 import { getStudentProfile, updateStudentProfile } from "../services/studentProfileService";
 
 const router: IRouter = Router();
+
+router.get("/ai/status", (_req, res) => {
+  res.json({
+    geminiEnabled: isGeminiConfigured(),
+    model: process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash",
+  });
+});
 
 router.get("/ai/context", async (req, res) => {
   try {

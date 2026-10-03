@@ -10,9 +10,12 @@
     "scripts"
   ],
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "tsx watch server.ts",
     "start": "node server.ts",
     "transit:sync": "tsx scripts/sync-transit.ts",
+    "mobility:seed": "tsx scripts/seed-mobility-core.ts",
+    "dev:reset": "rm -rf data/postgres && npm run dev",
+    "mtc:sync": "tsx scripts/mtc-sync.ts",
     "build": "vite build --config artifacts/acims/vite.config.ts && esbuild server-app.ts --bundle --platform=node --format=esm --external:express --external:cors --external:pino --external:pino-http --external:vite --external:pg --external:drizzle-orm --external:firebase-admin --outfile=server.bundle.js",
     "gcp-build": "npm run build",
     "lint": "tsc --noEmit",
@@ -23,8 +26,11 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@google/generative-ai": "^0.24.1",
     "@radix-ui/react-tooltip": "^1.2.16",
     "cors": "^2.8.5",
+    "dotenv": "^18.0.5",
     "drizzle-orm": "^0.45.3",
     "esbuild": "^0.28.2",
     "express": "^5.0.0",

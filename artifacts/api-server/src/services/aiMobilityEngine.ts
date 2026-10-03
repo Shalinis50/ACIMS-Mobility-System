@@ -18,6 +18,8 @@ import {
   type JourneyPlanOption,
 } from "./aiMobilityTools";
 import { REC_CAMPUS_CENTER } from "./campusData";
+import { buildMissedBusMtcOptions, isMtcDataAvailable, mtcUnavailableMessage } from "./mtc/mtcService.ts";
+import { MTC_SOURCE_LABEL } from "./mtc/mtcSchema.ts";
 
 function timeToMinutes(time24: string): number {
   if (!time24) return 0;
@@ -56,7 +58,9 @@ export type IntentType =
   | "STOP_DETAILS"
   | "METRO"
   | "RAIL"
-  | "GENERAL_TRANSPORT";
+  | "GENERAL_TRANSPORT"
+  | "CONVERSATION"
+  | "OUT_OF_SCOPE";
 
 export interface ConversationTurn {
   role: "user" | "assistant";
@@ -97,8 +101,128 @@ export interface AiMobilityResponse {
   ttsText: string;
 }
 
+const TRANSPORT_KEYWORDS =
+  /\b(bus|buses|mtc|metro|cmrl|train|rail|route|stop|eta|delay|gps|journey|tambaram|rec|college|pickup|leave|timing|schedule|nearby|missed|transport)\b/i;
+
+/** Topics NAVI is allowed to discuss (commute, campus movement, alerts). */
+const MOBILITY_IN_SCOPE =
+  /\b(bus|buses|mtc|metro|cmrl|train|rail|route|stop|eta|delay|gps|journey|tambaram|rec|rajalakshmi|college|pickup|leave|timing|schedule|nearby|missed|transport|campus|commute|shuttle|driver|navi|acims|boarding|queue|safety|alert|walk|direction|depart|arriv|suburban|feeder|track|fare|ticket|hostel|gate|block|library|auditorium|quad|destination|get\s+to|reach|how\s+do\s+i|where\s+is\s+my|where\s+is\s+the|take\s+me\s+to)\b/i;
+
+const OFF_TOPIC_PROMPT =
+  /\b(homework|assignment|essay|exam\s+question|solve\s+this|write\s+(a|an|me)\s+|code|python|javascript|typescript|react|recipe|cook|cricket|ipl|football\s+score|movie|netflix|song|lyrics|joke|poem|dating|crypto|bitcoin|stock\s+market|politics|election|president|prime\s+minister|weather\s+forecast|climate\s+change|who\s+is\s+(elon|trump|modi)|chatgpt|gpt-?\d|meaning\s+of\s+life|relationship\s+advice|medical\s+advice|diagnos)\b/i;
+
+function isSmallTalkMessage(text: string): boolean {
+  return /^(hi|hello|hey|hiya|yo|sup|good\s+(morning|afternoon|evening)|thanks|thank\s*you|thx|ok|okay|cool|bye|goodbye|help|what\s+can\s+you\s+do|who\s+are\s+you)[\s!.?]*$/i.test(
+    text,
+  );
+}
+
+/** Greetings and very short non-transport messages — never show a default journey plan. */
+export function isGreetingOrSmallTalk(message: string): boolean {
+  const text = message.toLowerCase().trim();
+  if (!text) return false;
+  if (isSmallTalkMessage(text)) return true;
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  return wordCount <= 2 && !TRANSPORT_KEYWORDS.test(text);
+}
+
+export async function buildConversationNaviResponse(
+  studentId: string,
+  deviceCoords?: {
+    latitude?: number;
+    longitude?: number;
+    accuracy?: number;
+    speed?: number;
+    heading?: number;
+    timestamp?: string;
+  },
+): Promise<AiMobilityResponse> {
+  const profile = toolGetStudentProfile(studentId).profile;
+  const busStatus = toolGetAcimsBusStatus(profile.assignedBusId);
+  const busLoc = toolGetAcimsBusLocation(profile.assignedBusId);
+  let etaLine = "";
+  try {
+    const eta = await toolCalculateEta(profile.assignedBusId, profile.pickupStopId);
+    if (eta.canCalculate) {
+      etaLine = `Pickup ETA at ${profile.pickupStopName}: ${eta.formattedEta}.`;
+    }
+  } catch {
+    // ignore
+  }
+  const firstName = profile.name.split(" ")[0] || "there";
+  const liveHint = busLoc.isLiveGps
+    ? `Bus #${busStatus.busNumber} GPS was updated ${busLoc.secondsSinceLastUpdate}s ago.`
+    : `Bus #${busStatus.busNumber} is on standby until driver GPS is active.`;
+
+  const answer = `Hi ${firstName}! I'm NAVI, your ACIMS mobility assistant for REC.\n\nRight now: ${liveHint} ${etaLine}\n\nYou can ask me things like:\n• Where is my college bus?\n• When should I leave for pickup?\n• Buses near me or MTC alternatives if you missed the shuttle\n\nWhat would you like to check first?`;
+
+  return {
+    answer,
+    intent: "CONVERSATION",
+    sources: ["ACIMS Student Profile", "Live Bus Telemetry"],
+    sourceBadge: {
+      label: busLoc.isLiveGps ? "Live GPS + Student Context" : "Student Context",
+      type: busLoc.isLiveGps ? "live GPS" : "official",
+      timestamp: new Date().toISOString(),
+    },
+    ttsText: `Hi ${firstName}. I can help with your bus, pickup timing, or public transport options. What do you need?`,
+  };
+}
+
+function isActiveTransportThread(history: ConversationTurn[]): boolean {
+  return history.slice(-6).some((t) => {
+    if (t.role === "user" && MOBILITY_IN_SCOPE.test(t.text)) return true;
+    if (t.role === "assistant" && t.intent && t.intent !== "OUT_OF_SCOPE" && t.intent !== "CONVERSATION") {
+      return true;
+    }
+    return false;
+  });
+}
+
+/** Returns true when the message should be refused (not answered). */
+export function isOutOfMobilityScope(message: string, history: ConversationTurn[] = []): boolean {
+  const text = message.toLowerCase().trim();
+  if (!text) return true;
+
+  if (isSmallTalkMessage(text)) return false;
+  if (MOBILITY_IN_SCOPE.test(text)) return false;
+
+  if (OFF_TOPIC_PROMPT.test(text)) return true;
+
+  if (isActiveTransportThread(history) && text.length < 160) return false;
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  if (wordCount <= 2) return false;
+
+  return true;
+}
+
+export function buildOutOfScopeNaviResponse(): AiMobilityResponse {
+  return {
+    answer:
+      "I'm NAVI — your ACIMS commute assistant. I can only help with college bus tracking, pickup times, public transport, campus directions, queues, and safety alerts.\n\nPlease ask something related to your transport or daily commute. I won't answer other topics here.",
+    intent: "OUT_OF_SCOPE",
+    sources: ["ACIMS NAVI scope policy"],
+    sourceBadge: {
+      label: "Outside commute scope",
+      type: "official",
+      timestamp: new Date().toISOString(),
+    },
+    ttsText: "Please ask about your bus, commute, or campus transport. I can't help with other topics.",
+  };
+}
+
 export function classifyIntent(message: string, history: ConversationTurn[] = []): IntentType {
   const text = message.toLowerCase().trim();
+
+  if (isOutOfMobilityScope(message, history)) return "OUT_OF_SCOPE";
+
+  if (isSmallTalkMessage(text)) return "CONVERSATION";
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  if (wordCount <= 2 && !TRANSPORT_KEYWORDS.test(text)) {
+    return "CONVERSATION";
+  }
 
   // Follow-up checks from previous conversation turns
   const lastTurn = history.length > 0 ? history[history.length - 1] : null;
@@ -199,7 +323,7 @@ export function classifyIntent(message: string, history: ConversationTurn[] = []
  * Dispatches to required real tools based on intent and generates
  * personal, verifiable, source-aware answers with no-bluff safeguards.
  */
-export function executeMobilityAgent(input: {
+export async function executeMobilityAgent(input: {
   studentId: string;
   message: string;
   deviceCoords?: {
@@ -212,15 +336,19 @@ export function executeMobilityAgent(input: {
   };
   history?: ConversationTurn[];
   destinationId?: string;
-}): AiMobilityResponse {
+}): Promise<AiMobilityResponse> {
   const { studentId, message, deviceCoords, history = [] } = input;
   const profile = toolGetStudentProfile(studentId).profile;
   const intent = classifyIntent(message, history);
   const now = getChennaiNow();
+  const textLower = message.toLowerCase().trim();
+
+  if (intent === "OUT_OF_SCOPE") {
+    return buildOutOfScopeNaviResponse();
+  }
 
   // Extract explicit time requests if mentioned (e.g. "after 8", "at 7:30", "tomorrow morning")
   let queryTime = now.time24;
-  const textLower = message.toLowerCase();
   if (textLower.includes("after 8") || textLower.includes("after 8:00")) {
     queryTime = "08:00:00";
   } else if (textLower.includes("after 9") || textLower.includes("after 9:00")) {
@@ -233,6 +361,10 @@ export function executeMobilityAgent(input: {
   const locResult = toolGetStudentLocation(studentId, deviceCoords);
   const studentLoc = locResult.location;
 
+  if (intent === "CONVERSATION" || isGreetingOrSmallTalk(message)) {
+    return await buildConversationNaviResponse(studentId, deviceCoords);
+  }
+
   // --------------------------------------------------------------------------
   // INTENT 1: LIVE_BUS_LOCATION
   // --------------------------------------------------------------------------
@@ -241,8 +373,10 @@ export function executeMobilityAgent(input: {
     const busStatus = toolGetAcimsBusStatus(profile.assignedBusId);
 
     if (busLoc.isLiveGps && busLoc.location) {
-      const eta = toolCalculateEta(profile.assignedBusId, profile.pickupStopId);
-      const etaText = eta.canCalculate ? `Estimated arrival at ${profile.pickupStopName}: ${eta.formattedEta}.` : "";
+      const eta = await toolCalculateEta(profile.assignedBusId, profile.pickupStopId);
+      const etaText = eta.canCalculate
+        ? `Estimated arrival at ${profile.pickupStopName}: ${eta.formattedEta}${(eta as any).delayMinutes ? ` (delay ~${(eta as any).delayMinutes} min, ${(eta as any).delayStatus})` : ""}.`
+        : "";
 
       const answer = `Your college bus (Bus #${busStatus.busNumber} - ${busStatus.routeLabel}) was last detected near ${busLoc.location.nextStop}. The live GPS signal was updated ${busLoc.secondsSinceLastUpdate} seconds ago directly from the onboard driver phone. Current status: ${busLoc.location.status}. ${etaText}`;
 
@@ -474,45 +608,57 @@ export function executeMobilityAgent(input: {
   if (intent === "MISSED_BUS" || intent === "PUBLIC_TRANSPORT_ALTERNATIVE") {
     const pickupStopName = profile.pickupStopName;
     const destName = profile.collegeDestination.name;
+    const lat = deviceCoords?.latitude ?? studentLoc.latitude;
+    const lon = deviceCoords?.longitude ?? studentLoc.longitude;
 
-    // Search real public transit alternatives from student pickup area toward college
-    const alternatives = toolSearchJourney({
-      originText: "Tambaram",
-      destinationText: "REC",
+    const mtcBlock = isMtcDataAvailable()
+      ? buildMissedBusMtcOptions({ latitude: lat, longitude: lon })
+      : { available: false, message: mtcUnavailableMessage(), options: [] };
+
+    const mtcLines =
+      mtcBlock.available && mtcBlock.options.length
+        ? mtcBlock.options
+            .slice(0, 4)
+            .map(
+              (o) =>
+                `• ${o.stopName} (~${o.walkingMinutes} min walk): MTC routes ${o.routes.join(", ") || "—"}${o.scheduledNextDeparture ? ` · next listed departure ${o.scheduledNextDeparture}` : ""}`,
+            )
+            .join("\n")
+        : mtcBlock.message ?? mtcUnavailableMessage();
+
+    const journey = toolSearchJourney({
+      originText: pickupStopName,
+      destinationText: destName,
+      originLat: lat,
+      originLon: lon,
       departureTime: queryTime,
     });
 
-    const publicDepartures = toolGetStopDepartures("MTC_STOP_TAMBARAM", queryTime, 5);
-    const busOptions = publicDepartures.departures.slice(0, 3);
-
-    const busSummary = busOptions.map(
-      (b) => `• 🚌 MTC Route ${b.routeNumber} to ${b.destination}: Departs ${b.departureFormatted} from Tambaram Terminal (reaches Thandalam/REC in ~45 min).`
-    ).join("\n");
-
-    const answer = `You missed your primary ACIMS bus from ${pickupStopName}.\n\nHere are real public transport alternatives toward ${destName}:\n\n1. Public Bus (MTC):\n${busSummary || "• MTC Route 579 (Tambaram ↔ Kanchipuram via REC Campus) runs every 20 minutes."}\n\n2. Chennai Metro (CMRL) Alternative:\n• Board Airport Metro or Guindy Metro → Connect to MTC 54 / Feeder at Porur.\n\n3. Southern Railway (CSR):\n• Tambaram Suburban train to Guindy / St. Thomas Mount.\n\nAll public alternatives are based on official scheduled timetables.`;
+    const answer = `You missed your primary ACIMS bus from ${pickupStopName}.\n\nCOLLEGE BUS: Check the next ACIMS shift or live GPS on your dashboard.\n\nMTC (${MTC_SOURCE_LABEL}):\n${mtcLines}\n\nOther modes (Metro / Suburban where loaded):\n${journey.journeyOptions.slice(0, 2).map((j) => `• ${j.summary}`).join("\n") || "No additional scheduled options in ACIMS registry."}`;
 
     return {
       answer,
       intent,
-      sources: ["CUMTA Unified Chennai Transit Feed (MTC + CMRL + Suburban)", "ACIMS Missed Bus Planner"],
+      sources: [MTC_SOURCE_LABEL, "ACIMS Missed Bus Planner"],
       sourceBadge: {
-        label: "Official GTFS Schedules (MTC & CMRL)",
-        type: "scheduled",
+        label: mtcBlock.available ? MTC_SOURCE_LABEL : "MTC data unavailable",
+        type: "official",
         timestamp: new Date().toISOString(),
       },
-      cards: busOptions.map((b) => ({
-        type: "alternative",
-        title: `MTC Route ${b.routeNumber} — ${b.destination}`,
-        subtitle: `Departs ${b.departureFormatted} from Tambaram Terminal`,
-        status: "Scheduled",
+      cards: (mtcBlock.options ?? []).slice(0, 3).map((o) => ({
+        type: "alternative" as const,
+        title: `MTC near ${o.stopName}`,
+        subtitle: o.routes.length ? `Routes: ${o.routes.join(", ")}` : "Route list pending official stage sync",
+        status: "Scheduled" as const,
         details: {
-          agency: "Metropolitan Transport Corporation",
-          departure: b.departureFormatted,
-          destination: b.destination,
-          route: `${b.origin} → ${b.destination}`,
+          walkingMinutes: o.walkingMinutes,
+          distanceMeters: o.distanceMeters,
+          source: o.source,
         },
       })),
-      ttsText: `You missed your primary bus. The best public alternative is MTC Route 579 departing at ${busOptions[0]?.departureFormatted || "7:40 AM"} from Tambaram Terminal toward REC Campus.`,
+      ttsText: mtcBlock.available
+        ? `You missed your college bus. Nearest official MTC option is ${mtcBlock.options[0]?.stopName}.`
+        : mtcUnavailableMessage(),
     };
   }
 
@@ -575,6 +721,46 @@ export function executeMobilityAgent(input: {
   // --------------------------------------------------------------------------
   // INTENT 6: JOURNEY_PLANNING, METRO, RAIL, BUS_ROUTE
   // --------------------------------------------------------------------------
+  if (isGreetingOrSmallTalk(message)) {
+    return await buildConversationNaviResponse(studentId, deviceCoords);
+  }
+
+  if (
+    intent !== "JOURNEY_PLANNING" &&
+    intent !== "METRO" &&
+    intent !== "RAIL" &&
+    intent !== "BUS_ROUTE" &&
+    intent !== "GENERAL_TRANSPORT"
+  ) {
+    return {
+      answer:
+        "I can help with your ACIMS bus location, pickup ETA, nearby MTC stops, journey planning, or what to do if you missed the bus. Try asking one of those.",
+      intent: "GENERAL_TRANSPORT",
+      sources: ["ACIMS NAVI"],
+      sourceBadge: {
+        label: "NAVI Guidance",
+        type: "official",
+        timestamp: new Date().toISOString(),
+      },
+      ttsText: "Ask me about your bus, pickup time, or public transport options.",
+    };
+  }
+
+  if (intent === "GENERAL_TRANSPORT" && !TRANSPORT_KEYWORDS.test(message)) {
+    const firstName = profile.name.split(" ")[0] || "there";
+    return {
+      answer: `Hi ${firstName} — I'm not sure which trip detail you need yet.\n\nTry: "Where is my bus?", "What's my next bus?", or "How do I get to REC from my stop?"`,
+      intent: "CONVERSATION",
+      sources: ["ACIMS NAVI"],
+      sourceBadge: {
+        label: "NAVI Guidance",
+        type: "official",
+        timestamp: new Date().toISOString(),
+      },
+      ttsText: "Ask about your bus location, next bus, or how to reach college.",
+    };
+  }
+
   let originQuery = "Tambaram";
   let destQuery = "REC";
   if (textLower.includes("guindy")) {

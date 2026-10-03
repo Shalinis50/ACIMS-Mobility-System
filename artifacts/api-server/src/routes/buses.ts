@@ -23,7 +23,9 @@ import {
   type RouteStopInfo,
 } from "../services/gpsEngine";
 import { realtimeHub } from "../services/realtimeHub";
-import { syncBusNotifications } from "../services/notificationEngine";
+import { processMobilityTelemetry } from "../services/mobilityPipeline";
+import { requireAuth, requireDriver } from "../middleware/acimsAuth.ts";
+import { getActiveTripForBus, startTripFromDriverSession, completeActiveTrip } from "../../../../src/db/mobilityOps.ts";
 
 const router: IRouter = Router();
 
@@ -394,7 +396,7 @@ router.get("/buses/:busId/route", async (req, res) => {
 // -------------------------------------------------------------
 // INGEST REAL DRIVER GPS (Single update)
 // -------------------------------------------------------------
-router.post("/bus/location", async (req, res) => {
+router.post("/bus/location", requireAuth, requireDriver, async (req, res) => {
   try {
     const {
       busId,
@@ -462,8 +464,14 @@ router.post("/bus/location", async (req, res) => {
       receivedAt,
     });
 
-    // 4. ENSURE TRACKING SESSION IS ACTIVE
+    const strictTrip = process.env.ACIMS_STRICT_GPS === "true";
     const trackingState = await isBusTrackingActive(busId);
+    const activeTrip = await getActiveTripForBus(busId);
+    if (strictTrip && !trackingState.isActive && !activeTrip) {
+      return res.status(409).json({
+        error: "No active trip. Driver must start trip before GPS can be ingested.",
+      });
+    }
     if (!trackingState.isActive) {
       await startTrackingSession(busId, driverId || bus.driverId || "driver-active");
     }
@@ -474,10 +482,17 @@ router.post("/bus/location", async (req, res) => {
     // 6. REALTIME INSTANT BROADCAST TO ALL SUBSCRIBED STUDENTS & ADMIN
     realtimeHub.broadcastLocation(telemetry);
 
-    // 7. NOTIFICATION HOOK: Check stop proximity for student alerts
-    if (telemetry.isAtStop || telemetry.isApproachingStop) {
-      syncBusNotifications(busId, telemetry.nextStop, telemetry.isAtStop, telemetry.isApproachingStop).catch(() => {});
-    }
+    // 7. Pickup-centric ETA, geofence, delay, and event notifications
+    processMobilityTelemetry({
+      id: busId,
+      busNumber: telemetry.busNumber,
+      latitude: telemetry.latitude,
+      longitude: telemetry.longitude,
+      speed: typeof speed === "number" ? speed : saved.speed,
+      heading: typeof heading === "number" ? heading : saved.heading,
+      tripId: activeTrip?.id ?? null,
+      recordedAt: recordedAt ?? saved.recordedAt,
+    }).catch(() => {});
 
     res.json({
       success: true,
@@ -496,7 +511,7 @@ router.post("/bus/location", async (req, res) => {
 // -------------------------------------------------------------
 // BATCH INGEST OFFLINE-QUEUED GPS POINTS
 // -------------------------------------------------------------
-router.post("/bus/location/batch", async (req, res) => {
+router.post("/bus/location/batch", requireAuth, requireDriver, async (req, res) => {
   try {
     const { busId, points } = req.body as {
       busId: string;
@@ -573,7 +588,25 @@ router.post("/bus/location/batch", async (req, res) => {
 // -------------------------------------------------------------
 // DRIVER TRACKING SESSION CONTROLS
 // -------------------------------------------------------------
-router.post("/driver/session/start", async (req, res) => {
+/** Demo / lab: path coordinates to simulate GPS moving along the assigned route. */
+router.get("/driver/simulator-path/:busId", async (req, res) => {
+  const route = getRouteForBus(req.params.busId);
+  if (!route) {
+    return res.status(404).json({ error: "No route geometry for this bus." });
+  }
+  const path =
+    route.path.length > 0
+      ? route.path
+      : route.stops.map((s) => ({ latitude: s.latitude, longitude: s.longitude }));
+  res.json({
+    busId: req.params.busId,
+    routeId: route.id,
+    routeName: route.name,
+    path,
+  });
+});
+
+router.post("/driver/session/start", requireAuth, requireDriver, async (req, res) => {
   try {
     const { busId, driverId = "driver-active" } = req.body;
     if (!busId) return res.status(400).json({ error: "busId required" });
@@ -589,15 +622,41 @@ router.post("/driver/session/start", async (req, res) => {
       });
     }
 
+    const { resolveShiftForDriverTrip } = await import("../../../../src/db/shiftManagement.ts");
+    const shift = await resolveShiftForDriverTrip(busId, driverId);
+    if (shift && !shift.active) {
+      return res.status(400).json({ error: "Assigned shift is inactive. Contact transport admin." });
+    }
+
+    const scheduledStartAt =
+      shift?.startTime
+        ? (() => {
+            const [h, m] = shift.startTime.split(":").map(Number);
+            const d = new Date();
+            d.setHours(h || 0, m || 0, 0, 0);
+            return d;
+          })()
+        : null;
+
     const session = await startTrackingSession(busId, driverId);
+    const trip = await startTripFromDriverSession({
+      busId,
+      driverId,
+      routeId: shift?.routeId || bus.routeId || `route-${busId}`,
+      shiftId: typeof req.body.shiftId === "string" ? req.body.shiftId : shift?.id,
+      trackingSessionId: session.id,
+      scheduledStartAt,
+      shiftStartSnapshot: shift?.startTime ?? null,
+      shiftEndSnapshot: shift?.endTime ?? null,
+    });
     realtimeHub.broadcastSessionState(busId, "ACTIVE", session);
-    res.json({ status: "ACTIVE", session });
+    res.json({ status: "ACTIVE", session, trip });
   } catch (err: any) {
     res.status(500).json({ error: "Failed to start tracking session" });
   }
 });
 
-router.post("/driver/session/pause", async (req, res) => {
+router.post("/driver/session/pause", requireAuth, requireDriver, async (req, res) => {
   try {
     const { busId } = req.body;
     if (!busId) return res.status(400).json({ error: "busId required" });
@@ -610,7 +669,7 @@ router.post("/driver/session/pause", async (req, res) => {
   }
 });
 
-router.post("/driver/session/resume", async (req, res) => {
+router.post("/driver/session/resume", requireAuth, requireDriver, async (req, res) => {
   try {
     const { busId } = req.body;
     if (!busId) return res.status(400).json({ error: "busId required" });
@@ -623,14 +682,15 @@ router.post("/driver/session/resume", async (req, res) => {
   }
 });
 
-router.post("/driver/session/stop", async (req, res) => {
+router.post("/driver/session/stop", requireAuth, requireDriver, async (req, res) => {
   try {
     const { busId } = req.body;
     if (!busId) return res.status(400).json({ error: "busId required" });
 
     const session = await stopTrackingSession(busId);
+    const trip = await completeActiveTrip(busId);
     realtimeHub.broadcastSessionState(busId, "ENDED", session);
-    res.json({ status: "ENDED", session });
+    res.json({ status: "ENDED", session, trip });
   } catch (err: any) {
     res.status(500).json({ error: "Failed to stop tracking session" });
   }

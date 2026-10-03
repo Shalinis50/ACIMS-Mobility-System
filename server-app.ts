@@ -10,6 +10,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export async function startServer() {
+  const { bootstrapAppTables, ensureBaselineFleetData } = await import("./src/db/bootstrapAppTables.ts");
+  await bootstrapAppTables();
+  const { bootstrapCoreTables } = await import("./src/db/bootstrapCoreTables.ts");
+  await bootstrapCoreTables();
+  const { migrateMobilitySchemaColumns } = await import("./src/db/bootstrapAppTables.ts");
+  await migrateMobilitySchemaColumns();
+  await ensureBaselineFleetData();
+  const { ensureCanonicalShiftSlots } = await import("./src/db/shiftManagement.ts");
+  await ensureCanonicalShiftSlots();
+  const { ensureOfficialPickupPointsFromRoutes } = await import("./src/db/ensureMobilityPickups.ts");
+  await ensureOfficialPickupPointsFromRoutes();
+
+  const { ensureMtcSchema, purgeLegacyDummyMtcFromTransitDb } = await import(
+    "./artifacts/api-server/src/services/mtc/mtcService.ts"
+  );
+  ensureMtcSchema();
+  purgeLegacyDummyMtcFromTransitDb();
+
   const app = express();
   const port = Number(process.env.PORT) || 3000;
 

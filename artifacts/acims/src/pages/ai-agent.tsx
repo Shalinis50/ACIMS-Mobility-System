@@ -59,6 +59,8 @@ interface MessageItem {
     markers: MapMarker[];
   };
   ttsText?: string;
+  followUps?: string[];
+  geminiEnhanced?: boolean;
   time: string;
 }
 
@@ -81,6 +83,96 @@ const promptSuggestions = [
   'What about public buses?',
   'Where do I get down?',
 ];
+
+const INDIAN_ENGLISH_LANG = 'en-IN';
+
+/** Known female Indian English system voices (never treat generic en-IN as female). */
+const INDIAN_ENGLISH_FEMALE_NAMES = [
+  'veena',
+  'priya',
+  'neerja',
+  'lekha',
+  'aditi',
+  'kajal',
+  'swara',
+  'geeta',
+  'meera',
+  'ananya',
+  'heera',
+];
+
+const ENGLISH_FEMALE_FALLBACK_NAMES = [
+  'samantha',
+  'karen',
+  'victoria',
+  'zira',
+  'fiona',
+  'moira',
+  'tessa',
+  'serena',
+  'susan',
+  'kate',
+  'salli',
+  'joanna',
+  'amy',
+  'emma',
+  'nicole',
+  'hazel',
+  'sara',
+  'linda',
+];
+
+function voiceName(v: SpeechSynthesisVoice): string {
+  return v.name.toLowerCase();
+}
+
+function isIndianEnglishVoice(v: SpeechSynthesisVoice): boolean {
+  const lang = v.lang.replace('_', '-').toLowerCase();
+  return lang === 'en-in' || lang.startsWith('en-in');
+}
+
+function isExplicitlyMaleVoice(v: SpeechSynthesisVoice): boolean {
+  const name = voiceName(v);
+  if (/\bmale\b|\bman\b/.test(name)) return true;
+  return /karun|rishi|ravi|arjun|amit|daniel|alex|fred|david|mark|james|aaron|guy|ralph|bruce|lee|tom|harry|ryan|samuel|nathan|john|michael|paul|george|richard|william|brian|eric|steven|kevin|jason|matthew|jacob|noah|liam|oliver|ethan|logan|lucas|mason|aiden|jack|henry|owen|sebastian|muhammad|raj|vikram|suresh|kumar/.test(
+    name,
+  );
+}
+
+function isExplicitlyFemaleVoice(v: SpeechSynthesisVoice): boolean {
+  const name = voiceName(v);
+  if (/\bfemale\b|\bwoman\b/.test(name)) return true;
+  if (INDIAN_ENGLISH_FEMALE_NAMES.some((token) => name.includes(token))) return true;
+  if (ENGLISH_FEMALE_FALLBACK_NAMES.some((token) => name.includes(token))) return true;
+  return false;
+}
+
+function getSpeechVoices(): SpeechSynthesisVoice[] {
+  if (!('speechSynthesis' in window)) return [];
+  // Chrome loads voices asynchronously; calling getVoices() again before speak helps.
+  return window.speechSynthesis.getVoices();
+}
+
+/** Female Indian English (en-IN) when available; never falls back to a male voice. */
+function pickIndianEnglishFemaleVoice(): SpeechSynthesisVoice | null {
+  const voices = getSpeechVoices();
+  if (!voices.length) return null;
+
+  const femaleOnly = voices.filter((v) => isExplicitlyFemaleVoice(v) && !isExplicitlyMaleVoice(v));
+
+  const indianFemale = femaleOnly.find((v) => isIndianEnglishVoice(v));
+  if (indianFemale) return indianFemale;
+
+  const namedIndianFemale = femaleOnly.find((v) =>
+    INDIAN_ENGLISH_FEMALE_NAMES.some((token) => voiceName(v).includes(token)),
+  );
+  if (namedIndianFemale) return namedIndianFemale;
+
+  const englishFemale = femaleOnly.find((v) => v.lang.toLowerCase().startsWith('en'));
+  if (englishFemale) return englishFemale;
+
+  return femaleOnly[0] ?? null;
+}
 
 function LeafletAutoCenter({ center }: { center: [number, number] }) {
   const map = useMap();
@@ -145,6 +237,43 @@ export default function AiAgentPage() {
 
   // Text-To-Speech (TTS) State
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
+  const [ttsVoice, setTtsVoice] = useState<SpeechSynthesisVoice | null>(null);
+  const [geminiEnabled, setGeminiEnabled] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+
+    const syncVoice = () => {
+      const voice = pickIndianEnglishFemaleVoice();
+      if (voice) setTtsVoice(voice);
+    };
+
+    syncVoice();
+    const retry1 = window.setTimeout(syncVoice, 300);
+    const retry2 = window.setTimeout(syncVoice, 1200);
+    window.speechSynthesis.addEventListener('voiceschanged', syncVoice);
+    return () => {
+      window.clearTimeout(retry1);
+      window.clearTimeout(retry2);
+      window.speechSynthesis.removeEventListener('voiceschanged', syncVoice);
+    };
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/ai/status')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) {
+          setGeminiEnabled(Boolean(data.geminiEnabled));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isSubmitting]);
 
   // Load student profile from backend
   useEffect(() => {
@@ -273,11 +402,10 @@ export default function AiAgentPage() {
     if (!queryText) setMessage('');
     setIsSubmitting(true);
 
-    // Build context history for follow-ups
-    const conversationHistory = messages.slice(-6).map((m) => ({
+    const conversationHistory = [...messages.slice(-8), userMessage].map((m) => ({
       role: m.role,
       text: m.text,
-      intent: m.intent as any,
+      intent: m.intent as string | undefined,
     }));
 
     try {
@@ -303,6 +431,8 @@ export default function AiAgentPage() {
           cards: data.cards,
           mapData: data.mapData,
           ttsText: data.ttsText,
+          followUps: data.followUps,
+          geminiEnhanced: data.geminiEnhanced,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
         setMessages((prev) => [...prev, assistantMessage]);
@@ -324,7 +454,7 @@ export default function AiAgentPage() {
     }
   };
 
-  // TTS Read Answer
+  // TTS Read Answer — Indian English (en-IN), female when available on device
   const toggleSpeak = (text: string, index: number) => {
     if (!('speechSynthesis' in window)) return;
 
@@ -335,15 +465,29 @@ export default function AiAgentPage() {
     }
 
     window.speechSynthesis.cancel();
+    const voice = pickIndianEnglishFemaleVoice() ?? ttsVoice;
+    if (voice && voice !== ttsVoice) {
+      setTtsVoice(voice);
+    }
+
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+    utterance.rate = 0.9;
+    utterance.pitch = 1.05;
+    utterance.lang = INDIAN_ENGLISH_LANG;
+
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = isIndianEnglishVoice(voice)
+        ? voice.lang.replace('_', '-')
+        : INDIAN_ENGLISH_LANG;
+    }
 
     utterance.onend = () => setSpeakingIndex(null);
     utterance.onerror = () => setSpeakingIndex(null);
 
     setSpeakingIndex(index);
-    window.speechSynthesis.speak(utterance);
+    // Brief delay helps Chrome apply the selected voice reliably.
+    window.setTimeout(() => window.speechSynthesis.speak(utterance), 50);
   };
 
   return (
@@ -418,6 +562,11 @@ export default function AiAgentPage() {
             <p className="text-xs text-muted-foreground">
               Tap the microphone to speak naturally. Speech recognition will query live transit schedules and bus telemetry.
             </p>
+            <p className="text-[10px] leading-4 text-muted-foreground">
+              {ttsVoice
+                ? `Read-aloud voice: ${ttsVoice.name.replace(/Microsoft |Google /gi, '')} (${ttsVoice.lang})`
+                : 'For Indian English female voice, add Veena or Neerja (English – India) in your system speech voices, then refresh.'}
+            </p>
 
             <div className="pt-2 flex justify-center">
               <button
@@ -485,9 +634,16 @@ export default function AiAgentPage() {
                 <div className="text-[10px] text-muted-foreground">Personalized commute &amp; multi-modal transit</div>
               </div>
             </div>
-            <span className="mono text-[10px] font-extrabold rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
-              Zero Hallucination
-            </span>
+            <div className="flex flex-col items-end gap-1">
+              <span className="mono text-[10px] font-extrabold rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
+                Grounded in verified data
+              </span>
+              {geminiEnabled && (
+                <span className="mono text-[9px] font-bold rounded-full bg-violet-500/15 text-violet-700 dark:text-violet-300 px-2 py-0.5">
+                  Enhanced replies
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Message Stream */}
@@ -606,6 +762,22 @@ export default function AiAgentPage() {
                     </div>
                   )}
 
+                  {item.role === 'assistant' && item.followUps && item.followUps.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {item.followUps.map((prompt) => (
+                        <button
+                          key={prompt}
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => sendQuery(prompt)}
+                          className="rounded-lg border border-border bg-background px-2.5 py-1 text-[10px] font-bold text-foreground hover:border-accent hover:bg-accent/10 disabled:opacity-50"
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Actions Bar: Read Answer & Ask Follow-up */}
                   {item.role === 'assistant' && (
                     <div className="mt-2 pt-1.5 flex items-center justify-end gap-2 border-t border-border/30">
@@ -645,10 +817,13 @@ export default function AiAgentPage() {
                   <Bot size={15} />
                 </span>
                 <div className="rounded-2xl bg-muted px-4 py-3 text-xs text-muted-foreground animate-pulse border border-border/50">
-                  Querying CUMTA GTFS schedules, student stop matrices, and live bus GPS…
+                  {geminiEnabled
+                    ? 'NAVI is checking live bus data, then shaping a natural reply with Gemini…'
+                    : 'Querying CUMTA GTFS schedules, student stop matrices, and live bus GPS…'}
                 </div>
               </div>
             )}
+            <div ref={chatEndRef} />
           </div>
 
           {/* Input Form */}

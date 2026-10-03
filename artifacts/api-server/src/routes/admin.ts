@@ -1,4 +1,5 @@
 import { Router, type IRouter, type RequestHandler } from "express";
+import { requireAuth, requireAdmin } from "../middleware/acimsAuth.ts";
 import {
   CreateAdminBusBody,
   CreateAdminDriverBody,
@@ -21,6 +22,30 @@ import {
 } from "../../../../src/db/services.ts";
 import { listProviders } from "../services/transport";
 import { getAdminQueues } from "../services/admin";
+import type { AuthRequest } from "../../../../src/middleware/auth.ts";
+import {
+  getAdminTransportDashboard,
+  getGpsHealthFleet,
+  getEtaDelayBoard,
+  listAdminStudents,
+  updateStudentTransport,
+  listRecentMobilityNotifications,
+  sendAdminBroadcast,
+  getNaviAdminStatus,
+  listCampusLocationsAdmin,
+  getExtendedAnalytics,
+  getAdminTrips,
+  getBusLiveDetail,
+  listAdminAuditLogs,
+  recordAdminAudit,
+} from "../services/adminPortalService.ts";
+import { getCommandCenterSnapshot } from "../services/commandCenterService.ts";
+import {
+  listAdminShifts,
+  getShiftById,
+  validateAndUpdateShift,
+  setShiftActive,
+} from "../../../../src/db/shiftManagement.ts";
 
 const router: IRouter = Router();
 
@@ -36,7 +61,7 @@ const requireAdminRole: RequestHandler = (req, res, next) => {
   }
   next();
 };
-router.use("/admin", requireAdminRole);
+router.use("/admin", requireAuth, requireAdminRole, requireAdmin);
 
 // -------------------------------------------------------------
 // DASHBOARD
@@ -45,21 +70,202 @@ router.get("/admin/dashboard", async (_req, res) => {
   try {
     const busList = await getDbBuses();
     const routeList = await getDbRoutes();
-    const reports = await db.select().from(safetyReports);
+    let reports: (typeof safetyReports.$inferSelect)[] = [];
+    try {
+      reports = await db.select().from(safetyReports);
+    } catch {
+      reports = [];
+    }
+
+    let commandCounters = {
+      activeBuses: busList.filter((b) => b.active).length,
+      activeDrivers: 0,
+      activeTrips: 0,
+      onTime: 0,
+      delayed: 0,
+      gpsIssues: 0,
+    };
+    try {
+      const command = await getCommandCenterSnapshot();
+      commandCounters = command.counters;
+    } catch (err) {
+      console.warn("[admin/dashboard] command center snapshot skipped:", err);
+    }
 
     const dashboard = {
-      activeBuses: busList.filter((b) => b.active).length,
-      activeTrips: busList.filter((b) => b.active).length,
+      activeBuses: commandCounters.activeBuses,
+      activeDrivers: commandCounters.activeDrivers,
+      activeTrips: commandCounters.activeTrips,
+      onTime: commandCounters.onTime,
+      delayedBuses: commandCounters.delayed,
+      gpsIssues: commandCounters.gpsIssues,
       activeRoutes: routeList.filter((r) => r.active).length,
-      delayedBuses: 0,
       queueEntries: getAdminQueues().reduce((total, q) => total + q.queueSize, 0),
       openSafetyReports: reports.filter((r) => r.status === "OPEN" || r.status === "UNDER REVIEW").length,
       providersOnline: listProviders().filter((p) => p.status === "live").length,
       systemStatus: "Operational",
+      fleetSize: busList.filter((b) => b.active).length,
     };
     res.json(dashboard);
   } catch (err: any) {
+    console.error("[admin/dashboard]", err);
     res.status(500).json({ error: "Failed to generate admin dashboard" });
+  }
+});
+
+router.get("/admin/transport-dashboard", async (_req, res) => {
+  try {
+    res.json(await getAdminTransportDashboard());
+  } catch {
+    res.status(500).json({ error: "Failed to load transport dashboard" });
+  }
+});
+
+router.get("/admin/gps-health", async (_req, res) => {
+  res.json(await getGpsHealthFleet());
+});
+
+router.get("/admin/eta-delays", async (_req, res) => {
+  res.json(await getEtaDelayBoard());
+});
+
+router.get("/admin/eta-monitoring", async (_req, res) => {
+  const { getAdminEtaMonitoring } = await import("../services/etaMonitoringService.ts");
+  res.json(await getAdminEtaMonitoring());
+});
+
+router.get("/admin/delay-monitoring", async (_req, res) => {
+  const { getAdminDelayMonitoring } = await import("../services/etaMonitoringService.ts");
+  res.json(await getAdminDelayMonitoring());
+});
+
+router.get("/admin/students", async (_req, res) => {
+  res.json(await listAdminStudents());
+});
+
+router.patch("/admin/students/:userId/transport", async (req, res) => {
+  const updated = await updateStudentTransport(req.params.userId, req.body);
+  if (!updated) return res.status(404).json({ error: "Student not found" });
+  const authUser = (req as AuthRequest).user as { uid?: string };
+  await recordAdminAudit({
+    adminId: authUser?.uid || req.header("x-acims-user-id") || "admin",
+    action: "UPDATE_STUDENT_TRANSPORT",
+    entityType: "student",
+    entityId: req.params.userId,
+    detail: JSON.stringify(req.body),
+  });
+  res.json(updated);
+});
+
+router.get("/admin/notifications/recent", async (_req, res) => {
+  res.json(await listRecentMobilityNotifications());
+});
+
+router.post("/admin/broadcast", async (req, res) => {
+  const { title, message, target } = req.body as {
+    title?: string;
+    message?: string;
+    target?: { scope: string; busId?: string; routeId?: string; pickupStopId?: string };
+  };
+  if (!title?.trim() || !message?.trim() || !target?.scope) {
+    return res.status(400).json({ error: "title, message, and target.scope required" });
+  }
+  const result = await sendAdminBroadcast({
+    title: title.trim(),
+    message: message.trim(),
+    target: target as any,
+  });
+  const authUser = (req as AuthRequest).user as { uid?: string };
+  await recordAdminAudit({
+    adminId: authUser?.uid || req.header("x-acims-user-id") || "admin",
+    action: "BROADCAST",
+    entityType: "notification",
+    detail: `${target.scope}: ${title}`,
+  });
+  res.json(result);
+});
+
+router.get("/admin/navi", async (_req, res) => {
+  res.json(getNaviAdminStatus());
+});
+
+router.get("/admin/campus/locations", async (_req, res) => {
+  res.json(await listCampusLocationsAdmin());
+});
+
+router.get("/admin/analytics/transport", async (_req, res) => {
+  res.json(await getExtendedAnalytics());
+});
+
+router.get("/admin/trips", async (req, res) => {
+  const status = typeof req.query.status === "string" ? req.query.status : undefined;
+  const limit = Number(req.query.limit || 80);
+  res.json(await getAdminTrips(status, limit));
+});
+
+router.get("/admin/buses/:busId/live", async (req, res) => {
+  const detail = await getBusLiveDetail(req.params.busId);
+  if (!detail) return res.status(404).json({ error: "Bus not found" });
+  res.json(detail);
+});
+
+router.get("/admin/audit-logs", async (req, res) => {
+  const limit = Number(req.query.limit || 100);
+  res.json(await listAdminAuditLogs(Math.min(200, Math.max(1, limit))));
+});
+
+// -------------------------------------------------------------
+// SHIFT MANAGEMENT (Morning / Evening canonical slots)
+// -------------------------------------------------------------
+router.get("/admin/shifts", async (_req, res) => {
+  try {
+    res.json(await listAdminShifts());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to list shifts" });
+  }
+});
+
+router.get("/admin/shifts/:shiftId", async (req, res) => {
+  const shift = await getShiftById(req.params.shiftId);
+  if (!shift) return res.status(404).json({ error: "Shift not found" });
+  res.json(shift);
+});
+
+router.put("/admin/shifts/:shiftId", async (req, res) => {
+  try {
+    const updated = await validateAndUpdateShift(req.params.shiftId, req.body);
+    const authUser = (req as AuthRequest).user as { uid?: string };
+    await recordAdminAudit({
+      adminId: authUser?.uid || req.header("x-acims-user-id") || "admin",
+      action: "UPDATE_SHIFT",
+      entityType: "shift",
+      entityId: updated.id,
+      detail: `${updated.name} ${updated.startTime}-${updated.endTime}`,
+    });
+    res.json({
+      shift: updated,
+      message: `${updated.name} timing updated successfully.`,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "Failed to update shift" });
+  }
+});
+
+router.post("/admin/shifts/:shiftId/activate", async (req, res) => {
+  try {
+    const updated = await setShiftActive(req.params.shiftId, true);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "Failed to activate shift" });
+  }
+});
+
+router.post("/admin/shifts/:shiftId/deactivate", async (req, res) => {
+  try {
+    const updated = await setShiftActive(req.params.shiftId, false);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "Failed to deactivate shift" });
   }
 });
 
@@ -96,6 +302,15 @@ router.post("/admin/buses", async (req, res) => {
       routeId: input.routeId,
       driverId: input.driverId,
       active: input.active ?? true,
+    });
+
+    const authUser = (req as AuthRequest).user as { uid?: string };
+    await recordAdminAudit({
+      adminId: authUser?.uid || req.header("x-acims-user-id") || "admin",
+      action: "CREATE_BUS",
+      entityType: "bus",
+      entityId: created.id,
+      detail: created.busNumber,
     });
 
     res.status(201).json({

@@ -12,7 +12,107 @@ import {
 } from "../../../../src/db/services.ts";
 import { listSafetyAlerts } from "./safety";
 import { listProviders } from "./transport";
-import { executeMobilityAgent, type ConversationTurn } from "./aiMobilityEngine";
+import {
+  buildConversationNaviResponse,
+  buildOutOfScopeNaviResponse,
+  executeMobilityAgent,
+  isGreetingOrSmallTalk,
+  isOutOfMobilityScope,
+  type ConversationTurn,
+} from "./aiMobilityEngine";
+import {
+  enhanceNaviAnswerWithGemini,
+  generateConversationalNaviReply,
+  isGeminiConfigured,
+  type NaviHistoryTurn,
+} from "./geminiNavi";
+
+type NaviChatReply = {
+  answer: string;
+  sources: string[];
+  intent: string;
+  sourceBadge: {
+    label: string;
+    type: "scheduled" | "live GPS" | "official" | "calculated";
+    timestamp: string;
+  };
+  ttsText: string;
+  context: null;
+  cards?: Array<{
+    type: string;
+    title: string;
+    subtitle?: string;
+    details: Record<string, unknown>;
+  }>;
+  mapData?: unknown;
+  followUps?: string[];
+  geminiEnhanced?: boolean;
+};
+
+function toHistoryTurns(history?: ConversationTurn[]): NaviHistoryTurn[] {
+  if (!history?.length) return [];
+  return history
+    .filter((t) => t.role === "user" || t.role === "assistant")
+    .map((t) => ({ role: t.role, text: t.text }));
+}
+
+async function deliverNaviReply(
+  userMessage: string,
+  reply: NaviChatReply,
+  history?: ConversationTurn[],
+  studentDisplayName?: string,
+): Promise<NaviChatReply> {
+  if (!isGeminiConfigured()) return { ...reply, geminiEnhanced: false };
+
+  if (reply.intent === "OUT_OF_SCOPE") {
+    return { ...reply, geminiEnhanced: false, followUps: undefined };
+  }
+
+  if (reply.intent === "CONVERSATION") {
+    const conversational = await generateConversationalNaviReply({
+      userMessage,
+      history: toHistoryTurns(history),
+      liveContext: reply.answer,
+      studentName: studentDisplayName || "Student",
+    });
+    if (conversational) {
+      return {
+        ...reply,
+        answer: conversational.answer,
+        ttsText: conversational.ttsText,
+        followUps: conversational.followUps,
+        geminiEnhanced: true,
+        sourceBadge: {
+          ...reply.sourceBadge,
+          label: `${reply.sourceBadge.label} · Gemini`,
+        },
+      };
+    }
+  }
+
+  const enhanced = await enhanceNaviAnswerWithGemini({
+    userMessage,
+    factualAnswer: reply.answer,
+    factualTts: reply.ttsText,
+    sources: reply.sources,
+    intent: reply.intent,
+    history: toHistoryTurns(history),
+  });
+
+  if (!enhanced) return { ...reply, geminiEnhanced: false };
+
+  return {
+    ...reply,
+    answer: enhanced.answer,
+    ttsText: enhanced.ttsText,
+    followUps: enhanced.followUps,
+    geminiEnhanced: true,
+    sourceBadge: {
+      ...reply.sourceBadge,
+      label: `${reply.sourceBadge.label} · Gemini`,
+    },
+  };
+}
 
 export async function getAiContext(studentId = "student-20418") {
   const [buses, locations, safetyAlerts, profile, queue] = await Promise.all([
@@ -48,6 +148,38 @@ export async function answerMobilityQuestion(
   history?: ConversationTurn[],
 ) {
   const textLower = message.toLowerCase().trim();
+
+  if (isOutOfMobilityScope(message, history ?? [])) {
+    const scoped = buildOutOfScopeNaviResponse();
+    return {
+      answer: scoped.answer,
+      sources: scoped.sources,
+      intent: scoped.intent,
+      sourceBadge: scoped.sourceBadge,
+      ttsText: scoped.ttsText,
+      context: null,
+      geminiEnhanced: false,
+    };
+  }
+
+  if (isGreetingOrSmallTalk(message)) {
+    const conv = await buildConversationNaviResponse(studentId, deviceCoords);
+    const profile = await getProfileWithDetails(studentId);
+    const studentDisplayName = profile?.name?.split(" ")[0] || "Student";
+    return deliverNaviReply(
+      message,
+      {
+        answer: conv.answer,
+        sources: conv.sources,
+        intent: conv.intent,
+        sourceBadge: conv.sourceBadge,
+        ttsText: conv.ttsText,
+        context: null,
+      },
+      history,
+      studentDisplayName,
+    );
+  }
 
   // 1. Safeguard against impossible questions / non-existent buses / hallucinated queries
   if (
@@ -250,8 +382,11 @@ export async function answerMobilityQuestion(
     }
   }
 
-  // 5. Default to the rule-based GTFS + Live GPS reasoning engine
-  const agentResponse = executeMobilityAgent({
+  // 5. Default to the rule-based GTFS + Live GPS reasoning engine (+ optional Gemini phrasing)
+  const profile = await getProfileWithDetails(studentId);
+  const studentDisplayName = profile?.name?.split(" ")[0] || "Student";
+
+  const agentResponse = await executeMobilityAgent({
     studentId,
     message,
     destinationId,
@@ -259,14 +394,19 @@ export async function answerMobilityQuestion(
     history,
   });
 
-  return {
-    answer: agentResponse.answer,
-    sources: agentResponse.sources,
-    intent: agentResponse.intent,
-    sourceBadge: agentResponse.sourceBadge,
-    cards: agentResponse.cards,
-    mapData: agentResponse.mapData,
-    ttsText: agentResponse.ttsText,
-    context: null,
-  };
+  return deliverNaviReply(
+    message,
+    {
+      answer: agentResponse.answer,
+      sources: agentResponse.sources,
+      intent: agentResponse.intent,
+      sourceBadge: agentResponse.sourceBadge,
+      cards: agentResponse.cards,
+      mapData: agentResponse.mapData,
+      ttsText: agentResponse.ttsText,
+      context: null,
+    },
+    history,
+    studentDisplayName,
+  );
 }

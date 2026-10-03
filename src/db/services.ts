@@ -52,12 +52,25 @@ export async function getOrCreateProfile(
 
     // Create corresponding role table entry
     if (role === 'STUDENT') {
+      let assignedBusId = 'bus-12';
+      let assignedRouteId = 'route-bus-12';
+      let pickupStopId = 'tambaram';
+      try {
+        const { getMvpCollegeRoute } = await import(
+          '../../artifacts/api-server/src/services/mvpCollegeRouteService.ts'
+        );
+        const mvp = getMvpCollegeRoute();
+        assignedBusId = mvp.busId;
+        assignedRouteId = mvp.routeId;
+      } catch {
+        /* defaults */
+      }
       await db.insert(students).values({
         profileId: newProfile.id,
         registerNumber: userId.startsWith('student-') ? userId : `REG-${newProfile.id}`,
-        assignedBusId: 'bus-12',
-        assignedRouteId: 'route-bus-12',
-        pickupStopId: 'tambaram',
+        assignedBusId,
+        assignedRouteId,
+        pickupStopId,
       });
     } else if (role === 'DRIVER') {
       await db.insert(drivers).values({
@@ -84,12 +97,23 @@ export async function getProfileWithDetails(userId: string) {
     if (profile.role === 'STUDENT') {
       const studentRecs = await db.select().from(students).where(eq(students.profileId, profile.id));
       if (studentRecs.length > 0) {
-        details = { ...details, ...studentRecs[0] };
+        const s = studentRecs[0];
+        details = {
+          ...details,
+          registerNumber: s.registerNumber,
+          pickupStopId: s.pickupStopId,
+          assignedBusId: s.assignedBusId,
+          assignedRouteId: s.assignedRouteId,
+        };
       }
     } else if (profile.role === 'DRIVER') {
       const driverRecs = await db.select().from(drivers).where(eq(drivers.profileId, profile.id));
       if (driverRecs.length > 0) {
-        details = { ...details, ...driverRecs[0] };
+        const d = driverRecs[0];
+        details = {
+          ...details,
+          assignedBusId: d.assignedBusId,
+        };
       }
     }
 
@@ -103,6 +127,32 @@ export async function getProfileWithDetails(userId: string) {
 // -------------------------------------------------------------
 // BUSES & ROUTES
 // -------------------------------------------------------------
+export async function getStudentUserIdsForBus(busId: string): Promise<string[]> {
+  try {
+    const studentRows = await db.select().from(students).where(eq(students.assignedBusId, busId));
+    const userIds: string[] = [];
+    for (const row of studentRows) {
+      const prof = await db.select().from(profiles).where(eq(profiles.id, row.profileId)).limit(1);
+      if (prof[0]?.userId) userIds.push(prof[0].userId);
+      else if (row.registerNumber) userIds.push(row.registerNumber);
+    }
+    return userIds;
+  } catch {
+    return [];
+  }
+}
+
+export async function bindStudentPickupByUserId(userId: string, pickupPointId: string) {
+  const profile = await getProfileWithDetails(userId);
+  if (!profile?.id) return null;
+  const updated = await db
+    .update(students)
+    .set({ pickupStopId: pickupPointId })
+    .where(eq(students.profileId, profile.id))
+    .returning();
+  return updated[0] ?? null;
+}
+
 export async function getDbBuses() {
   try {
     return await db.select().from(buses).orderBy(buses.busNumber);

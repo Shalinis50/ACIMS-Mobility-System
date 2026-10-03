@@ -66,8 +66,35 @@ export default function DriverTrackingPage() {
   const [geoError, setGeoError] = useState<string | null>(null);
 
   const watchIdRef = useRef<number | null>(null);
+  const simulatorIntervalRef = useRef<number | null>(null);
+  const simulatorPathRef = useRef<Array<{ latitude: number; longitude: number }>>([]);
+  const pathIndexRef = useRef(0);
+  const [mobileLinkSource, setMobileLinkSource] = useState<"none" | "device" | "simulator">("none");
   const isPausedRef = useRef(false);
   isPausedRef.current = sessionStatus === "PAUSED";
+
+  const mobileDeviceConnected =
+    mobileLinkSource !== "none" && (hasFirstGpsPoint || sessionStatus === "ACTIVE" || sessionStatus === "STARTING");
+
+  function bearingDeg(
+    from: { latitude: number; longitude: number },
+    to: { latitude: number; longitude: number },
+  ): number {
+    const y = Math.sin(((to.longitude - from.longitude) * Math.PI) / 180) * Math.cos((to.latitude * Math.PI) / 180);
+    const x =
+      Math.cos((from.latitude * Math.PI) / 180) * Math.sin((to.latitude * Math.PI) / 180) -
+      Math.sin((from.latitude * Math.PI) / 180) *
+        Math.cos((to.latitude * Math.PI) / 180) *
+        Math.cos(((to.longitude - from.longitude) * Math.PI) / 180);
+    return (Math.atan2(y, x) * 180) / Math.PI;
+  }
+
+  function clearSimulatorInterval() {
+    if (simulatorIntervalRef.current !== null) {
+      window.clearInterval(simulatorIntervalRef.current);
+      simulatorIntervalRef.current = null;
+    }
+  }
 
   // Sync profile data
   useEffect(() => {
@@ -199,9 +226,12 @@ export default function DriverTrackingPage() {
    * START TRACKING: Verify auth, start session, begin watchPosition
    */
   const startTracking = async () => {
+    clearSimulatorInterval();
+    setMobileLinkSource("device");
     if (!navigator.geolocation) {
       setGpsConnection("DENIED");
       setGeoError("Geolocation is not supported by your browser or device.");
+      setMobileLinkSource("none");
       return;
     }
 
@@ -269,6 +299,81 @@ export default function DriverTrackingPage() {
     watchIdRef.current = id;
   };
 
+  /** Demo: sends GPS fixes along the real route path (desktop / lab testing). */
+  const startSimulatorTracking = async () => {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    clearSimulatorInterval();
+    setMobileLinkSource("simulator");
+    setGeoError(null);
+    setSessionStatus("STARTING");
+    setGpsConnection("WAITING");
+    setHasFirstGpsPoint(false);
+
+    try {
+      const sessionRes = await fetch("/api/driver/session/start", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-acims-driver-id": driverUserId,
+        },
+        body: JSON.stringify({ busId: selectedBusId, driverId: driverUserId }),
+      });
+      if (sessionRes.status === 403) {
+        const errData = await sessionRes.json().catch(() => ({}));
+        setGeoError(errData.error || "Driver not authorized for this vehicle.");
+        setSessionStatus("IDLE");
+        setGpsConnection("DISCONNECTED");
+        setMobileLinkSource("none");
+        return;
+      }
+      setBackendConnection("CONNECTED");
+    } catch {
+      setBackendConnection("OFFLINE");
+    }
+
+    const pathRes = await fetch(`/api/driver/simulator-path/${encodeURIComponent(selectedBusId)}`);
+    if (!pathRes.ok) {
+      setGeoError("Could not load route path for GPS simulator.");
+      setSessionStatus("IDLE");
+      setMobileLinkSource("none");
+      return;
+    }
+    const data = (await pathRes.json()) as { path: Array<{ latitude: number; longitude: number }> };
+    simulatorPathRef.current = data.path ?? [];
+    pathIndexRef.current = 0;
+    if (!simulatorPathRef.current.length) {
+      setGeoError("Route has no path points for simulation.");
+      setMobileLinkSource("none");
+      return;
+    }
+
+    const tick = () => {
+      if (isPausedRef.current) return;
+      const path = simulatorPathRef.current;
+      const i = pathIndexRef.current % path.length;
+      const j = (pathIndexRef.current + 1) % path.length;
+      const pt = path[i];
+      const next = path[j];
+      pathIndexRef.current += 1;
+      const coords = {
+        latitude: pt.latitude,
+        longitude: pt.longitude,
+        accuracy: 12,
+        altitude: null,
+        altitudeAccuracy: null,
+        heading: bearingDeg(pt, next),
+        speed: 6.5,
+      } as GeolocationCoordinates;
+      void transmitLocation(coords, Date.now());
+    };
+
+    tick();
+    simulatorIntervalRef.current = window.setInterval(tick, 5000);
+  };
+
   /**
    * PAUSE TRACKING: Stop publishing without destroying session
    */
@@ -305,6 +410,8 @@ export default function DriverTrackingPage() {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    clearSimulatorInterval();
+    setMobileLinkSource("none");
     setSessionStatus("ENDED");
     setGpsConnection("DISCONNECTED");
     setRealtimeConnection("DISCONNECTED");
@@ -325,6 +432,7 @@ export default function DriverTrackingPage() {
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
+      clearSimulatorInterval();
     };
   }, []);
 
@@ -373,6 +481,25 @@ export default function DriverTrackingPage() {
             description="Broadcast your device's genuine satellite GPS coordinates directly to the ACMIS live network. Students track this vehicle in real time with zero simulation."
           />
         </div>
+
+        {mobileDeviceConnected && (
+          <div
+            className="mt-6 flex items-center gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-900 dark:text-emerald-100"
+            data-testid="driver-gps-connected"
+          >
+            <Smartphone size={20} className="shrink-0 text-emerald-600" />
+            <span>
+              GPS connected
+              {mobileLinkSource === "simulator"
+                ? " (demo — simulated fixes along route)"
+                : " (live device GPS)"}
+            </span>
+            <span className="ml-auto hidden sm:inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700">
+              <span className="pulse-dot h-2 w-2 rounded-full bg-emerald-500" />
+              LINKED
+            </span>
+          </div>
+        )}
 
         {/* CONNECTION MONITORING STRIP */}
         <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -540,15 +667,29 @@ export default function DriverTrackingPage() {
           {/* Primary Action Buttons */}
           <div className="rounded-[28px] border border-border bg-card p-6 shadow-md text-center space-y-3">
             {sessionStatus === "IDLE" || sessionStatus === "ENDED" ? (
-              <button
-                type="button"
-                onClick={startTracking}
-                data-testid="button-start-driver-gps"
-                className="inline-flex h-14 w-full items-center justify-center gap-3 rounded-2xl bg-accent px-6 text-base font-extrabold text-accent-foreground shadow-lg transition hover:scale-[1.01] active:scale-[0.99]"
-              >
-                <Radio size={22} className="animate-pulse" />
-                <span>Start Live Tracking</span>
-              </button>
+              <div className="flex flex-col gap-2.5">
+                <button
+                  type="button"
+                  onClick={startTracking}
+                  data-testid="button-start-driver-gps"
+                  className="inline-flex h-14 w-full items-center justify-center gap-3 rounded-2xl bg-accent px-6 text-base font-extrabold text-accent-foreground shadow-lg transition hover:scale-[1.01] active:scale-[0.99]"
+                >
+                  <Radio size={22} className="animate-pulse" />
+                  <span>Start live tracking (device GPS)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void startSimulatorTracking()}
+                  data-testid="button-simulate-driver-gps"
+                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-border bg-muted/50 px-6 text-sm font-extrabold text-foreground hover:bg-muted"
+                >
+                  <Smartphone size={18} />
+                  <span>Simulate GPS along route (demo)</span>
+                </button>
+                <p className="text-[11px] text-muted-foreground">
+                  Use the demo simulator on a laptop: posts real coordinates to the backend so students see live ETA on My bus.
+                </p>
+              </div>
             ) : (
               <div className="flex flex-col gap-2.5 sm:flex-row">
                 {isPaused ? (
