@@ -1,6 +1,6 @@
 import { and, desc, eq, ne } from "drizzle-orm";
 import { db } from "./index.ts";
-import { shifts, trips } from "./schema.ts";
+import { shifts, trips, shiftAssignments, buses, busRoutes } from "./schema.ts";
 import { getDbBusById, getDbRoutes } from "./services.ts";
 
 export const CANONICAL_SHIFT_TYPES = ["MORNING", "EVENING"] as const;
@@ -233,14 +233,59 @@ export async function setShiftActive(shiftId: string, active: boolean) {
 }
 
 export async function getActiveShiftsForStudents() {
-  await ensureCanonicalShiftSlots();
-  const rows = await db.select().from(shifts).where(eq(shifts.active, true));
-  return rows
-    .filter((s) => s.startTime && s.endTime && s.routeId && s.busId)
-    .sort((a, b) => (a.shiftType === "MORNING" ? -1 : b.shiftType === "MORNING" ? 1 : 0));
+  const allShifts = await db.select().from(shifts).where(eq(shifts.active, true)).orderBy(shifts.startTime);
+  const assignments = await db.select().from(shiftAssignments).where(eq(shiftAssignments.active, true));
+  const busesList = await db.select().from(buses).where(eq(buses.active, true));
+  const routesList = await db.select().from(busRoutes).where(eq(busRoutes.active, true));
+  const routeMap = new Map(routesList.map((r) => [r.id, r]));
+  const busMap = new Map(busesList.map((b) => [b.id, b]));
+
+  return allShifts.map((s) => {
+    const shiftBusAssigns = assignments.filter((a) => a.shiftId === s.id);
+    const assignedBuses = shiftBusAssigns
+      .map((a) => {
+        const b = busMap.get(a.busId);
+        if (!b) return null;
+        const r = b.routeId ? routeMap.get(b.routeId) : null;
+        return {
+          busId: b.id,
+          busNumber: b.busNumber,
+          routeId: b.routeId || null,
+          routeName: r ? `${r.routeName} (${r.routeCode})` : (b.routeId || "Campus Route"),
+          driverId: b.driverId || null,
+        };
+      })
+      .filter(Boolean);
+
+    return {
+      id: s.id,
+      name: s.name,
+      shiftType: s.shiftType || "MORNING",
+      slotTime: s.slotTime || (s.startTime ? formatShiftTimeDisplay(s.startTime) : "6:30 AM"),
+      startTime: s.startTime,
+      endTime: s.endTime,
+      direction: s.direction || "TO_COLLEGE",
+      directionLabel: directionLabel(s.direction || "TO_COLLEGE"),
+      operatingDays: s.operatingDays || "MON,TUE,WED,THU,FRI",
+      examOnly: Boolean(s.examOnly),
+      assignedBuses,
+    };
+  });
 }
 
 export async function getShiftAssignedToBus(busId: string) {
+  const assignments = await db
+    .select()
+    .from(shiftAssignments)
+    .where(and(eq(shiftAssignments.busId, busId), eq(shiftAssignments.active, true)));
+
+  if (assignments.length > 0) {
+    const shiftIds = new Set(assignments.map((a) => a.shiftId));
+    const matched = await db.select().from(shifts).where(eq(shifts.active, true));
+    const currentShift = matched.find((s) => shiftIds.has(s.id) && s.startTime && s.endTime);
+    if (currentShift) return currentShift;
+  }
+
   const rows = await db
     .select()
     .from(shifts)

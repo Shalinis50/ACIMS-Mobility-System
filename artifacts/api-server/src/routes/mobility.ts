@@ -29,31 +29,22 @@ router.get("/mobility/shifts", async (_req, res) => {
 /** Student-facing daily shift schedule (active, DB-backed). */
 router.get("/mobility/daily-shifts", async (_req, res) => {
   const rows = await getActiveShiftsForStudents();
-  const { getDbBuses, getDbRoutes } = await import("../../../../src/db/services.ts");
-  const buses = await getDbBuses();
-  const routes = await getDbRoutes();
   res.json(
-    rows.map((s) => {
-      const bus = buses.find((b) => b.id === s.busId);
-      const route = routes.find((r) => r.id === s.routeId);
-      return {
-        id: s.id,
-        shiftType: s.shiftType,
-        name: s.name,
-        startTime: s.startTime,
-        endTime: s.endTime,
-        startTimeDisplay: formatShiftTimeDisplay(s.startTime),
-        endTimeDisplay: formatShiftTimeDisplay(s.endTime),
-        direction: s.direction,
-        directionLabel: directionLabel(s.direction),
-        routeId: s.routeId,
-        routeName: route?.routeName ?? s.routeId,
-        busId: s.busId,
-        busNumber: bus?.busNumber ?? s.busId,
-        driverId: s.driverId,
-        operatingDays: s.operatingDays,
-      };
-    }),
+    rows.map((s) => ({
+      id: s.id,
+      shiftType: s.shiftType,
+      name: s.name,
+      slotTime: (s as any).slotTime || formatShiftTimeDisplay(s.startTime),
+      startTime: s.startTime,
+      endTime: s.endTime,
+      startTimeDisplay: formatShiftTimeDisplay(s.startTime),
+      endTimeDisplay: formatShiftTimeDisplay(s.endTime),
+      direction: s.direction,
+      directionLabel: (s as any).directionLabel || directionLabel(s.direction),
+      operatingDays: s.operatingDays,
+      examOnly: (s as any).examOnly,
+      assignedBuses: (s as any).assignedBuses || [],
+    })),
   );
 });
 

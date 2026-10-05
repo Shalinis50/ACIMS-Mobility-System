@@ -156,9 +156,8 @@ export async function bindStudentPickupByUserId(userId: string, pickupPointId: s
 
 export async function getDbBuses() {
   try {
-    const { DUMMY_BUS_IDS } = await import("../../artifacts/api-server/src/services/recTransport/collegeFleetService.ts");
     const rows = await db.select().from(buses).orderBy(buses.busNumber);
-    return rows.filter((b) => !(DUMMY_BUS_IDS as readonly string[]).includes(b.id));
+    return rows;
   } catch (error) {
     console.error('Error fetching buses from DB:', error);
     return [];
@@ -181,6 +180,7 @@ export async function createDbBus(data: {
   registrationNumber?: string;
   routeId?: string;
   driverId?: string;
+  capacity?: number;
   active?: boolean;
 }) {
   try {
@@ -196,7 +196,8 @@ export async function updateDbBus(busId: string, updates: Partial<{
   busNumber: string;
   registrationNumber: string;
   routeId: string;
-  driverId: string;
+  driverId: string | null;
+  capacity: number;
   active: boolean;
 }>) {
   try {
@@ -214,9 +215,8 @@ export async function updateDbBus(busId: string, updates: Partial<{
 
 export async function getDbRoutes() {
   try {
-    const { DUMMY_ROUTE_IDS } = await import("../../artifacts/api-server/src/services/recTransport/collegeFleetService.ts");
     const rows = await db.select().from(busRoutes).orderBy(busRoutes.routeCode);
-    return rows.filter((r) => !(DUMMY_ROUTE_IDS as readonly string[]).includes(r.id));
+    return rows;
   } catch (error) {
     console.error('Error fetching routes:', error);
     return [];

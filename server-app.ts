@@ -3,8 +3,8 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import cors from "cors";
-import router from "./artifacts/api-server/src/routes/index";
-import { startBusSimulation } from "./artifacts/api-server/src/routes/buses";
+import router from "./artifacts/api-server/src/routes/index.ts";
+import { startBusSimulation } from "./artifacts/api-server/src/routes/buses.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +17,8 @@ export async function startServer() {
   const { migrateMobilitySchemaColumns } = await import("./src/db/bootstrapAppTables.ts");
   await migrateMobilitySchemaColumns();
   await ensureBaselineFleetData();
+  const { seedInitialAcimsRoutesAndFleet } = await import("./src/db/seedAcimsRoutes.ts");
+  await seedInitialAcimsRoutesAndFleet();
   const { ensureCanonicalShiftSlots } = await import("./src/db/shiftManagement.ts");
   await ensureCanonicalShiftSlots();
   const { ensureOfficialPickupPointsFromRoutes } = await import("./src/db/ensureMobilityPickups.ts");
@@ -29,7 +31,7 @@ export async function startServer() {
   purgeLegacyDummyMtcFromTransitDb();
 
   const app = express();
-  const port = Number(process.env.PORT) || 3000;
+  const port = (process.env.PORT && process.env.PORT !== "8080") ? Number(process.env.PORT) : 3000;
 
   // Detect distribution folder if built
   const candidatePaths = [
@@ -37,8 +39,7 @@ export async function startServer() {
     path.resolve(__dirname, "dist"),
   ];
   const distPath = candidatePaths.find((p) => fs.existsSync(path.join(p, "index.html")));
-  const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION);
-  const isProd = (process.env.NODE_ENV === "production" || isCloudRun) && Boolean(distPath);
+  const isProd = process.env.NODE_ENV === "production" && Boolean(distPath);
 
   app.use(cors());
   app.use(express.json());
@@ -83,6 +84,17 @@ export async function startServer() {
       root: path.resolve(__dirname, "artifacts/acims"),
     });
     app.use(vite.middlewares);
+    app.use(async (req, res, next) => {
+      const url = req.originalUrl;
+      try {
+        let template = fs.readFileSync(path.resolve(__dirname, "artifacts/acims/index.html"), "utf-8");
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ "Content-Type": "text/html" }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
   }
 
   const server = app.listen(port, "0.0.0.0", () => {

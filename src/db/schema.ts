@@ -35,6 +35,7 @@ export const buses = pgTable("buses", {
   registrationNumber: text("registration_number"),
   routeId: text("route_id"),
   driverId: text("driver_id"),
+  capacity: integer("capacity").notNull().default(40),
   active: boolean("active").notNull().default(true),
   source: text("source").notNull().default("ADMIN"),
   manuallyEdited: boolean("manually_edited").notNull().default(false),
@@ -43,9 +44,10 @@ export const buses = pgTable("buses", {
 
 // BUS ROUTES
 export const busRoutes = pgTable("bus_routes", {
-  id: text("id").primaryKey(), // e.g. 'route-bus-18'
+  id: text("id").primaryKey(), // e.g. 'route-18'
   routeName: text("route_name").notNull(),
   routeCode: text("route_code").notNull(),
+  direction: text("direction").notNull().default("TO_COLLEGE"), // TO_COLLEGE | FROM_COLLEGE
   startingTimeDisplay: text("starting_time_display"),
   startingTime24: text("starting_time_24"),
   campusArrivalDisplay: text("campus_arrival_display"),
@@ -63,6 +65,9 @@ export const busStops = pgTable("bus_stops", {
   latitude: doublePrecision("latitude").notNull(),
   longitude: doublePrecision("longitude").notNull(),
   sequenceNumber: integer("sequence_number").notNull(),
+  approximateTime: text("approximate_time"),
+  isNonStop: boolean("is_non_stop").notNull().default(false),
+  active: boolean("active").notNull().default(true),
 });
 
 /** Official student pickup points (geofenced stops on a route). */
@@ -78,22 +83,25 @@ export const officialPickupPoints = pgTable("official_pickup_points", {
   expectedOffsetMinutes: integer("expected_offset_minutes").notNull().default(0),
   scheduledTimeDisplay: text("scheduled_time_display"),
   scheduledTime24: text("scheduled_time_24"),
+  isNonStop: boolean("is_non_stop").notNull().default(false),
   source: text("source").notNull().default("ADMIN"),
   active: boolean("active").notNull().default(true),
 });
 
-/** Configurable operating shift (morning/evening slots; timings set by admin). */
+/** Configurable operating shift / service slot (morning/evening/exam slots; timings set by admin). */
 export const shifts = pgTable("shifts", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  shiftType: text("shift_type"), // MORNING | EVENING (canonical slots)
-  startTime: text("start_time"), // HH:MM 24h — unset until admin configures
+  shiftType: text("shift_type"), // MORNING | EVENING | EXAM
+  slotTime: text("slot_time"), // e.g. "6:30 AM"
+  startTime: text("start_time"), // HH:MM 24h
   endTime: text("end_time"),
   direction: text("direction").notNull().default("TO_COLLEGE"), // TO_COLLEGE | FROM_COLLEGE
   routeId: text("route_id"),
   busId: text("bus_id"),
   driverId: text("driver_id"),
   operatingDays: text("operating_days").notNull().default("MON,TUE,WED,THU,FRI"),
+  examOnly: boolean("exam_only").notNull().default(false),
   active: boolean("active").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -103,7 +111,7 @@ export const shiftAssignments = pgTable("shift_assignments", {
   id: text("id").primaryKey(),
   shiftId: text("shift_id").notNull(),
   busId: text("bus_id").notNull(),
-  driverId: text("driver_id").notNull(),
+  driverId: text("driver_id"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });

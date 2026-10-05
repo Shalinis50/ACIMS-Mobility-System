@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import {
   getDbBuses,
   getDbBusById,
+  getDbRoutes,
   getDbStopsByRoute,
   recordBusLocation,
   getLatestBusLocation,
@@ -14,6 +15,9 @@ import {
   isBusTrackingActive,
   verifyDriverBusAssignment,
 } from "../../../../src/db/services.ts";
+import { db } from "../../../../src/db/index.ts";
+import { busRoutes, busStops } from "../../../../src/db/schema.ts";
+import { eq } from "drizzle-orm";
 import { getRouteForBus } from "../services/routesData";
 import {
   validateGpsCoordinate,
@@ -171,21 +175,106 @@ export async function buildBusTelemetry(busId: string): Promise<ComputedTelemetr
 // -------------------------------------------------------------
 // LIST ALL BUSES
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// NEARBY CAMPUS BUS DISCOVERY (Geolocation-based)
+// -------------------------------------------------------------
+router.get("/buses/nearby", async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ error: "Valid lat and lng query parameters required" });
+    }
+
+    const busList = await getDbBuses();
+    const routeList = await getDbRoutes();
+    const allStops = await db.select().from(busStops).where(eq(busStops.active, true));
+
+    function calcDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+      const R = 6371;
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    const routesWithClosestStop = routeList.map((r) => {
+      const rStops = allStops.filter((s) => s.routeId === r.id && !s.isNonStop);
+      let closestStop: typeof allStops[0] | null = null;
+      let minDistance = Infinity;
+
+      for (const stop of rStops) {
+        if (stop.latitude && stop.longitude) {
+          const dist = calcDistanceKm(lat, lng, stop.latitude, stop.longitude);
+          if (dist < minDistance) {
+            minDistance = dist;
+            closestStop = stop;
+          }
+        }
+      }
+
+      const assignedBuses = busList.filter((b) => b.routeId === r.id && b.active);
+      const firstBus = assignedBuses[0] || null;
+
+      return {
+        routeId: r.id,
+        routeCode: r.routeCode,
+        routeName: r.routeName,
+        direction: r.direction || "TO_COLLEGE",
+        closestStopName: closestStop?.stopName || "Campus Stop",
+        approxTime: closestStop?.approximateTime || r.startingTimeDisplay || "Approx.",
+        distanceKm: Number.isFinite(minDistance) ? Number(minDistance.toFixed(2)) : 999,
+        busId: firstBus?.id || `bus-${r.routeCode.toLowerCase()}`,
+        busNumber: firstBus?.busNumber || r.routeCode,
+        buses: assignedBuses.map((b) => ({
+          id: b.id,
+          busNumber: b.busNumber,
+          driverId: b.driverId,
+        })),
+      };
+    });
+
+    // Sort by proximity
+    routesWithClosestStop.sort((a, b) => a.distanceKm - b.distanceKm);
+
+    res.json(routesWithClosestStop);
+  } catch (err: any) {
+    console.error("Error finding nearby buses:", err);
+    res.status(500).json({ error: "Failed to find nearby buses" });
+  }
+});
+
+// -------------------------------------------------------------
+// LIST ALL BUSES
+// -------------------------------------------------------------
 router.get("/buses", async (_req, res) => {
   try {
     const dbBusesList = await getDbBuses();
+    const routeList = await getDbRoutes();
+    const routeMap = new Map(routeList.map((r) => [r.id, r]));
+    const allStops = await db.select().from(busStops).orderBy(busStops.sequenceNumber);
+
     const results = await Promise.all(
       dbBusesList.map(async (bus) => {
-        const routeDef = getRouteForBus(bus.id);
+        const route = bus.routeId ? routeMap.get(bus.routeId) : null;
+        const stops = bus.routeId ? allStops.filter((s) => s.routeId === bus.routeId) : [];
         const telemetry = await buildBusTelemetry(bus.id);
+
+        const origin = stops[0]?.stopName || "Terminal Depot";
+        const destination = stops[stops.length - 1]?.stopName || "College Campus";
+        const routeLabel = route ? `${route.routeName}` : "Campus Route";
 
         return {
           id: bus.id,
           busNumber: bus.busNumber,
-          origin: routeDef?.origin || "Central Campus",
-          destination: routeDef?.destination || "City Station",
-          routeLabel: routeDef?.name || "Campus Express",
-          capacity: 45,
+          origin,
+          destination,
+          routeLabel,
+          capacity: bus.capacity || 40,
           currentLocation: { latitude: telemetry.latitude, longitude: telemetry.longitude },
           nextStop: telemetry.nextStop,
           nextStopId: telemetry.nextStopId,
@@ -198,7 +287,7 @@ router.get("/buses", async (_req, res) => {
           status: telemetry.status,
           updatedAt: telemetry.recordedAt,
           active: bus.active,
-          routeId: bus.routeId || routeDef?.id || "route-bus-12",
+          routeId: bus.routeId || (route ? route.id : "route-18"),
           driverId: bus.driverId || undefined,
           locationMode: "driver-gps",
           freshness: telemetry.freshness,
@@ -227,16 +316,26 @@ router.get("/buses/:busId", async (req, res) => {
       return res.status(404).json({ error: "Bus not found" });
     }
 
-    const routeDef = getRouteForBus(bus.id);
+    let route = null;
+    let stops: typeof busStops.$inferSelect[] = [];
+    if (bus.routeId) {
+      const r = await db.select().from(busRoutes).where(eq(busRoutes.id, bus.routeId)).limit(1);
+      route = r[0] || null;
+      stops = await db.select().from(busStops).where(eq(busStops.routeId, bus.routeId)).orderBy(busStops.sequenceNumber);
+    }
     const telemetry = await buildBusTelemetry(bus.id);
+
+    const origin = stops[0]?.stopName || "Terminal Depot";
+    const destination = stops[stops.length - 1]?.stopName || "College Campus";
+    const routeLabel = route ? `${route.routeName}` : "Campus Route";
 
     res.json({
       id: bus.id,
       busNumber: bus.busNumber,
-      origin: routeDef?.origin || "Central Campus",
-      destination: routeDef?.destination || "City Station",
-      routeLabel: routeDef?.name || "Campus Express",
-      capacity: 45,
+      origin,
+      destination,
+      routeLabel,
+      capacity: bus.capacity || 40,
       currentLocation: { latitude: telemetry.latitude, longitude: telemetry.longitude },
       nextStop: telemetry.nextStop,
       nextStopId: telemetry.nextStopId,
@@ -249,7 +348,7 @@ router.get("/buses/:busId", async (req, res) => {
       status: telemetry.status,
       updatedAt: telemetry.recordedAt,
       active: bus.active,
-      routeId: bus.routeId || routeDef?.id || "route-bus-12",
+      routeId: bus.routeId || "route-18",
       driverId: bus.driverId || undefined,
       locationMode: "driver-gps",
       freshness: telemetry.freshness,

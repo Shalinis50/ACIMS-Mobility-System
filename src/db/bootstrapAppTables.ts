@@ -142,14 +142,31 @@ const APP_STATEMENTS = [
 export async function migrateMobilitySchemaColumns() {
   const alters = [
     "ALTER TABLE shifts ADD COLUMN IF NOT EXISTS shift_type TEXT",
+    "ALTER TABLE shifts ADD COLUMN IF NOT EXISTS slot_time TEXT",
     "ALTER TABLE shifts ADD COLUMN IF NOT EXISTS end_time TEXT",
     "ALTER TABLE shifts ADD COLUMN IF NOT EXISTS bus_id TEXT",
     "ALTER TABLE shifts ADD COLUMN IF NOT EXISTS driver_id TEXT",
+    "ALTER TABLE shifts ADD COLUMN IF NOT EXISTS exam_only BOOLEAN DEFAULT FALSE",
     "ALTER TABLE shifts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()",
     "ALTER TABLE trips ADD COLUMN IF NOT EXISTS shift_start_snapshot TEXT",
     "ALTER TABLE trips ADD COLUMN IF NOT EXISTS shift_end_snapshot TEXT",
     "ALTER TABLE shifts ALTER COLUMN start_time DROP NOT NULL",
     "ALTER TABLE shifts ALTER COLUMN route_id DROP NOT NULL",
+    "ALTER TABLE shift_assignments ALTER COLUMN driver_id DROP NOT NULL",
+    "ALTER TABLE bus_routes ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'TO_COLLEGE'",
+    "ALTER TABLE bus_stops ADD COLUMN IF NOT EXISTS approximate_time TEXT",
+    "ALTER TABLE bus_stops ADD COLUMN IF NOT EXISTS is_non_stop BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE bus_stops ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE",
+    "ALTER TABLE official_pickup_points ADD COLUMN IF NOT EXISTS is_non_stop BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE buses ADD COLUMN IF NOT EXISTS capacity INTEGER DEFAULT 40",
+    `CREATE TABLE IF NOT EXISTS shift_assignments (
+      id TEXT PRIMARY KEY,
+      shift_id TEXT NOT NULL,
+      bus_id TEXT NOT NULL,
+      driver_id TEXT,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
   ];
   for (const sql of alters) {
     try {

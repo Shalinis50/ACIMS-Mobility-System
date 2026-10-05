@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
 export type NaviHistoryTurn = { role: "user" | "assistant"; text: string };
 
@@ -41,19 +41,12 @@ Do not claim that a bus has arrived unless the arrival/geofence system confirms 
 
 Always prefer 'I don't have enough current data to answer that reliably' over guessing.`;
 
-function getModel() {
+function getAiClient(): { ai: GoogleGenAI; modelName: string } | null {
   const apiKey = getGeminiApiKey();
   if (!apiKey) return null;
-  const modelName = process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash";
-  const genAI = new GoogleGenerativeAI(apiKey);
-  return genAI.getGenerativeModel({
-    model: modelName,
-    systemInstruction: MOBI_SYSTEM_PROMPT,
-    generationConfig: {
-      temperature: 0.2,
-      maxOutputTokens: 800,
-    },
-  });
+  const modelName = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+  const ai = new GoogleGenAI({ apiKey });
+  return { ai, modelName };
 }
 
 function formatHistory(history: NaviHistoryTurn[]): string {
@@ -75,8 +68,8 @@ export async function enhanceNaviAnswerWithGemini(params: {
   intent: string;
   history?: NaviHistoryTurn[];
 }): Promise<{ answer: string; ttsText: string; followUps?: string[] } | null> {
-  const model = getModel();
-  if (!model) return null;
+  const client = getAiClient();
+  if (!client) return null;
 
   try {
     const prompt = `Rewrite VERIFIED_ANSWER as MOBI in short, clear spoken Indian English (one or two sentences for simple questions).
@@ -102,8 +95,16 @@ ${params.factualAnswer}
 Reply with JSON only, no markdown:
 {"answer":"...","ttsText":"...","followUps":["...","..."]}`;
 
-    const result = await model.generateContent(prompt);
-    const raw = result.response.text().trim();
+    const result = await client.ai.models.generateContent({
+      model: client.modelName,
+      contents: prompt,
+      config: {
+        systemInstruction: MOBI_SYSTEM_PROMPT,
+        temperature: 0.2,
+        maxOutputTokens: 800,
+      },
+    });
+    const raw = result.text?.trim() || "";
     const jsonSlice = raw.match(/\{[\s\S]*\}/);
     if (!jsonSlice) return null;
 
@@ -138,8 +139,8 @@ export async function generateConversationalNaviReply(params: {
   liveContext: string;
   studentName: string;
 }): Promise<{ answer: string; ttsText: string; followUps?: string[] } | null> {
-  const model = getModel();
-  if (!model) return null;
+  const client = getAiClient();
+  if (!client) return null;
 
   try {
     const prompt = `Respond as MOBI. Be short, clear, and helpful.
@@ -164,8 +165,16 @@ STUDENT_MESSAGE: ${params.userMessage}
 JSON only:
 {"answer":"...","ttsText":"...","followUps":["...","..."]}`;
 
-    const result = await model.generateContent(prompt);
-    const raw = result.response.text().trim();
+    const result = await client.ai.models.generateContent({
+      model: client.modelName,
+      contents: prompt,
+      config: {
+        systemInstruction: MOBI_SYSTEM_PROMPT,
+        temperature: 0.2,
+        maxOutputTokens: 800,
+      },
+    });
+    const raw = result.text?.trim() || "";
     const jsonSlice = raw.match(/\{[\s\S]*\}/);
     if (!jsonSlice) return null;
 
