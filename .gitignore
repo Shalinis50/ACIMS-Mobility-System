@@ -20,6 +20,20 @@ node_modules/
 jspm_packages/
 web_modules/
 
+# Compiled Output & Build Bundles
+tmp
+out-tsc
+*.tsbuildinfo
+.expo
+.expo-shared
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+.local/
+
 # Python / Virtual Environments
 __pycache__/
 *.py[cod]
@@ -46,24 +60,31 @@ wheels/
 .installed.cfg
 *.egg
 
-# Build Outputs & Bundles
-dist/
-build/
-out/
-.next/
-.nuxt/
-.cache/
-
 # IDE and Editor Directories
-.idea/
-.vscode/
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
-# Logs and Runtime Data
+# Misc & Logs
+/.sass-cache
+/connect.lock
+/libpeerconnection.log
+testem.log
+/typings
 logs/
 *.log
 npm-debug.log*
@@ -76,3 +97,13 @@ lerna-debug.log*
 coverage/
 .nyc_output/
 *.lcov
+
+# Instructions & Rules
+.cursor/rules/nx-rules.mdc
+.github/instructions/nx.instructions.md
+
+# Local Databases (never commit runtime data)
+data/postgres/
+*.db
+*.db-shm
+*.db-wal
