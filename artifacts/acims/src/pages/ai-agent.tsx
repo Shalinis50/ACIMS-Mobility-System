@@ -24,8 +24,6 @@ import {
 import { MapContainer, Marker, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import { divIcon } from 'leaflet';
 import { PageHeading } from '@/components/acims-ui';
-import { useAuth } from '@/lib/auth-context';
-import { studentMobilityHeaders } from '@/lib/mobilityApi';
 import 'leaflet/dist/leaflet.css';
 
 interface MessageCard {
@@ -61,13 +59,6 @@ interface MessageItem {
     markers: MapMarker[];
   };
   ttsText?: string;
-  followUps?: string[];
-  geminiEnhanced?: boolean;
-  actionPrompt?: {
-    type: 'CHANGE_PICKUP';
-    currentName: string | null;
-    options: Array<{ id: string; name: string }>;
-  };
   time: string;
 }
 
@@ -81,106 +72,15 @@ interface StudentProfileState {
 }
 
 const promptSuggestions = [
-  'Where is my bus?',
-  'When will my bus reach my stop?',
-  'Is my bus delayed?',
-  'What time is my bus?',
-  'Where is my pickup point?',
+  'Where is my college bus?',
+  "What's my next bus?",
+  'Which buses are near me?',
   'I missed my bus. What can I take?',
-  'Where is the library?',
-  'Find the nearest bus stop.',
-  'How do I get to the auditorium?',
+  'How do I get to REC from my stop?',
+  'When should I leave home?',
+  'What about public buses?',
+  'Where do I get down?',
 ];
-
-const INDIAN_ENGLISH_LANG = 'en-IN';
-
-/** Known female Indian English system voices (never treat generic en-IN as female). */
-const INDIAN_ENGLISH_FEMALE_NAMES = [
-  'veena',
-  'priya',
-  'neerja',
-  'lekha',
-  'aditi',
-  'kajal',
-  'swara',
-  'geeta',
-  'meera',
-  'ananya',
-  'heera',
-];
-
-const ENGLISH_FEMALE_FALLBACK_NAMES = [
-  'samantha',
-  'karen',
-  'victoria',
-  'zira',
-  'fiona',
-  'moira',
-  'tessa',
-  'serena',
-  'susan',
-  'kate',
-  'salli',
-  'joanna',
-  'amy',
-  'emma',
-  'nicole',
-  'hazel',
-  'sara',
-  'linda',
-];
-
-function voiceName(v: SpeechSynthesisVoice): string {
-  return v.name.toLowerCase();
-}
-
-function isIndianEnglishVoice(v: SpeechSynthesisVoice): boolean {
-  const lang = v.lang.replace('_', '-').toLowerCase();
-  return lang === 'en-in' || lang.startsWith('en-in');
-}
-
-function isExplicitlyMaleVoice(v: SpeechSynthesisVoice): boolean {
-  const name = voiceName(v);
-  if (/\bmale\b|\bman\b/.test(name)) return true;
-  return /karun|rishi|ravi|arjun|amit|daniel|alex|fred|david|mark|james|aaron|guy|ralph|bruce|lee|tom|harry|ryan|samuel|nathan|john|michael|paul|george|richard|william|brian|eric|steven|kevin|jason|matthew|jacob|noah|liam|oliver|ethan|logan|lucas|mason|aiden|jack|henry|owen|sebastian|muhammad|raj|vikram|suresh|kumar/.test(
-    name,
-  );
-}
-
-function isExplicitlyFemaleVoice(v: SpeechSynthesisVoice): boolean {
-  const name = voiceName(v);
-  if (/\bfemale\b|\bwoman\b/.test(name)) return true;
-  if (INDIAN_ENGLISH_FEMALE_NAMES.some((token) => name.includes(token))) return true;
-  if (ENGLISH_FEMALE_FALLBACK_NAMES.some((token) => name.includes(token))) return true;
-  return false;
-}
-
-function getSpeechVoices(): SpeechSynthesisVoice[] {
-  if (!('speechSynthesis' in window)) return [];
-  // Chrome loads voices asynchronously; calling getVoices() again before speak helps.
-  return window.speechSynthesis.getVoices();
-}
-
-/** Female Indian English (en-IN) when available; never falls back to a male voice. */
-function pickIndianEnglishFemaleVoice(): SpeechSynthesisVoice | null {
-  const voices = getSpeechVoices();
-  if (!voices.length) return null;
-
-  const femaleOnly = voices.filter((v) => isExplicitlyFemaleVoice(v) && !isExplicitlyMaleVoice(v));
-
-  const indianFemale = femaleOnly.find((v) => isIndianEnglishVoice(v));
-  if (indianFemale) return indianFemale;
-
-  const namedIndianFemale = femaleOnly.find((v) =>
-    INDIAN_ENGLISH_FEMALE_NAMES.some((token) => voiceName(v).includes(token)),
-  );
-  if (namedIndianFemale) return namedIndianFemale;
-
-  const englishFemale = femaleOnly.find((v) => v.lang.toLowerCase().startsWith('en'));
-  if (englishFemale) return englishFemale;
-
-  return femaleOnly[0] ?? null;
-}
 
 function LeafletAutoCenter({ center }: { center: [number, number] }) {
   const map = useMap();
@@ -191,12 +91,11 @@ function LeafletAutoCenter({ center }: { center: [number, number] }) {
 }
 
 export default function AiAgentPage() {
-  const { profile, token } = useAuth();
   const [studentId, setStudentId] = useState(() => {
     try {
-      return profile?.userId || sessionStorage.getItem('acmis_student_session') || 'student-20418';
+      return sessionStorage.getItem('acmis_student_session') || 'student-20418';
     } catch {
-      return profile?.userId || 'student-20418';
+      return 'student-20418';
     }
   });
 
@@ -227,7 +126,7 @@ export default function AiAgentPage() {
   const [messages, setMessages] = useState<MessageItem[]>([
     {
       role: 'assistant',
-      text: "How can I help you? Ask about your bus, ETA, pickup point, campus locations, or MTC options. I only answer from live ACIMS data.",
+      text: 'Hello Ananya! I am your personal ACIMS Mobility Assistant. I can check your college bus GPS, pickup stop timings, nearby MTC buses, Metro/Rail connections, and journey alternatives using verified transport data.',
       sources: ['ACIMS Student Identity & Transit Registry'],
       sourceBadge: {
         label: 'ACIMS Verified Network',
@@ -243,53 +142,9 @@ export default function AiAgentPage() {
   const [speechTranscript, setSpeechTranscript] = useState('');
   const [speechSupported, setSpeechSupported] = useState(false);
   const recognitionRef = useRef<any>(null);
-  const sendQueryRef = useRef<
-    (text?: string, confirmAction?: { action: 'CHANGE_PICKUP'; pickupPointId?: string; confirmed?: boolean }) => Promise<void>
-  >(null);
 
   // Text-To-Speech (TTS) State
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
-  const [ttsVoice, setTtsVoice] = useState<SpeechSynthesisVoice | null>(null);
-  const [geminiEnabled, setGeminiEnabled] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (profile?.userId) setStudentId(profile.userId);
-  }, [profile?.userId]);
-
-  useEffect(() => {
-    if (!('speechSynthesis' in window)) return;
-
-    const syncVoice = () => {
-      const voice = pickIndianEnglishFemaleVoice();
-      if (voice) setTtsVoice(voice);
-    };
-
-    syncVoice();
-    const retry1 = window.setTimeout(syncVoice, 300);
-    const retry2 = window.setTimeout(syncVoice, 1200);
-    window.speechSynthesis.addEventListener('voiceschanged', syncVoice);
-    return () => {
-      window.clearTimeout(retry1);
-      window.clearTimeout(retry2);
-      window.speechSynthesis.removeEventListener('voiceschanged', syncVoice);
-    };
-  }, []);
-
-  useEffect(() => {
-    fetch('/api/ai/status')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data) {
-          setGeminiEnabled(Boolean(data.geminiEnabled));
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isSubmitting]);
 
   // Load student profile from backend
   useEffect(() => {
@@ -376,13 +231,6 @@ export default function AiAgentPage() {
 
       recognition.onend = () => {
         setIsListening(false);
-        setSpeechTranscript((current) => {
-          const trimmed = current.trim();
-          if (trimmed) {
-            void sendQueryRef.current?.(trimmed);
-          }
-          return current;
-        });
       };
 
       recognitionRef.current = recognition;
@@ -396,6 +244,9 @@ export default function AiAgentPage() {
     if (isListening) {
       recognitionRef.current.stop();
       setIsListening(false);
+      if (speechTranscript.trim()) {
+        sendQuery(speechTranscript.trim());
+      }
     } else {
       setSpeechTranscript('');
       try {
@@ -407,12 +258,9 @@ export default function AiAgentPage() {
   };
 
   // Submit query
-  const sendQuery = async (
-    queryText?: string,
-    confirmAction?: { action: 'CHANGE_PICKUP'; pickupPointId?: string; confirmed?: boolean },
-  ) => {
-    const textToSend = (queryText || message).trim() || (confirmAction ? 'Confirm pickup change' : '');
-    if ((!textToSend && !confirmAction) || isSubmitting) return;
+  const sendQuery = async (queryText?: string) => {
+    const textToSend = (queryText || message).trim();
+    if (!textToSend || isSubmitting) return;
 
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMessage: MessageItem = {
@@ -425,22 +273,22 @@ export default function AiAgentPage() {
     if (!queryText) setMessage('');
     setIsSubmitting(true);
 
-    const conversationHistory = [...messages.slice(-8), userMessage].map((m) => ({
+    // Build context history for follow-ups
+    const conversationHistory = messages.slice(-6).map((m) => ({
       role: m.role,
       text: m.text,
-      intent: m.intent as string | undefined,
+      intent: m.intent as any,
     }));
 
     try {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers: studentMobilityHeaders(token, profile),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           studentId,
           message: textToSend,
-          deviceCoords: gpsStatus === 'granted' ? deviceCoords || undefined : undefined,
+          deviceCoords: deviceCoords || undefined,
           history: conversationHistory,
-          confirmAction,
         }),
       });
 
@@ -455,31 +303,19 @@ export default function AiAgentPage() {
           cards: data.cards,
           mapData: data.mapData,
           ttsText: data.ttsText,
-          followUps: data.followUps,
-          geminiEnhanced: data.geminiEnhanced,
-          actionPrompt: data.actionPrompt,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
-        setMessages((prev) => {
-          const next = [...prev, assistantMessage];
-          window.setTimeout(() => {
-            toggleSpeak(assistantMessage.ttsText || assistantMessage.text, next.length - 1);
-          }, 80);
-          return next;
-        });
+        setMessages((prev) => [...prev, assistantMessage]);
       } else {
         throw new Error('Server returned an error');
       }
     } catch {
-      const fallback =
-        "I'm unable to retrieve that information right now.";
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          text: fallback,
-          sources: ['ACIMS MOBI'],
-          ttsText: fallback,
+          text: "I don't have reliable transport data for that right now. Please verify your connection or try another travel query.",
+          sources: ['ACIMS Fallback Safeguard'],
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -487,9 +323,8 @@ export default function AiAgentPage() {
       setIsSubmitting(false);
     }
   };
-  sendQueryRef.current = sendQuery;
 
-  // TTS Read Answer — Indian English (en-IN), female when available on device
+  // TTS Read Answer
   const toggleSpeak = (text: string, index: number) => {
     if (!('speechSynthesis' in window)) return;
 
@@ -500,38 +335,24 @@ export default function AiAgentPage() {
     }
 
     window.speechSynthesis.cancel();
-    const voice = pickIndianEnglishFemaleVoice() ?? ttsVoice;
-    if (voice && voice !== ttsVoice) {
-      setTtsVoice(voice);
-    }
-
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9;
-    utterance.pitch = 1.05;
-    utterance.lang = INDIAN_ENGLISH_LANG;
-
-    if (voice) {
-      utterance.voice = voice;
-      utterance.lang = isIndianEnglishVoice(voice)
-        ? voice.lang.replace('_', '-')
-        : INDIAN_ENGLISH_LANG;
-    }
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
 
     utterance.onend = () => setSpeakingIndex(null);
     utterance.onerror = () => setSpeakingIndex(null);
 
     setSpeakingIndex(index);
-    // Brief delay helps Chrome apply the selected voice reliably.
-    window.setTimeout(() => window.speechSynthesis.speak(utterance), 50);
+    window.speechSynthesis.speak(utterance);
   };
 
   return (
     <div className="page-in min-h-[calc(100vh-80px)]">
       {/* Header */}
       <PageHeading
-        eyebrow="ACIMS Mobility Assistant"
-        title="MOBI"
-        description="How can I help you? Voice-first answers from live ACIMS buses, pickup points, campus map, and official MTC data — never guessed."
+        eyebrow="Personal Mobility Assistant"
+        title="ACIMS AI"
+        description="Your dedicated transit intelligence companion. Grounded exclusively in verified CUMTA GTFS data, stop-specific timetables, and live college bus telemetry."
         action={
           <div className="flex flex-wrap items-center gap-2">
             {gpsStatus === 'granted' && deviceCoords ? (
@@ -591,16 +412,11 @@ export default function AiAgentPage() {
           {/* Prominent Voice Assistant Box */}
           <div className="rounded-[28px] border-2 border-accent/70 bg-gradient-to-br from-card to-accent/10 p-6 shadow-md text-center space-y-4">
             <div className="mono text-[10px] uppercase tracking-[0.2em] font-extrabold text-muted-foreground">
-              MOBI
+              Voice Assistant
             </div>
-            <h2 className="text-lg font-extrabold text-foreground">How can I help you?</h2>
+            <h2 className="text-lg font-extrabold text-foreground">Ask anything about your commute</h2>
             <p className="text-xs text-muted-foreground">
-              Speak naturally. MOBI queries ACIMS data first, then answers in voice and text. It will not invent bus locations, ETAs, or MTC routes.
-            </p>
-            <p className="text-[10px] leading-4 text-muted-foreground">
-              {ttsVoice
-                ? `Read-aloud voice: ${ttsVoice.name.replace(/Microsoft |Google /gi, '')} (${ttsVoice.lang})`
-                : 'For Indian English female voice, add Veena or Neerja (English – India) in your system speech voices, then refresh.'}
+              Tap the microphone to speak naturally. Speech recognition will query live transit schedules and bus telemetry.
             </p>
 
             <div className="pt-2 flex justify-center">
@@ -627,7 +443,7 @@ export default function AiAgentPage() {
             )}
 
             <div className="text-[11px] font-bold text-muted-foreground">
-              {isListening ? 'Listening… tap mic to stop' : '🎙️ Ask MOBI'}
+              {isListening ? 'Tap mic again to submit query' : '🎙️ Tap to Speak'}
             </div>
           </div>
 
@@ -665,20 +481,13 @@ export default function AiAgentPage() {
                 <Bot size={20} />
               </span>
               <div>
-                <div className="text-sm font-extrabold text-foreground">MOBI</div>
-                <div className="text-[10px] text-muted-foreground">Real-time AI voice mobility assistant</div>
+                <div className="text-sm font-extrabold text-foreground">ACIMS Mobility Intelligence Desk</div>
+                <div className="text-[10px] text-muted-foreground">Personalized commute &amp; multi-modal transit</div>
               </div>
             </div>
-            <div className="flex flex-col items-end gap-1">
-              <span className="mono text-[10px] font-extrabold rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
-                Grounded in verified data
-              </span>
-              {geminiEnabled && (
-                <span className="mono text-[9px] font-bold rounded-full bg-violet-500/15 text-violet-700 dark:text-violet-300 px-2 py-0.5">
-                  Enhanced replies
-                </span>
-              )}
-            </div>
+            <span className="mono text-[10px] font-extrabold rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
+              Zero Hallucination
+            </span>
           </div>
 
           {/* Message Stream */}
@@ -797,45 +606,6 @@ export default function AiAgentPage() {
                     </div>
                   )}
 
-                  {item.role === 'assistant' && item.actionPrompt?.type === 'CHANGE_PICKUP' && item.actionPrompt.options.length > 0 && (
-                    <div className="mt-3 space-y-1.5">
-                      <div className="text-[10px] font-bold text-muted-foreground">Confirm pickup change</div>
-                      {item.actionPrompt.options.map((opt) => (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          disabled={isSubmitting}
-                          onClick={() =>
-                            sendQuery(`Change pickup to ${opt.name}`, {
-                              action: 'CHANGE_PICKUP',
-                              pickupPointId: opt.id,
-                              confirmed: true,
-                            })
-                          }
-                          className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-left text-[11px] font-bold text-foreground hover:border-accent hover:bg-accent/10 disabled:opacity-50"
-                        >
-                          Confirm: {opt.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {item.role === 'assistant' && item.followUps && item.followUps.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {item.followUps.map((prompt) => (
-                        <button
-                          key={prompt}
-                          type="button"
-                          disabled={isSubmitting}
-                          onClick={() => sendQuery(prompt)}
-                          className="rounded-lg border border-border bg-background px-2.5 py-1 text-[10px] font-bold text-foreground hover:border-accent hover:bg-accent/10 disabled:opacity-50"
-                        >
-                          {prompt}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
                   {/* Actions Bar: Read Answer & Ask Follow-up */}
                   {item.role === 'assistant' && (
                     <div className="mt-2 pt-1.5 flex items-center justify-end gap-2 border-t border-border/30">
@@ -875,13 +645,10 @@ export default function AiAgentPage() {
                   <Bot size={15} />
                 </span>
                 <div className="rounded-2xl bg-muted px-4 py-3 text-xs text-muted-foreground animate-pulse border border-border/50">
-                  {geminiEnabled
-                    ? 'MOBI is querying ACIMS tools, then speaking a grounded reply…'
-                    : 'MOBI is querying ACIMS live data…'}
+                  Querying CUMTA GTFS schedules, student stop matrices, and live bus GPS…
                 </div>
               </div>
             )}
-            <div ref={chatEndRef} />
           </div>
 
           {/* Input Form */}
@@ -909,7 +676,7 @@ export default function AiAgentPage() {
               data-testid="input-ai-message"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="Ask MOBI (e.g. Where is my bus?)"
+              placeholder="Ask anything (e.g. When is my next bus? Did I miss my bus? Buses near me?)"
               className="h-12 flex-1 rounded-xl border border-input bg-background px-4 text-xs font-medium text-foreground outline-none focus:ring-2 focus:ring-ring"
             />
 

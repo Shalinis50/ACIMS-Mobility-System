@@ -8,10 +8,6 @@ import path from "node:path";
 
 const { Pool } = pg;
 
-declare global {
-  var _pgliteClient: PGlite | undefined;
-}
-
 export type DbClient = any;
 
 let pool: any = null;
@@ -32,16 +28,29 @@ if (process.env.DATABASE_URL) {
   }
 }
 
+declare global {
+  var _pgliteInstance: PGlite | undefined;
+}
+
 if (!db) {
   // Use persistent embedded PostgreSQL engine
   const dataDir = path.resolve(process.cwd(), "data/postgres");
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+  if (!global._pgliteInstance) {
+    try {
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      const pidFile = path.join(dataDir, "postmaster.pid");
+      if (fs.existsSync(pidFile)) {
+        try { fs.unlinkSync(pidFile); } catch {}
+      }
+      global._pgliteInstance = new PGlite(dataDir);
+    } catch {
+      global._pgliteInstance = new PGlite();
+    }
   }
-  pgliteClient = global._pgliteClient ?? new PGlite(dataDir);
-  global._pgliteClient = pgliteClient;
+  pgliteClient = global._pgliteInstance;
   db = drizzlePglite(pgliteClient, { schema });
-  console.log(`[ACIMS DB] Persistent PostgreSQL engine initialized at ${dataDir}`);
 }
 
 /**

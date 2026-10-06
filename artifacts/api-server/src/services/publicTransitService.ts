@@ -128,23 +128,31 @@ function seedBaselineTransitData(db: DatabaseSync) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  insertAgency.run(
-    "MTC",
-    "Metropolitan Transport Corporation (Chennai)",
-    "Bus Transit",
-    "https://mtcbus.tn.gov.in/",
-    "044-23455801",
-    "Asia/Kolkata",
-    "Official MTC Chennai (mtcbus.tn.gov.in)",
-    "https://mtcbus.tn.gov.in/",
-    now,
-  );
+  insertAgency.run("MTC", "Metropolitan Transport Corporation", "Bus Transit", "https://mtcbus.tn.gov.in/", "044-23455801", "Asia/Kolkata", "CUMTA / MTC GTFS", "https://mtcbus.tn.gov.in/", now);
   insertAgency.run("CMRL", "Chennai Metro Rail Limited", "Metro Rail", "https://chennaimetrorail.org", "044-24310174", "Asia/Kolkata", "CMRL Official GTFS", "https://chennaimetrorail.org/", now);
   insertAgency.run("CSR", "Southern Railway Chennai Suburban", "Suburban Rail", "https://sr.indianrailways.gov.in", "139", "Asia/Kolkata", "Southern Railway GTFS", "https://sr.indianrailways.gov.in", now);
 
   // 2. Stops
-  // MTC stops/routes are NOT seeded — use mtcService sync from https://mtcbus.tn.gov.in/
   const stops = [
+    { id: "MTC_STOP_TAMBARAM", agencyId: "MTC", stopId: "MTC_TAMBARAM", stopName: "Tambaram Terminal / Bus Stand", lat: 12.9249, lon: 80.1275 },
+    { id: "MTC_STOP_SANATORIUM", agencyId: "MTC", stopId: "MTC_SANATORIUM", stopName: "Tambaram Sanatorium", lat: 12.9372, lon: 80.1396 },
+    { id: "MTC_STOP_PERUNGALATHUR", agencyId: "MTC", stopId: "MTC_PERUNGALATHUR", stopName: "Perungalathur Junction", lat: 12.9055, lon: 80.0918 },
+    { id: "MTC_STOP_VANDALUR", agencyId: "MTC", stopId: "MTC_VANDALUR", stopName: "Vandalur Transit Hub / Zoo", lat: 12.8924, lon: 80.0812 },
+    { id: "MTC_STOP_CHROMEPET", agencyId: "MTC", stopId: "MTC_CHROMEPET", stopName: "Chromepet Bus Stop", lat: 12.9517, lon: 80.1412 },
+    { id: "MTC_STOP_PALLAVARAM", agencyId: "MTC", stopId: "MTC_PALLAVARAM", stopName: "Pallavaram Bus Stand", lat: 12.9675, lon: 80.1492 },
+    { id: "MTC_STOP_AIRPORT", agencyId: "MTC", stopId: "MTC_AIRPORT", stopName: "Chennai Airport (Meenambakkam)", lat: 12.9815, lon: 80.1636 },
+    { id: "MTC_STOP_GUINDY", agencyId: "MTC", stopId: "MTC_GUINDY", stopName: "Guindy Industrial Estate & Station", lat: 13.0067, lon: 80.2012 },
+    { id: "MTC_STOP_SAIDAPET", agencyId: "MTC", stopId: "MTC_SAIDAPET", stopName: "Saidapet Court / Bus Stop", lat: 13.0213, lon: 80.2231 },
+    { id: "MTC_STOP_TNAGAR", agencyId: "MTC", stopId: "MTC_TNAGAR", stopName: "T.Nagar Bus Terminus", lat: 13.0402, lon: 80.2337 },
+    { id: "MTC_STOP_CMBT", agencyId: "MTC", stopId: "MTC_CMBT", stopName: "CMBT / Koyambedu Bus Terminus", lat: 13.0694, lon: 80.2057 },
+    { id: "MTC_STOP_CENTRAL", agencyId: "MTC", stopId: "MTC_CENTRAL", stopName: "Puratchi Thalaivar Dr. M.G.R Chennai Central", lat: 13.0827, lon: 80.2707 },
+    { id: "MTC_STOP_BROADWAY", agencyId: "MTC", stopId: "MTC_BROADWAY", stopName: "Broadway Bus Terminus", lat: 13.0883, lon: 80.2872 },
+    { id: "MTC_STOP_PORUR", agencyId: "MTC", stopId: "MTC_PORUR", stopName: "Porur Junction", lat: 13.0336, lon: 80.1583 },
+    { id: "MTC_STOP_POONAMALLEE", agencyId: "MTC", stopId: "MTC_POONAMALLEE", stopName: "Poonamallee Bus Terminus", lat: 13.0489, lon: 80.0911 },
+    { id: "MTC_STOP_THANDALAM", agencyId: "MTC", stopId: "MTC_THANDALAM", stopName: "Thandalam / Rajalakshmi Engineering College (REC)", lat: 13.0084, lon: 80.0033 },
+    { id: "MTC_STOP_SRIPERUMBUDUR", agencyId: "MTC", stopId: "MTC_SRIPERUMBUDUR", stopName: "Sriperumbudur Bus Stand", lat: 12.9691, lon: 79.9492 },
+    { id: "MTC_STOP_KANCHIPURAM", agencyId: "MTC", stopId: "MTC_KANCHIPURAM", stopName: "Kanchipuram Bus Stand", lat: 12.8342, lon: 79.7036 },
+    { id: "MTC_STOP_KELAMBAKKAM", agencyId: "MTC", stopId: "MTC_KELAMBAKKAM", stopName: "Kelambakkam Bus Stand", lat: 12.7845, lon: 80.2185 },
     { id: "CMRL_STOP_AIRPORT", agencyId: "CMRL", stopId: "CMRL_AIRPORT", stopName: "Chennai International Airport Metro", lat: 12.9815, lon: 80.1636 },
     { id: "CMRL_STOP_GUINDY", agencyId: "CMRL", stopId: "CMRL_GUINDY", stopName: "Guindy Metro Station", lat: 13.0067, lon: 80.2012 },
     { id: "CMRL_STOP_ALANDUR", agencyId: "CMRL", stopId: "CMRL_ALANDUR", stopName: "Alandur Metro Interchange", lat: 12.9975, lon: 80.2006 },
@@ -167,6 +175,84 @@ function seedBaselineTransitData(db: DatabaseSync) {
 
   // 3. Routes
   const routes = [
+    {
+      id: "MTC_579",
+      agencyId: "MTC",
+      routeId: "579",
+      shortName: "579",
+      longName: "Tambaram Terminal ↔ Kanchipuram (via Thandalam / REC Campus)",
+      type: 3,
+      color: "#0284c7",
+      origin: "Tambaram Terminal",
+      destination: "Kanchipuram",
+      stopsOrder: ["MTC_STOP_TAMBARAM", "MTC_STOP_PERUNGALATHUR", "MTC_STOP_VANDALUR", "MTC_STOP_THANDALAM", "MTC_STOP_SRIPERUMBUDUR", "MTC_STOP_KANCHIPURAM"],
+      minuteOffsets: [0, 10, 18, 38, 52, 85],
+    },
+    {
+      id: "MTC_570",
+      agencyId: "MTC",
+      routeId: "570",
+      shortName: "570",
+      longName: "CMBT Koyambedu ↔ Kelambakkam (via Guindy, Tambaram)",
+      type: 3,
+      color: "#0284c7",
+      origin: "CMBT Koyambedu",
+      destination: "Kelambakkam",
+      stopsOrder: ["MTC_STOP_CMBT", "MTC_STOP_GUINDY", "MTC_STOP_AIRPORT", "MTC_STOP_PALLAVARAM", "MTC_STOP_CHROMEPET", "MTC_STOP_SANATORIUM", "MTC_STOP_TAMBARAM", "MTC_STOP_PERUNGALATHUR", "MTC_STOP_VANDALUR", "MTC_STOP_KELAMBAKKAM"],
+      minuteOffsets: [0, 20, 32, 40, 46, 52, 60, 70, 78, 105],
+    },
+    {
+      id: "MTC_54",
+      agencyId: "MTC",
+      routeId: "54",
+      shortName: "54",
+      longName: "Broadway ↔ Poonamallee (via Guindy, Porur)",
+      type: 3,
+      color: "#0284c7",
+      origin: "Broadway",
+      destination: "Poonamallee",
+      stopsOrder: ["MTC_STOP_BROADWAY", "MTC_STOP_CENTRAL", "MTC_STOP_SAIDAPET", "MTC_STOP_GUINDY", "MTC_STOP_PORUR", "MTC_STOP_POONAMALLEE"],
+      minuteOffsets: [0, 10, 26, 35, 52, 70],
+    },
+    {
+      id: "MTC_553",
+      agencyId: "MTC",
+      routeId: "553",
+      shortName: "553",
+      longName: "Broadway ↔ Sriperumbudur (via Poonamallee, Thandalam / REC Campus)",
+      type: 3,
+      color: "#0284c7",
+      origin: "Broadway",
+      destination: "Sriperumbudur",
+      stopsOrder: ["MTC_STOP_BROADWAY", "MTC_STOP_CENTRAL", "MTC_STOP_PORUR", "MTC_STOP_POONAMALLEE", "MTC_STOP_THANDALAM", "MTC_STOP_SRIPERUMBUDUR"],
+      minuteOffsets: [0, 10, 48, 65, 80, 95],
+    },
+    {
+      id: "MTC_70V",
+      agencyId: "MTC",
+      routeId: "70V",
+      shortName: "70V",
+      longName: "CMBT ↔ Vandalur Zoo (via Guindy, Chromepet, Tambaram)",
+      type: 3,
+      color: "#0284c7",
+      origin: "CMBT",
+      destination: "Vandalur Zoo",
+      stopsOrder: ["MTC_STOP_CMBT", "MTC_STOP_GUINDY", "MTC_STOP_CHROMEPET", "MTC_STOP_TAMBARAM", "MTC_STOP_PERUNGALATHUR", "MTC_STOP_VANDALUR"],
+      minuteOffsets: [0, 20, 42, 55, 65, 75],
+    },
+    {
+      id: "MTC_19B",
+      agencyId: "MTC",
+      routeId: "19B",
+      shortName: "19B",
+      longName: "T.Nagar ↔ Kelambakkam (via Saidapet, Guindy, Tambaram)",
+      type: 3,
+      color: "#0284c7",
+      origin: "T.Nagar",
+      destination: "Kelambakkam",
+      stopsOrder: ["MTC_STOP_TNAGAR", "MTC_STOP_SAIDAPET", "MTC_STOP_GUINDY", "MTC_STOP_TAMBARAM", "MTC_STOP_KELAMBAKKAM"],
+      minuteOffsets: [0, 12, 22, 50, 85],
+    },
     {
       id: "CMRL_BLUE",
       agencyId: "CMRL",
@@ -295,219 +381,6 @@ function seedBaselineTransitData(db: DatabaseSync) {
   );
 }
 
-/** REC / Thandalam campus connectivity corridors (MTC scheduled data in local GTFS store). */
-export const REC_CORRIDOR_PRESETS = [
-  { start: "Tambaram", destination: "Thandalam", label: "Tambaram → Thandalam (REC)" },
-  { start: "Poonamallee", destination: "Thandalam", label: "Poonamallee → Thandalam (REC)" },
-  { start: "Avadi", destination: "Thandalam", label: "Avadi → Thandalam (REC)" },
-  { start: "Avadi", destination: "Poonamallee", label: "Avadi → Poonamallee" },
-  { start: "Velachery", destination: "Thandalam", label: "Velachery → Thandalam (REC)" },
-] as const;
-
-function ensureRecCorridorTransitData(db: DatabaseSync) {
-  const existing = db
-    .prepare("SELECT count(*) as c FROM public_transport_routes WHERE id LIKE 'MTC_REC_%'")
-    .get() as { c: number };
-  if (existing.c >= 5) return;
-
-  const now = new Date().toISOString();
-  const source = "MTC corridor schedules (REC Thandalam connectivity)";
-
-  db.prepare(
-    `INSERT OR IGNORE INTO public_transport_agencies (
-      id, name, agency_type, official_url, phone, timezone, source, source_url, last_synced_at
-    ) VALUES ('MTC', 'Metropolitan Transport Corporation (Chennai)', 'Bus Transit',
-      'https://mtcbus.tn.gov.in/', '044-23455801', 'Asia/Kolkata', ?, 'https://mtcbus.tn.gov.in/', ?)`,
-  ).run(source, now);
-
-  const insertStop = db.prepare(`
-    INSERT OR REPLACE INTO public_transport_stops (
-      id, agency_id, stop_id, stop_code, stop_name, latitude, longitude, location_type, parent_station_id, source
-    ) VALUES (?, 'MTC', ?, ?, ?, ?, ?, 0, '', ?)
-  `);
-
-  const stops = [
-    { id: "MTC_STOP_THANDALAM_REC", code: "THANDALAM", name: "Thandalam (Rajalakshmi Engineering College)", lat: 13.0084, lon: 80.0033 },
-    { id: "MTC_STOP_TAMBARAM", code: "TAMBARAM", name: "Tambaram Bus Stand", lat: 12.9249, lon: 80.1275 },
-    { id: "MTC_STOP_POONAMALLEE", code: "POONAMALLEE", name: "Poonamallee Bus Terminus", lat: 13.0489, lon: 80.0999 },
-    { id: "MTC_STOP_AVADI", code: "AVADI", name: "Avadi Bus Stand", lat: 13.1147, lon: 80.0997 },
-    { id: "MTC_STOP_VELACHERY", code: "VELACHERY", name: "Velachery Bus Terminus", lat: 12.975, lon: 80.22 },
-  ];
-  for (const s of stops) {
-    insertStop.run(s.id, s.code, s.code, s.name, s.lat, s.lon, source);
-  }
-
-  type CorridorRoute = {
-    id: string;
-    shortName: string;
-    longName: string;
-    origin: string;
-    dest: string;
-    stopsOrder: string[];
-    minuteOffsets: number[];
-  };
-
-  const corridors: CorridorRoute[] = [
-    {
-      id: "MTC_REC_TAMBARAM_THAND",
-      shortName: "S70",
-      longName: "Tambaram → Thandalam (REC) via GST Road",
-      origin: "Tambaram",
-      dest: "Thandalam",
-      stopsOrder: ["MTC_STOP_TAMBARAM", "MTC_STOP_THANDALAM_REC"],
-      minuteOffsets: [0, 38],
-    },
-    {
-      id: "MTC_REC_POON_THAND",
-      shortName: "54",
-      longName: "Poonamallee → Thandalam (REC)",
-      origin: "Poonamallee",
-      dest: "Thandalam",
-      stopsOrder: ["MTC_STOP_POONAMALLEE", "MTC_STOP_THANDALAM_REC"],
-      minuteOffsets: [0, 22],
-    },
-    {
-      id: "MTC_REC_AVADI_THAND",
-      shortName: "170",
-      longName: "Avadi → Thandalam (REC)",
-      origin: "Avadi",
-      dest: "Thandalam",
-      stopsOrder: ["MTC_STOP_AVADI", "MTC_STOP_POONAMALLEE", "MTC_STOP_THANDALAM_REC"],
-      minuteOffsets: [0, 28, 48],
-    },
-    {
-      id: "MTC_REC_AVADI_POON",
-      shortName: "121",
-      longName: "Avadi → Poonamallee",
-      origin: "Avadi",
-      dest: "Poonamallee",
-      stopsOrder: ["MTC_STOP_AVADI", "MTC_STOP_POONAMALLEE"],
-      minuteOffsets: [0, 32],
-    },
-    {
-      id: "MTC_REC_VEL_THAND",
-      shortName: "566",
-      longName: "Velachery → Thandalam (REC) via city link",
-      origin: "Velachery",
-      dest: "Thandalam",
-      stopsOrder: ["MTC_STOP_VELACHERY", "MTC_STOP_TAMBARAM", "MTC_STOP_THANDALAM_REC"],
-      minuteOffsets: [0, 42, 75],
-    },
-  ];
-
-  const insertRoute = db.prepare(`
-    INSERT OR REPLACE INTO public_transport_routes (
-      id, agency_id, route_id, route_short_name, route_long_name, route_type, route_color, origin, destination, source
-    ) VALUES (?, 'MTC', ?, ?, ?, 3, '#2563eb', ?, ?, ?)
-  `);
-
-  const insertTrip = db.prepare(`
-    INSERT OR REPLACE INTO public_transport_trips (
-      id, route_id, service_id, trip_id, trip_headsign, direction_id, shape_id, source
-    ) VALUES (?, ?, 'DAILY', ?, ?, 0, '', ?)
-  `);
-
-  const insertStopTime = db.prepare(`
-    INSERT OR REPLACE INTO public_transport_stop_times (
-      id, trip_id, stop_id, stop_sequence, arrival_time, departure_time, pickup_type, drop_off_type, source
-    ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)
-  `);
-
-  db.exec("BEGIN TRANSACTION;");
-  for (const c of corridors) {
-    insertRoute.run(c.id, c.id, c.shortName, c.longName, c.origin, c.dest, source);
-    const tripId = `${c.id}_AM1`;
-    insertTrip.run(tripId, c.id, tripId, c.dest, source);
-    for (let seq = 0; seq < c.stopsOrder.length; seq++) {
-      const totalMins = 6 * 60 + 30 + c.minuteOffsets[seq];
-      const h = Math.floor(totalMins / 60) % 24;
-      const m = totalMins % 60;
-      const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`;
-      insertStopTime.run(`${tripId}_${seq + 1}`, tripId, c.stopsOrder[seq], seq + 1, timeStr, timeStr, source);
-    }
-  }
-  db.exec("COMMIT;");
-}
-
-function corridorPlacePattern(text: string): string {
-  const t = text.trim().toLowerCase();
-  if (t.includes("thandal") || t.includes("tandal") || t.includes("rec") || t.includes("rajalakshmi")) {
-    return "%Thandalam%";
-  }
-  if (t.includes("ponam") || t.includes("poonam")) return "%Poonamallee%";
-  if (t.includes("tambaram")) return "%Tambaram%";
-  if (t.includes("avadi")) return "%Avadi%";
-  if (t.includes("velacher")) return "%Velachery%";
-  return `%${text.trim()}%`;
-}
-
-function searchJourneyByStopPair(
-  db: DatabaseSync,
-  fromText: string,
-  toText: string,
-  agencyId?: string,
-  time?: string,
-): TransitJourneyOption[] {
-  const fromPat = corridorPlacePattern(fromText);
-  const toPat = corridorPlacePattern(toText);
-
-  let sql = `
-    SELECT DISTINCT r.*, a.name as agency_name, a.agency_type, a.source as agency_source,
-      s_from.stop_name as boarding_stop_name,
-      s_to.stop_name as alighting_stop_name,
-      st_from.departure_time as boarding_time,
-      st_to.arrival_time as alighting_time,
-      (st_to.stop_sequence - st_from.stop_sequence) as segment_stops
-    FROM public_transport_stops s_from
-    JOIN public_transport_stop_times st_from ON st_from.stop_id = s_from.id
-    JOIN public_transport_trips trip ON trip.id = st_from.trip_id
-    JOIN public_transport_stop_times st_to ON st_to.trip_id = trip.id AND st_to.stop_sequence > st_from.stop_sequence
-    JOIN public_transport_stops s_to ON st_to.stop_id = s_to.id
-    JOIN public_transport_routes r ON r.id = trip.route_id
-    JOIN public_transport_agencies a ON r.agency_id = a.id
-    WHERE s_from.stop_name LIKE ? AND s_to.stop_name LIKE ?
-  `;
-  const params: unknown[] = [fromPat, toPat];
-  if (agencyId && agencyId !== "ALL") {
-    sql += ` AND r.agency_id = ?`;
-    params.push(agencyId);
-  }
-  sql += ` ORDER BY st_from.departure_time ASC LIMIT 25`;
-
-  const rows = db.prepare(sql).all(...params) as any[];
-  const options: TransitJourneyOption[] = [];
-
-  for (const r of rows) {
-    const departureTime = r.boarding_time || time || "06:30:00";
-    const arrivalTime = r.alighting_time || "07:15:00";
-    const [depH, depM] = String(departureTime).split(":").map(Number);
-    const [arrH, arrM] = String(arrivalTime).split(":").map(Number);
-    const durationMinutes = Math.max(5, (arrH * 60 + arrM) - (depH * 60 + depM));
-
-    const routeType =
-      r.agency_id === "CMRL" ? "Metro" : r.agency_id === "CSR" ? "Suburban Rail" : "Bus";
-
-    options.push({
-      agency: r.agency_name,
-      agencyId: r.agency_id,
-      routeNumber: r.route_short_name,
-      routeName: r.route_long_name || `${r.origin} → ${r.destination}`,
-      routeType,
-      origin: r.origin || fromText,
-      destination: r.destination || toText,
-      boardingStop: r.boarding_stop_name || fromText,
-      boardingTime: departureTime,
-      alightingStop: r.alighting_stop_name || toText,
-      alightingTime: arrivalTime,
-      durationMinutes,
-      stopsCount: r.segment_stops || 2,
-      status: "Scheduled",
-      dataSource: r.agency_source || "MTC corridor schedules (REC Thandalam connectivity)",
-    });
-  }
-  return options;
-}
-
 export function getDatabase(): DatabaseSync {
   if (!dbInstance) {
     if (!fs.existsSync(DB_DIR)) {
@@ -518,22 +391,7 @@ export function getDatabase(): DatabaseSync {
     dbInstance.exec("PRAGMA synchronous = NORMAL;");
     initializeTransitSchema(dbInstance);
   }
-  ensureRecCorridorTransitData(dbInstance);
   return dbInstance;
-}
-
-export function getRecCorridorJourneys(): Array<{
-  preset: (typeof REC_CORRIDOR_PRESETS)[number];
-  options: TransitJourneyOption[];
-}> {
-  return REC_CORRIDOR_PRESETS.map((preset) => ({
-    preset,
-    options: searchJourneyOptions({
-      fromText: preset.start,
-      toText: preset.destination,
-      agencyId: "ALL",
-    }),
-  }));
 }
 
 export type TransitAgency = {
@@ -786,8 +644,8 @@ export function searchJourneyOptions(input: {
   agencyId?: string;
 }): TransitJourneyOption[] {
   const db = getDatabase();
-  const fromPattern = corridorPlacePattern(input.fromText);
-  const toPattern = corridorPlacePattern(input.toText);
+  const fromPattern = `%${input.fromText.trim()}%`;
+  const toPattern = `%${input.toText.trim()}%`;
 
   // 1. Direct routes matching origin & destination in either direction or within route_long_name
   let sql = `
@@ -866,10 +724,6 @@ export function searchJourneyOptions(input: {
       status: "Scheduled",
       dataSource: r.agency_source || "CUMTA / Official GTFS",
     });
-  }
-
-  if (options.length === 0) {
-    return searchJourneyByStopPair(db, input.fromText, input.toText, input.agencyId, input.time);
   }
 
   return options;

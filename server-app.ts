@@ -3,35 +3,15 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import cors from "cors";
-import router from "./artifacts/api-server/src/routes/index.ts";
-import { startBusSimulation } from "./artifacts/api-server/src/routes/buses.ts";
+import router from "./artifacts/api-server/src/routes/index";
+import { ensureDatabaseInitialized } from "./src/db/index.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export async function startServer() {
-  const { bootstrapAppTables, ensureBaselineFleetData } = await import("./src/db/bootstrapAppTables.ts");
-  await bootstrapAppTables();
-  const { bootstrapCoreTables } = await import("./src/db/bootstrapCoreTables.ts");
-  await bootstrapCoreTables();
-  const { migrateMobilitySchemaColumns } = await import("./src/db/bootstrapAppTables.ts");
-  await migrateMobilitySchemaColumns();
-  await ensureBaselineFleetData();
-  const { seedInitialAcimsRoutesAndFleet } = await import("./src/db/seedAcimsRoutes.ts");
-  await seedInitialAcimsRoutesAndFleet();
-  const { ensureCanonicalShiftSlots } = await import("./src/db/shiftManagement.ts");
-  await ensureCanonicalShiftSlots();
-  const { ensureOfficialPickupPointsFromRoutes } = await import("./src/db/ensureMobilityPickups.ts");
-  await ensureOfficialPickupPointsFromRoutes();
-
-  const { ensureMtcSchema, purgeLegacyDummyMtcFromTransitDb } = await import(
-    "./artifacts/api-server/src/services/mtc/mtcService.ts"
-  );
-  ensureMtcSchema();
-  purgeLegacyDummyMtcFromTransitDb();
-
   const app = express();
-  const port = (process.env.PORT && process.env.PORT !== "8080") ? Number(process.env.PORT) : 3000;
+  const port = Number(process.env.PORT) || 3000;
 
   // Detect distribution folder if built
   const candidatePaths = [
@@ -39,7 +19,8 @@ export async function startServer() {
     path.resolve(__dirname, "dist"),
   ];
   const distPath = candidatePaths.find((p) => fs.existsSync(path.join(p, "index.html")));
-  const isProd = process.env.NODE_ENV === "production" && Boolean(distPath);
+  const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION);
+  const isProd = (process.env.NODE_ENV === "production" || isCloudRun) && Boolean(distPath);
 
   app.use(cors());
   app.use(express.json());
@@ -50,11 +31,11 @@ export async function startServer() {
     res.status(200).json({ status: "healthy", timestamp: new Date().toISOString() });
   });
 
-  // Start bus simulation
+  // Initialize database schema and transit seed data
   try {
-    startBusSimulation();
+    await ensureDatabaseInitialized();
   } catch (err) {
-    console.warn("Could not start bus simulation immediately:", err);
+    console.warn("Database initialization advisory:", err);
   }
 
   // API routes
@@ -84,17 +65,6 @@ export async function startServer() {
       root: path.resolve(__dirname, "artifacts/acims"),
     });
     app.use(vite.middlewares);
-    app.use(async (req, res, next) => {
-      const url = req.originalUrl;
-      try {
-        let template = fs.readFileSync(path.resolve(__dirname, "artifacts/acims/index.html"), "utf-8");
-        template = await vite.transformIndexHtml(url, template);
-        res.status(200).set({ "Content-Type": "text/html" }).end(template);
-      } catch (e) {
-        vite.ssrFixStacktrace(e as Error);
-        next(e);
-      }
-    });
   }
 
   const server = app.listen(port, "0.0.0.0", () => {

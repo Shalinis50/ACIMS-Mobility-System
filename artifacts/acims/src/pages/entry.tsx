@@ -26,7 +26,7 @@ export default function EntryPage() {
               <span>Campus Transit Portal</span>
             </div>
             <h1 className="display-font mt-3 text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl">
-              ACIMS
+              ACMIS
             </h1>
             <p className="mt-2 text-sm font-medium text-muted-foreground sm:text-base">
               Adaptive Campus Mobility &amp; Information System

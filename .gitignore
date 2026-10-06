@@ -48,9 +48,3 @@ Thumbs.db
 .cache/
 .local/
 .env
-
-# local databases (never commit runtime data)
-data/postgres/
-*.db
-*.db-shm
-*.db-wal

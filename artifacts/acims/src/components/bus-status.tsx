@@ -5,6 +5,7 @@ import {
   Clock3, 
   AlertTriangle, 
   CheckCircle2, 
+  Users, 
   Search, 
   RotateCw, 
   MapPin, 
@@ -454,6 +455,16 @@ function BusStatusCard({ bus, isSelected, onSelect, isOnline = true }: BusStatus
         >
           {isSelected ? 'Focused Route' : 'Focus Ride'}
         </button>
+
+        <Link
+          href="/queue"
+          onClick={onSelect}
+          className="rounded-xl border border-border bg-card p-2 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          title="Boarding queue for this bus"
+          aria-label={`Queue for bus ${bus.busNumber}`}
+        >
+          <Users size={15} />
+        </Link>
 
         <Link
           href="/map"

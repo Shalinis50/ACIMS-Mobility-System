@@ -2,7 +2,6 @@ import { Router, type IRouter } from "express";
 import {
   getDbBuses,
   getDbBusById,
-  getDbRoutes,
   getDbStopsByRoute,
   recordBusLocation,
   getLatestBusLocation,
@@ -14,10 +13,8 @@ import {
   getBusTrackingSession,
   isBusTrackingActive,
   verifyDriverBusAssignment,
+  updateDbBus,
 } from "../../../../src/db/services.ts";
-import { db } from "../../../../src/db/index.ts";
-import { busRoutes, busStops } from "../../../../src/db/schema.ts";
-import { eq } from "drizzle-orm";
 import { getRouteForBus } from "../services/routesData";
 import {
   validateGpsCoordinate,
@@ -27,9 +24,7 @@ import {
   type RouteStopInfo,
 } from "../services/gpsEngine";
 import { realtimeHub } from "../services/realtimeHub";
-import { processMobilityTelemetry } from "../services/mobilityPipeline";
-import { requireAuth, requireDriver } from "../middleware/acimsAuth.ts";
-import { getActiveTripForBus, startTripFromDriverSession, completeActiveTrip } from "../../../../src/db/mobilityOps.ts";
+import { syncBusNotifications } from "../services/notificationEngine";
 
 const router: IRouter = Router();
 
@@ -175,106 +170,21 @@ export async function buildBusTelemetry(busId: string): Promise<ComputedTelemetr
 // -------------------------------------------------------------
 // LIST ALL BUSES
 // -------------------------------------------------------------
-// -------------------------------------------------------------
-// NEARBY CAMPUS BUS DISCOVERY (Geolocation-based)
-// -------------------------------------------------------------
-router.get("/buses/nearby", async (req, res) => {
-  try {
-    const lat = Number(req.query.lat);
-    const lng = Number(req.query.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return res.status(400).json({ error: "Valid lat and lng query parameters required" });
-    }
-
-    const busList = await getDbBuses();
-    const routeList = await getDbRoutes();
-    const allStops = await db.select().from(busStops).where(eq(busStops.active, true));
-
-    function calcDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-      const R = 6371;
-      const dLat = ((lat2 - lat1) * Math.PI) / 180;
-      const dLon = ((lon2 - lon1) * Math.PI) / 180;
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
-    }
-
-    const routesWithClosestStop = routeList.map((r) => {
-      const rStops = allStops.filter((s) => s.routeId === r.id && !s.isNonStop);
-      let closestStop: typeof allStops[0] | null = null;
-      let minDistance = Infinity;
-
-      for (const stop of rStops) {
-        if (stop.latitude && stop.longitude) {
-          const dist = calcDistanceKm(lat, lng, stop.latitude, stop.longitude);
-          if (dist < minDistance) {
-            minDistance = dist;
-            closestStop = stop;
-          }
-        }
-      }
-
-      const assignedBuses = busList.filter((b) => b.routeId === r.id && b.active);
-      const firstBus = assignedBuses[0] || null;
-
-      return {
-        routeId: r.id,
-        routeCode: r.routeCode,
-        routeName: r.routeName,
-        direction: r.direction || "TO_COLLEGE",
-        closestStopName: closestStop?.stopName || "Campus Stop",
-        approxTime: closestStop?.approximateTime || r.startingTimeDisplay || "Approx.",
-        distanceKm: Number.isFinite(minDistance) ? Number(minDistance.toFixed(2)) : 999,
-        busId: firstBus?.id || `bus-${r.routeCode.toLowerCase()}`,
-        busNumber: firstBus?.busNumber || r.routeCode,
-        buses: assignedBuses.map((b) => ({
-          id: b.id,
-          busNumber: b.busNumber,
-          driverId: b.driverId,
-        })),
-      };
-    });
-
-    // Sort by proximity
-    routesWithClosestStop.sort((a, b) => a.distanceKm - b.distanceKm);
-
-    res.json(routesWithClosestStop);
-  } catch (err: any) {
-    console.error("Error finding nearby buses:", err);
-    res.status(500).json({ error: "Failed to find nearby buses" });
-  }
-});
-
-// -------------------------------------------------------------
-// LIST ALL BUSES
-// -------------------------------------------------------------
 router.get("/buses", async (_req, res) => {
   try {
     const dbBusesList = await getDbBuses();
-    const routeList = await getDbRoutes();
-    const routeMap = new Map(routeList.map((r) => [r.id, r]));
-    const allStops = await db.select().from(busStops).orderBy(busStops.sequenceNumber);
-
     const results = await Promise.all(
       dbBusesList.map(async (bus) => {
-        const route = bus.routeId ? routeMap.get(bus.routeId) : null;
-        const stops = bus.routeId ? allStops.filter((s) => s.routeId === bus.routeId) : [];
+        const routeDef = getRouteForBus(bus.id);
         const telemetry = await buildBusTelemetry(bus.id);
-
-        const origin = stops[0]?.stopName || "Terminal Depot";
-        const destination = stops[stops.length - 1]?.stopName || "College Campus";
-        const routeLabel = route ? `${route.routeName}` : "Campus Route";
 
         return {
           id: bus.id,
           busNumber: bus.busNumber,
-          origin,
-          destination,
-          routeLabel,
-          capacity: bus.capacity || 40,
+          origin: routeDef?.origin || "Central Campus",
+          destination: routeDef?.destination || "City Station",
+          routeLabel: routeDef?.name || "Campus Express",
+          capacity: 45,
           currentLocation: { latitude: telemetry.latitude, longitude: telemetry.longitude },
           nextStop: telemetry.nextStop,
           nextStopId: telemetry.nextStopId,
@@ -287,7 +197,7 @@ router.get("/buses", async (_req, res) => {
           status: telemetry.status,
           updatedAt: telemetry.recordedAt,
           active: bus.active,
-          routeId: bus.routeId || (route ? route.id : "route-18"),
+          routeId: bus.routeId || routeDef?.id || "route-bus-12",
           driverId: bus.driverId || undefined,
           locationMode: "driver-gps",
           freshness: telemetry.freshness,
@@ -316,26 +226,16 @@ router.get("/buses/:busId", async (req, res) => {
       return res.status(404).json({ error: "Bus not found" });
     }
 
-    let route = null;
-    let stops: typeof busStops.$inferSelect[] = [];
-    if (bus.routeId) {
-      const r = await db.select().from(busRoutes).where(eq(busRoutes.id, bus.routeId)).limit(1);
-      route = r[0] || null;
-      stops = await db.select().from(busStops).where(eq(busStops.routeId, bus.routeId)).orderBy(busStops.sequenceNumber);
-    }
+    const routeDef = getRouteForBus(bus.id);
     const telemetry = await buildBusTelemetry(bus.id);
-
-    const origin = stops[0]?.stopName || "Terminal Depot";
-    const destination = stops[stops.length - 1]?.stopName || "College Campus";
-    const routeLabel = route ? `${route.routeName}` : "Campus Route";
 
     res.json({
       id: bus.id,
       busNumber: bus.busNumber,
-      origin,
-      destination,
-      routeLabel,
-      capacity: bus.capacity || 40,
+      origin: routeDef?.origin || "Central Campus",
+      destination: routeDef?.destination || "City Station",
+      routeLabel: routeDef?.name || "Campus Express",
+      capacity: 45,
       currentLocation: { latitude: telemetry.latitude, longitude: telemetry.longitude },
       nextStop: telemetry.nextStop,
       nextStopId: telemetry.nextStopId,
@@ -348,7 +248,7 @@ router.get("/buses/:busId", async (req, res) => {
       status: telemetry.status,
       updatedAt: telemetry.recordedAt,
       active: bus.active,
-      routeId: bus.routeId || "route-18",
+      routeId: bus.routeId || routeDef?.id || "route-bus-12",
       driverId: bus.driverId || undefined,
       locationMode: "driver-gps",
       freshness: telemetry.freshness,
@@ -495,7 +395,7 @@ router.get("/buses/:busId/route", async (req, res) => {
 // -------------------------------------------------------------
 // INGEST REAL DRIVER GPS (Single update)
 // -------------------------------------------------------------
-router.post("/bus/location", requireAuth, requireDriver, async (req, res) => {
+router.post("/bus/location", async (req, res) => {
   try {
     const {
       busId,
@@ -523,10 +423,8 @@ router.post("/bus/location", requireAuth, requireDriver, async (req, res) => {
     const driverId = req.header("x-acims-driver-id") || bodyDriverId;
     if (driverId) {
       const isAssigned = await verifyDriverBusAssignment(driverId, busId);
-      if (!isAssigned && bus.driverId && bus.driverId !== driverId) {
-        return res.status(403).json({
-          error: `Unauthorized: Driver ${driverId} is not assigned to broadcast for bus ${bus.busNumber}`,
-        });
+      if (!isAssigned) {
+        await updateDbBus(busId, { driverId }).catch(() => {});
       }
     }
 
@@ -563,14 +461,8 @@ router.post("/bus/location", requireAuth, requireDriver, async (req, res) => {
       receivedAt,
     });
 
-    const strictTrip = process.env.ACIMS_STRICT_GPS === "true";
+    // 4. ENSURE TRACKING SESSION IS ACTIVE
     const trackingState = await isBusTrackingActive(busId);
-    const activeTrip = await getActiveTripForBus(busId);
-    if (strictTrip && !trackingState.isActive && !activeTrip) {
-      return res.status(409).json({
-        error: "No active trip. Driver must start trip before GPS can be ingested.",
-      });
-    }
     if (!trackingState.isActive) {
       await startTrackingSession(busId, driverId || bus.driverId || "driver-active");
     }
@@ -581,17 +473,10 @@ router.post("/bus/location", requireAuth, requireDriver, async (req, res) => {
     // 6. REALTIME INSTANT BROADCAST TO ALL SUBSCRIBED STUDENTS & ADMIN
     realtimeHub.broadcastLocation(telemetry);
 
-    // 7. Pickup-centric ETA, geofence, delay, and event notifications
-    processMobilityTelemetry({
-      id: busId,
-      busNumber: telemetry.busNumber,
-      latitude: telemetry.latitude,
-      longitude: telemetry.longitude,
-      speed: typeof speed === "number" ? speed : saved.speed,
-      heading: typeof heading === "number" ? heading : saved.heading,
-      tripId: activeTrip?.id ?? null,
-      recordedAt: recordedAt ?? saved.recordedAt,
-    }).catch(() => {});
+    // 7. NOTIFICATION HOOK: Check stop proximity for student alerts
+    if (telemetry.isAtStop || telemetry.isApproachingStop) {
+      syncBusNotifications(busId, telemetry.nextStop, telemetry.isAtStop, telemetry.isApproachingStop).catch(() => {});
+    }
 
     res.json({
       success: true,
@@ -610,7 +495,7 @@ router.post("/bus/location", requireAuth, requireDriver, async (req, res) => {
 // -------------------------------------------------------------
 // BATCH INGEST OFFLINE-QUEUED GPS POINTS
 // -------------------------------------------------------------
-router.post("/bus/location/batch", requireAuth, requireDriver, async (req, res) => {
+router.post("/bus/location/batch", async (req, res) => {
   try {
     const { busId, points } = req.body as {
       busId: string;
@@ -687,25 +572,7 @@ router.post("/bus/location/batch", requireAuth, requireDriver, async (req, res) 
 // -------------------------------------------------------------
 // DRIVER TRACKING SESSION CONTROLS
 // -------------------------------------------------------------
-/** Demo / lab: path coordinates to simulate GPS moving along the assigned route. */
-router.get("/driver/simulator-path/:busId", async (req, res) => {
-  const route = getRouteForBus(req.params.busId);
-  if (!route) {
-    return res.status(404).json({ error: "No route geometry for this bus." });
-  }
-  const path =
-    route.path.length > 0
-      ? route.path
-      : route.stops.map((s) => ({ latitude: s.latitude, longitude: s.longitude }));
-  res.json({
-    busId: req.params.busId,
-    routeId: route.id,
-    routeName: route.name,
-    path,
-  });
-});
-
-router.post("/driver/session/start", requireAuth, requireDriver, async (req, res) => {
+router.post("/driver/session/start", async (req, res) => {
   try {
     const { busId, driverId = "driver-active" } = req.body;
     if (!busId) return res.status(400).json({ error: "busId required" });
@@ -713,49 +580,21 @@ router.post("/driver/session/start", requireAuth, requireDriver, async (req, res
     const bus = await getDbBusById(busId);
     if (!bus) return res.status(404).json({ error: "Bus not found" });
 
-    // Verify driver assignment
+    // Verify driver assignment (or claim vehicle assignment upon session start)
     const isAssigned = await verifyDriverBusAssignment(driverId, busId);
-    if (!isAssigned && bus.driverId && bus.driverId !== driverId) {
-      return res.status(403).json({
-        error: `Unauthorized: Driver ${driverId} is not assigned to bus ${bus.busNumber}`,
-      });
+    if (!isAssigned) {
+      await updateDbBus(busId, { driverId }).catch(() => {});
     }
-
-    const { resolveShiftForDriverTrip } = await import("../../../../src/db/shiftManagement.ts");
-    const shift = await resolveShiftForDriverTrip(busId, driverId);
-    if (shift && !shift.active) {
-      return res.status(400).json({ error: "Assigned shift is inactive. Contact transport admin." });
-    }
-
-    const scheduledStartAt =
-      shift?.startTime
-        ? (() => {
-            const [h, m] = shift.startTime.split(":").map(Number);
-            const d = new Date();
-            d.setHours(h || 0, m || 0, 0, 0);
-            return d;
-          })()
-        : null;
 
     const session = await startTrackingSession(busId, driverId);
-    const trip = await startTripFromDriverSession({
-      busId,
-      driverId,
-      routeId: shift?.routeId || bus.routeId || `route-${busId}`,
-      shiftId: typeof req.body.shiftId === "string" ? req.body.shiftId : shift?.id,
-      trackingSessionId: session.id,
-      scheduledStartAt,
-      shiftStartSnapshot: shift?.startTime ?? null,
-      shiftEndSnapshot: shift?.endTime ?? null,
-    });
     realtimeHub.broadcastSessionState(busId, "ACTIVE", session);
-    res.json({ status: "ACTIVE", session, trip });
+    res.json({ status: "ACTIVE", session });
   } catch (err: any) {
     res.status(500).json({ error: "Failed to start tracking session" });
   }
 });
 
-router.post("/driver/session/pause", requireAuth, requireDriver, async (req, res) => {
+router.post("/driver/session/pause", async (req, res) => {
   try {
     const { busId } = req.body;
     if (!busId) return res.status(400).json({ error: "busId required" });
@@ -768,7 +607,7 @@ router.post("/driver/session/pause", requireAuth, requireDriver, async (req, res
   }
 });
 
-router.post("/driver/session/resume", requireAuth, requireDriver, async (req, res) => {
+router.post("/driver/session/resume", async (req, res) => {
   try {
     const { busId } = req.body;
     if (!busId) return res.status(400).json({ error: "busId required" });
@@ -781,15 +620,14 @@ router.post("/driver/session/resume", requireAuth, requireDriver, async (req, re
   }
 });
 
-router.post("/driver/session/stop", requireAuth, requireDriver, async (req, res) => {
+router.post("/driver/session/stop", async (req, res) => {
   try {
     const { busId } = req.body;
     if (!busId) return res.status(400).json({ error: "busId required" });
 
     const session = await stopTrackingSession(busId);
-    const trip = await completeActiveTrip(busId);
     realtimeHub.broadcastSessionState(busId, "ENDED", session);
-    res.json({ status: "ENDED", session, trip });
+    res.json({ status: "ENDED", session });
   } catch (err: any) {
     res.status(500).json({ error: "Failed to stop tracking session" });
   }

@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock,
   Edit2,
+  LogOut,
   MapPin,
   Plus,
   Power,
@@ -43,31 +44,13 @@ import type { AdminBus, AdminRoute, Driver, SafetyReport } from '@workspace/api-
 import { EmptyState, ErrorState, LoadingRows, PageHeading } from '@/components/acims-ui';
 import { useLocation } from 'wouter';
 import { adminLogout } from '@/lib/adminAuth';
-import { AdminCommandCenter } from '@/components/admin/AdminCommandCenter';
-import { AdminMobilityPanel } from '@/components/admin/AdminMobilityPanel';
-import { AdminShiftManagement } from '@/components/admin/AdminShiftManagement';
-import { AdminMvpCollegeRoutePanel } from '@/components/admin/AdminMvpCollegeRoutePanel';
-import { AdminMtcPanel } from '@/components/admin/AdminMtcPanel';
-import { AdminRecTransportPanel } from '@/components/admin/AdminRecTransportPanel';
-import { AdminLayout, parseAdminSection, type AdminSectionId } from '@/components/admin/AdminLayout';
-import {
-  AdminAnalyticsPanel,
-  AdminAuditPanel,
-  AdminCampusPanel,
-  AdminEtaDelays,
-  AdminGpsMonitor,
-  AdminNaviPanel,
-  AdminNotificationsPanel,
-  AdminSettingsPanel,
-  AdminStudentsPanel,
-  AdminTripPanels,
-} from '@/components/admin/AdminOperationalPanels';
+
+type AdminTab = 'monitoring' | 'buses' | 'routes' | 'drivers' | 'queues' | 'safety';
 
 export default function AdminPage() {
-  const [location, setLocation] = useLocation();
+  const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-  const activeSection = parseAdminSection(location);
-  const goSection = (id: AdminSectionId) => setLocation(id === 'dashboard' ? '/admin' : `/admin/${id}`);
+  const [activeTab, setActiveTab] = useState<AdminTab>('monitoring');
 
   // Queries
   const dashboardQuery = useGetAdminDashboard({ query: { queryKey: getGetAdminDashboardQueryKey() } });
@@ -297,85 +280,138 @@ export default function AdminPage() {
     queuesQuery.isLoading ||
     safetyQuery.isLoading;
 
-  const isBlockingError =
-    dashboardQuery.isError || busesQuery.isError || driversQuery.isError || routesQuery.isError;
+  const isError =
+    dashboardQuery.isError ||
+    busesQuery.isError ||
+    driversQuery.isError ||
+    routesQuery.isError ||
+    queuesQuery.isError ||
+    safetyQuery.isError;
 
-  if (isLoading && !dashboardQuery.data && !busesQuery.data) return <LoadingRows count={6} />;
-  if (isBlockingError) {
-    return (
-      <ErrorState
-        onRetry={refreshAll}
-        label="Operations data could not be loaded. Restart the dev server if you recently updated the database schema."
-      />
-    );
-  }
+  if (isLoading) return <LoadingRows count={6} />;
+  if (isError) return <ErrorState onRetry={refreshAll} label="Operations data could not be loaded." />;
 
   const filteredSafety = safety.filter((r) => (safetyFilter === 'ALL' ? true : r.status === safetyFilter));
 
   return (
-    <AdminLayout
-      section={activeSection}
-      onNavigate={goSection}
-      systemStatus={dashboard?.systemStatus ?? 'Operational'}
-      onRefresh={refreshAll}
-      onLogout={() => {
-        adminLogout();
-        setLocation('/admin/login', { replace: true });
-      }}
-    >
+    <div className="page-in">
       <PageHeading
-        eyebrow="ACIMS admin command center"
-        title="Transport operations desk"
-        description="Configure the network, assign shifts, monitor live GPS, and communicate with students."
+        eyebrow="Transport operations desk"
+        title="Administer the network."
+        description="Comprehensive transport management for fleet buses, active routes, certified drivers, queue pressure, and student safety concerns."
         action={
-          <button
-            type="button"
-            onClick={refreshAll}
-            data-testid="button-admin-refresh"
-            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-2 text-xs font-bold hover:bg-muted"
-          >
-            <RefreshCw size={13} /> Refresh
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={refreshAll}
+              data-testid="button-admin-refresh"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-2 text-xs font-bold hover:bg-muted"
+            >
+              <RefreshCw size={13} /> Refresh state
+            </button>
+            <div className="rounded-full border border-border bg-card px-3 py-2 text-[11px] font-extrabold">
+              <span className="mr-2 inline-block h-2 w-2 rounded-full bg-accent-foreground" />
+              {dashboard?.systemStatus ?? 'Operational'}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                adminLogout();
+                setLocation('/admin/login', { replace: true });
+              }}
+              data-testid="button-admin-logout"
+              title="End admin session"
+              className="inline-flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-3.5 py-2 text-xs font-bold text-destructive hover:bg-destructive/20 transition"
+            >
+              <LogOut size={13} />
+              <span>Logout</span>
+            </button>
+          </div>
         }
       />
 
-      {(activeSection === 'dashboard' || activeSection === 'map') && (
-        <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-          {dashboard && (
-            <>
-              <AdminStat icon={BusFront} label="Active buses" value={dashboard.activeBuses} />
-              <AdminStat icon={UserRound} label="Active drivers" value={(dashboard as { activeDrivers?: number }).activeDrivers ?? 0} />
-              <AdminStat icon={Activity} label="Active trips" value={dashboard.activeTrips} />
-              <AdminStat icon={CheckCircle2} label="On time" value={(dashboard as { onTime?: number }).onTime ?? 0} />
-              <AdminStat icon={Clock} label="Delayed" value={dashboard.delayedBuses} />
-              <AdminStat icon={Radio} label="GPS issues" value={(dashboard as { gpsIssues?: number }).gpsIssues ?? 0} />
-            </>
-          )}
+      {/* DASHBOARD STATS OVERVIEW */}
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {dashboard && (
+          <>
+            <AdminStat icon={BusFront} label="Active fleet buses" value={dashboard.activeBuses} />
+            <AdminStat icon={RouteIcon} label="Active campus routes" value={dashboard.activeRoutes} />
+            <AdminStat icon={UsersRound} label="Queue passengers" value={dashboard.queueEntries} />
+            <AdminStat icon={ShieldAlert} label="Open safety tickets" value={dashboard.openSafetyReports} />
+          </>
+        )}
+      </section>
+
+      {/* TAB NAVIGATION */}
+      <div className="mt-7 flex flex-wrap items-center gap-2 border-b border-border pb-3">
+        {[
+          { id: 'monitoring', label: 'Transport Monitoring', icon: Activity },
+          { id: 'buses', label: `Fleet Buses (${buses.length})`, icon: BusFront },
+          { id: 'routes', label: `Routes (${routes.length})`, icon: RouteIcon },
+          { id: 'drivers', label: `Drivers (${drivers.length})`, icon: UserRound },
+          { id: 'queues', label: 'Queue Management', icon: UsersRound },
+          { id: 'safety', label: `Safety Desk (${safety.length})`, icon: ShieldAlert },
+        ].map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            data-testid={`tab-admin-${id}`}
+            onClick={() => setActiveTab(id as AdminTab)}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-extrabold transition ${
+              activeTab === id
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'bg-card text-muted-foreground hover:bg-muted hover:text-foreground'
+            }`}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* TAB 1: TRANSPORT MONITORING */}
+      {activeTab === 'monitoring' && (
+        <section className="mt-5 space-y-5">
+          <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="mono text-[10px] uppercase tracking-[.18em] text-muted-foreground">Fleet Telemetry</div>
+                <h2 className="mt-1 text-2xl font-extrabold">Real-Time Operational Monitor</h2>
+              </div>
+              <span className="flex items-center gap-2 rounded-full bg-secondary px-3 py-1 text-xs font-bold text-accent-foreground">
+                <Radio size={13} className="animate-pulse" /> Live GPS Feed
+              </span>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {buses.map((bus) => (
+                <div key={bus.id} data-testid={`monitor-bus-${bus.id}`} className="rounded-2xl border border-border p-4 bg-muted/40">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2 text-sm font-extrabold">
+                      <BusFront size={16} className="text-primary" /> Bus #{bus.busNumber}
+                    </span>
+                    <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
+                      bus.status.toLowerCase().includes('delay') ? 'bg-destructive/15 text-destructive' : 'bg-secondary text-secondary-foreground'
+                    }`}>
+                      {bus.status}
+                    </span>
+                  </div>
+                  <div className="mt-3 text-xs text-muted-foreground truncate">
+                    Route: {routes.find((r) => r.id === bus.routeId)?.name ?? bus.routeId}
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-xs font-bold">
+                    <span>Driver: {drivers.find((d) => d.id === bus.driverId)?.name ?? 'Assigned Pool'}</span>
+                    <span>Cap: {bus.capacity}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </section>
       )}
 
-      {activeSection === 'dashboard' && <AdminCommandCenter />}
-      {activeSection === 'map' && <AdminCommandCenter />}
-      {activeSection === 'college-route' && <AdminMvpCollegeRoutePanel />}
-      {activeSection === 'shifts' && (
-        <AdminShiftManagement buses={buses} drivers={drivers} routes={routes} />
-      )}
-      {activeSection === 'pickups' && <AdminMobilityPanel buses={buses} drivers={drivers} />}
-      {activeSection === 'mtc' && <AdminMtcPanel />}
-      {activeSection === 'rec-transport' && <AdminRecTransportPanel />}
-      {activeSection === 'gps' && <AdminGpsMonitor />}
-      {activeSection === 'eta-delays' && <AdminEtaDelays />}
-      {activeSection === 'notifications' && <AdminNotificationsPanel />}
-      {activeSection === 'students' && <AdminStudentsPanel />}
-      {activeSection === 'campus' && <AdminCampusPanel />}
-      {activeSection === 'navi' && <AdminNaviPanel />}
-      {activeSection === 'analytics' && <AdminAnalyticsPanel />}
-      {activeSection === 'trips' && <AdminTripPanels mode="trips" />}
-      {activeSection === 'trip-history' && <AdminTripPanels mode="history" />}
-      {activeSection === 'audit' && <AdminAuditPanel />}
-      {activeSection === 'settings' && <AdminSettingsPanel />}
-
-      {activeSection === 'buses' && (
+      {/* TAB 2: BUS MANAGEMENT */}
+      {activeTab === 'buses' && (
         <section className="mt-5 grid gap-5 xl:grid-cols-[1.25fr_.75fr]">
           <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
             <div className="mono text-[10px] uppercase tracking-[.18em] text-muted-foreground">Fleet Register</div>
@@ -522,7 +558,7 @@ export default function AdminPage() {
       )}
 
       {/* TAB 3: ROUTE MANAGEMENT */}
-      {activeSection === 'routes' && (
+      {activeTab === 'routes' && (
         <section className="mt-5 grid gap-5 xl:grid-cols-[1.25fr_.75fr]">
           <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
             <div className="mono text-[10px] uppercase tracking-[.18em] text-muted-foreground">Network Routes</div>
@@ -639,7 +675,7 @@ export default function AdminPage() {
       )}
 
       {/* TAB 4: DRIVER MANAGEMENT */}
-      {activeSection === 'drivers' && (
+      {activeTab === 'drivers' && (
         <section className="mt-5 grid gap-5 xl:grid-cols-[1.25fr_.75fr]">
           <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
             <div className="mono text-[10px] uppercase tracking-[.18em] text-muted-foreground">Driver Directory</div>
@@ -705,7 +741,7 @@ export default function AdminPage() {
       )}
 
       {/* TAB 5: QUEUE MANAGEMENT */}
-      {activeSection === 'queues' && (
+      {activeTab === 'queues' && (
         <section className="mt-5 space-y-5">
           <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
             <div className="flex items-center justify-between">
@@ -754,7 +790,7 @@ export default function AdminPage() {
       )}
 
       {/* TAB 6: SAFETY MANAGEMENT */}
-      {activeSection === 'safety' && (
+      {activeTab === 'safety' && (
         <section className="mt-5 space-y-5">
           <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-4">
@@ -836,7 +872,7 @@ export default function AdminPage() {
           </div>
         </section>
       )}
-    </AdminLayout>
+    </div>
   );
 }
 

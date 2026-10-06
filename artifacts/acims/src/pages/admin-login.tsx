@@ -53,14 +53,14 @@ export default function AdminLoginPage() {
 
             <div className="mt-4 flex items-center justify-center gap-1.5">
               <span className="mono text-[10px] font-extrabold uppercase tracking-[0.2em] text-muted-foreground">
-                ACIMS ADMIN PORTAL
+                ACMIS STAFF PORTAL
               </span>
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-foreground" />
               <span className="text-[10px] font-bold text-muted-foreground">Restricted</span>
             </div>
 
             <h1 className="display-font mt-1 text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
-              Admin Portal
+              Staff Portal Login
             </h1>
             <p className="mt-1 text-xs text-muted-foreground">
               Authorized personnel only. Enter your administrative credentials to manage campus mobility operations.
@@ -86,7 +86,7 @@ export default function AdminLoginPage() {
                 htmlFor="admin-username"
                 className="block text-xs font-bold uppercase tracking-wider text-muted-foreground"
               >
-                Admin ID / Email
+                Staff Username
               </label>
               <div className="relative mt-1.5">
                 <input
