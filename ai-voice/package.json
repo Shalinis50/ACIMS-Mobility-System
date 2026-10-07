@@ -1,0 +1,30 @@
+{
+  "name": "mobi-ai-voice-agent",
+  "version": "1.0.0",
+  "description": "Production MOBI AI Voice Search Agent with Speech-to-Text, Gemini AI Tool Calling, and Text-to-Speech",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "ai",
+    "voice-search",
+    "gemini",
+    "function-calling",
+    "transit",
+    "stt",
+    "tts"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/genai": "^2.27.0",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "multer": "^2.4.0"
+  }
+}

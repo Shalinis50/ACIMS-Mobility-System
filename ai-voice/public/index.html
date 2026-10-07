@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MOBI — AI Voice Search Agent</title>
+  <meta name="description" content="Production-ready real AI Voice Search Agent for urban transit mobility with real-time speech recognition, tool execution, and voice response.">
+  
+  <!-- Modern Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div class="app-wrapper">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand-logo">
+          <div class="brand-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="22"/>
+            </svg>
+          </div>
+          <div class="brand-meta">
+            <h1 class="brand-title">MOBI</h1>
+            <span class="brand-badge">Voice Agent</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- Language Selector -->
+        <div class="select-wrapper">
+          <select id="languageSelect" title="Search Language" aria-label="Select voice language">
+            <option value="en-IN" selected>English (India)</option>
+            <option value="en-US">English (US)</option>
+            <option value="ta-IN">Tamil (தமிழ்)</option>
+            <option value="hi-IN">Hindi (हिन्दी)</option>
+            <option value="es-ES">Spanish (Español)</option>
+          </select>
+        </div>
+
+        <!-- Speech Synthesis Toggle -->
+        <button id="ttsToggleBtn" class="icon-toggle active" title="Toggle Voice Responses (TTS)" aria-label="Toggle voice output">
+          <svg class="icon-speaker-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          </svg>
+          <svg class="icon-speaker-off hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <line x1="23" y1="9" x2="17" y2="15"/>
+            <line x1="17" y1="9" x2="23" y2="15"/>
+          </svg>
+        </button>
+
+        <!-- System Connection Status -->
+        <div id="connectionStatus" class="status-pill online" title="System Status">
+          <span class="status-dot"></span>
+          <span class="status-label">Ready</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Voice Experience Area -->
+    <main class="main-content">
+      <!-- Voice Interaction Stage -->
+      <section class="voice-stage">
+        <div class="hero-text">
+          <h2 class="hero-title">How can I help you?</h2>
+          <p class="hero-subtitle">Tap the microphone to speak, or ask follow-up questions naturally.</p>
+        </div>
+
+        <!-- Central Mic Button & Pulse Rings -->
+        <div class="mic-orb-container">
+          <div class="pulse-ring pulse-1" id="pulseRing1"></div>
+          <div class="pulse-ring pulse-2" id="pulseRing2"></div>
+          <div class="pulse-ring pulse-3" id="pulseRing3"></div>
+
+          <button id="micBtn" class="mic-button" aria-label="Ask MOBI voice search button" title="Click to Speak">
+            <div class="mic-icon-wrapper">
+              <svg class="mic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="22"/>
+                <line x1="8" y1="22" x2="16" y2="22"/>
+              </svg>
+            </div>
+          </button>
+        </div>
+
+        <!-- Voice Lifecycle State Badge -->
+        <div class="voice-state-indicator">
+          <span id="voiceStateBadge" class="state-badge idle">Ask MOBI</span>
+        </div>
+
+        <!-- Live Voice Controls (Stop, Cancel) -->
+        <div id="micControlsGroup" class="mic-controls-row hidden">
+          <button id="stopMicBtn" class="action-chip-btn stop" title="Finish and process voice input">
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            Done Speaking
+          </button>
+          <button id="cancelMicBtn" class="action-chip-btn cancel" title="Cancel voice recording">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Cancel
+          </button>
+        </div>
+
+        <!-- Real-time Live Transcript Bubble -->
+        <div id="liveTranscriptBox" class="live-transcript-box hidden">
+          <span class="transcript-prefix">You:</span>
+          <span id="liveTranscriptText" class="transcript-content">Listening for your voice...</span>
+        </div>
+      </section>
+
+      <!-- Quick Suggestion Chips -->
+      <section class="quick-prompts-section">
+        <span class="section-label">Try asking:</span>
+        <div class="chips-row">
+          <button class="prompt-chip" data-query="Find buses near me">
+            <span>📍 Find buses near me</span>
+          </button>
+          <button class="prompt-chip" data-query="Where is bus 21G?">
+            <span>🚌 Where is bus 21G?</span>
+          </button>
+          <button class="prompt-chip" data-query="I need to get to T Nagar">
+            <span>🧭 I need to get to T Nagar</span>
+          </button>
+          <button class="prompt-chip" data-query="What is the ETA for bus 21G at Airport?">
+            <span>⏱️ Bus 21G ETA at Airport</span>
+          </button>
+          <button class="prompt-chip" data-query="Tell me about route 29C">
+            <span>🗺️ Route 29C details</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Conversation Stream -->
+      <section class="conversation-section" id="conversationSection">
+        <div class="conversation-header">
+          <span class="convo-title">Session Conversation</span>
+          <button id="clearConvoBtn" class="clear-btn" title="Clear conversation history">Clear</button>
+        </div>
+        <div id="conversationContainer" class="conversation-container">
+          <!-- Initial Welcome Message from MOBI -->
+          <div class="chat-message mobi-message">
+            <div class="message-avatar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="22"/>
+              </svg>
+            </div>
+            <div class="message-bubble">
+              <div class="message-sender">MOBI</div>
+              <div class="message-text">Hello! I am MOBI, your AI voice assistant for Chennai buses and urban transit. Tap the microphone above or type a question below to find buses, check live locations, or get arrival times.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Input Bar (Text Fallback) -->
+    <footer class="app-footer">
+      <form id="textInputForm" class="text-input-form" autocomplete="off">
+        <div class="input-wrapper">
+          <input
+            type="text"
+            id="queryInput"
+            placeholder="Ask MOBI anything or type a transit question..."
+            aria-label="Ask MOBI transit query"
+            maxlength="250"
+          />
+          <button type="submit" id="sendBtn" class="send-btn" title="Send query" aria-label="Send message">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+      </form>
+    </footer>
+
+    <!-- Toast Notification -->
+    <div id="toastNotification" class="toast-notification hidden" role="alert">
+      <span id="toastMessage"></span>
+      <button id="toastCloseBtn" class="toast-close" aria-label="Close notification">&times;</button>
+    </div>
+  </div>
+
+  <script type="module" src="/js/speechService.js"></script>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
