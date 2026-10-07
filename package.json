@@ -1,60 +1,30 @@
 {
-  "name": "acims-workspace",
-  "version": "0.0.0",
-  "license": "MIT",
-  "private": true,
+  "name": "mobi-ai-voice-agent",
+  "version": "1.0.0",
+  "description": "Production MOBI AI Voice Search Agent with Speech-to-Text, Gemini AI Tool Calling, and Text-to-Speech",
   "type": "module",
-  "workspaces": [
-    "artifacts/*",
-    "lib/*",
-    "scripts"
-  ],
+  "main": "src/server.js",
   "scripts": {
-    "dev": "tsx watch server.ts",
-    "start": "node server.ts",
-    "transit:sync": "tsx scripts/sync-transit.ts",
-    "mobility:seed": "tsx scripts/seed-mobility-core.ts",
-    "dev:reset": "rm -rf data/postgres && npm run dev",
-    "mtc:sync": "tsx scripts/mtc-sync.ts",
-    "rec:sync": "tsx scripts/rec-sync.ts",
-    "rec:publish": "tsx scripts/rec-sync.ts --publish-only",
-    "build": "vite build --config artifacts/acims/vite.config.ts && esbuild server-app.ts --bundle --platform=node --format=esm --external:express --external:cors --external:pino --external:pino-http --external:vite --external:pg --external:drizzle-orm --external:firebase-admin --external:@electric-sql/pglite --external:@google/genai --external:socket.io --outfile=server.bundle.js",
-    "gcp-build": "npm run build",
-    "lint": "tsc --noEmit",
-    "typecheck:libs": "tsc --build",
-    "typecheck": "npm run typecheck:libs"
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
   },
-  "engines": {
-    "node": ">=22.0.0"
-  },
+  "keywords": [
+    "ai",
+    "voice-search",
+    "gemini",
+    "function-calling",
+    "transit",
+    "stt",
+    "tts"
+  ],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "@electric-sql/pglite": "^0.5.8",
     "@google/genai": "^2.27.0",
-    "@radix-ui/react-tooltip": "^1.2.16",
-    "@types/google.maps": "^3.66.5",
-    "@vis.gl/react-google-maps": "^1.10.1",
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "dotenv": "^18.0.5",
-    "drizzle-orm": "^0.45.3",
-    "esbuild": "^0.28.2",
-    "express": "^5.0.0",
-    "firebase": "^12.19.0",
-    "firebase-admin": "^14.5.0",
-    "pg": "^8.23.1",
-    "pino": "^9.6.0",
-    "pino-http": "^10.4.0",
-    "socket.io": "^4.8.4",
-    "socket.io-client": "^4.8.4",
-    "tsx": "^4.19.2",
-    "vite": "^6.2.0"
-  },
-  "devDependencies": {
-    "@types/cors": "^2.8.17",
-    "@types/express": "^5.0.0",
-    "@types/node": "^22.13.0",
-    "@types/pg": "^8.23.1",
-    "drizzle-kit": "^0.31.11",
-    "prettier": "^3.5.0",
-    "typescript": "^5.7.3"
+    "express": "^5.2.1",
+    "multer": "^2.4.0"
   }
 }
