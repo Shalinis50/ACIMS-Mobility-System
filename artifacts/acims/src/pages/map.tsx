@@ -1,127 +1,101 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
-import { Link } from 'wouter';
-import { 
-  BusFront, 
-  LocateFixed, 
-  MapPin, 
-  Navigation, 
-  Radio, 
-  Route as RouteIcon, 
-  CheckCircle2, 
-  Clock3, 
-  AlertTriangle,
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "wouter";
+import {
+  BusFront,
+  LocateFixed,
+  MapPin,
+  Navigation,
+  Radio,
+  Clock3,
   Smartphone,
-  Play,
-  RotateCcw,
-  Sparkles,
-  Info
-} from 'lucide-react';
-import { divIcon } from 'leaflet';
-import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet';
-import { 
-  useListBuses, 
-  getListBusesQueryKey 
-} from '@workspace/api-client-react';
-import { 
-  EmptyState, 
-  ErrorState, 
-  LoadingRows, 
-  PageHeading, 
-  selectBus, 
-  useSelectedBusId 
-} from '@/components/acims-ui';
-import { useNetworkStatus } from '@/hooks/use-network';
-import { OfflineMobilityView } from '@/components/offline-mobility-view';
-import { saveLastKnownBusSnapshot } from '@/lib/offline-storage';
-import { 
-  useBusRealtimeLocation, 
-  sendDriverGpsUpdate, 
-  type Coordinate, 
-  type RouteStop 
-} from '@/lib/realtime-location';
-import { GoogleMapVisualizer, GOOGLE_MAPS_API_KEY } from '@/components/google-map-visualizer';
-import 'leaflet/dist/leaflet.css';
-
-/**
- * Controller to handle Follow-Bus and View-Reset within Leaflet MapContainer
- */
-function MapCameraController({ 
-  busPosition, 
-  routeBounds, 
-  followBus 
-}: { 
-  busPosition: [number, number]; 
-  routeBounds: [number, number][]; 
-  followBus: boolean;
-}) {
-  const map = useMap();
-  const initialFitDone = useRef(false);
-
-  // Initial fit to route bounds
-  useEffect(() => {
-    if (!initialFitDone.current && routeBounds.length > 1) {
-      map.fitBounds(routeBounds, { padding: [40, 40], maxZoom: 16 });
-      initialFitDone.current = true;
-    }
-  }, [map, routeBounds]);
-
-  // Smooth follow camera
-  useEffect(() => {
-    if (followBus && busPosition) {
-      map.panTo(busPosition, { animate: true, duration: 1.0 });
-    }
-  }, [map, busPosition, followBus]);
-
-  return null;
-}
+  UserCheck,
+} from "lucide-react";
+import {
+  useListBuses,
+  getListBusesQueryKey,
+} from "@workspace/api-client-react";
+import {
+  ErrorState,
+  LoadingRows,
+  PageHeading,
+  selectBus,
+  useSelectedBusId,
+} from "@/components/acims-ui";
+import { useNetworkStatus } from "@/hooks/use-network";
+import { OfflineMobilityView } from "@/components/offline-mobility-view";
+import { saveLastKnownBusSnapshot } from "@/lib/offline-storage";
+import { useBusRealtimeLocation } from "@/lib/realtime-location";
+import {
+  normalizeAcimsRoute,
+  type RoutePathCoordinate,
+  type RouteStopModel,
+} from "@/routes/routeTypes";
+import { estimateEta } from "@/eta/estimateEta";
+import { GoogleBusMap } from "@/maps/GoogleBusMap";
 
 export default function LiveMap() {
   const { isOnline } = useNetworkStatus();
   const selectedBusId = useSelectedBusId();
-  const busesQuery = useListBuses({ query: { enabled: isOnline, queryKey: getListBusesQueryKey() } });
+  const busesQuery = useListBuses({
+    query: { enabled: isOnline, queryKey: getListBusesQueryKey() },
+  });
 
-  // Fallback to bus-18 if no bus is explicitly selected
-  const activeBusId = selectedBusId || 'bus-18';
+  // Support ?busId= query parameter for direct linking from My Bus or Driver page
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const urlBusId = params.get("busId");
+    if (urlBusId) {
+      selectBus(urlBusId);
+    }
+  }, []);
+
+  const activeBusId = selectedBusId || busesQuery.data?.[0]?.id || "bus-12";
 
   const bus = useMemo(() => {
-    return busesQuery.data?.find((b) => b.id === activeBusId) ?? busesQuery.data?.[0];
+    return (
+      busesQuery.data?.find((b) => b.id === activeBusId) ??
+      busesQuery.data?.[0]
+    );
   }, [busesQuery.data, activeBusId]);
 
   const effectiveBusId = bus?.id ?? activeBusId;
 
-  // Realtime Location Hook
+  // Realtime SSE Location Hook (GET /api/realtime/bus/:busId)
   const {
     location,
     routeDetails,
     freshness,
-    isLoading: isLocationLoading,
     isRealtimeConnected,
-    refresh: refreshLocation,
   } = useBusRealtimeLocation(effectiveBusId, isOnline);
 
-  // Map state controls
+  // Student's own real device GPS location for Google Map display
+  const [userLocation, setUserLocation] = useState<{
+    latitude: number;
+    longitude: number;
+    accuracy?: number | null;
+  } | null>(null);
+  const [centerOnUserTrigger, setCenterOnUserTrigger] = useState(0);
   const [followBus, setFollowBus] = useState(true);
-  const [mapEngine, setMapEngine] = useState<'google' | 'leaflet'>('google');
-  const [mapType, setMapType] = useState<'roadmap' | 'satellite' | 'terrain'>('roadmap');
-  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [driverModeOpen, setDriverModeOpen] = useState(false);
-  const [gpsStatusMessage, setGpsStatusMessage] = useState<string>('');
-  const [isTransmittingGps, setIsTransmittingGps] = useState(false);
 
-  // Request student's real device position to display relative to approaching bus
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserLocation({
-            latitude: Number(pos.coords.latitude.toFixed(6)),
-            longitude: Number(pos.coords.longitude.toFixed(6)),
-          });
-        },
-        () => {},
-        { enableHighAccuracy: true, timeout: 6000 }
-      );
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      return;
     }
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        setUserLocation({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        });
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    );
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
   }, []);
 
   // Cache bus state for offline view
@@ -131,104 +105,130 @@ export default function LiveMap() {
     }
   }, [bus]);
 
-  const busNumber = location?.busNumber || bus?.busNumber || '18';
-  const routeName = location?.routeName || routeDetails?.name || bus?.routeLabel || 'Metro Connector Feeder';
-  const origin = location?.origin || routeDetails?.origin || bus?.origin || 'Metro Central Station';
-  const destination = location?.destination || routeDetails?.destination || bus?.destination || 'Medical Sciences Center';
+  const normalizedRoute = useMemo(
+    () => normalizeAcimsRoute(routeDetails, effectiveBusId),
+    [routeDetails, effectiveBusId]
+  );
 
-  // Path coordinates
-  const path: Coordinate[] = routeDetails?.path && routeDetails.path.length > 0
-    ? routeDetails.path
-    : [
-        { latitude: 12.9249, longitude: 80.1275 },
-        { latitude: 12.9272, longitude: 80.1302 },
-        { latitude: 12.9301, longitude: 80.1336 },
-        { latitude: 12.9338, longitude: 80.1368 },
-        { latitude: 12.9372, longitude: 80.1396 },
-      ];
+  const busNumber =
+    location?.busNumber ||
+    normalizedRoute?.busNumber ||
+    bus?.busNumber ||
+    effectiveBusId.replace("bus-", "");
+  const routeName =
+    location?.routeName ||
+    normalizedRoute?.name ||
+    bus?.routeLabel ||
+    "Campus Transit Line";
+  const origin =
+    location?.origin ||
+    normalizedRoute?.origin ||
+    bus?.origin ||
+    "Route Origin";
+  const destination =
+    location?.destination ||
+    normalizedRoute?.destination ||
+    bus?.destination ||
+    "Campus Terminal";
 
-  // Route stops
-  const stops: RouteStop[] = routeDetails?.stops && routeDetails.stops.length > 0
-    ? routeDetails.stops
-    : [
-        { id: 'metro-central', name: 'Metro Central Station', sequence: 0, pathIndex: 0, latitude: 12.9249, longitude: 80.1275 },
-        { id: 'jb-estate', name: 'JB Estate', sequence: 1, pathIndex: 6, latitude: 12.9272, longitude: 80.1302 },
-        { id: 'ponnu', name: 'Ponnu', sequence: 2, pathIndex: 12, latitude: 12.9301, longitude: 80.1336 },
-        { id: 'ramratna', name: 'Ramratna', sequence: 3, pathIndex: 18, latitude: 12.9338, longitude: 80.1368 },
-        { id: 'medical-sciences', name: 'Medical Sciences Center', sequence: 4, pathIndex: 24, latitude: 12.9372, longitude: 80.1396 },
-      ];
+  const stops: RouteStopModel[] = useMemo(
+    () => normalizedRoute?.stops ?? [],
+    [normalizedRoute]
+  );
 
-  // Current bus coordinate
-  const busPosition: [number, number] = location
-    ? [location.latitude, location.longitude]
-    : [stops[0].latitude, stops[0].longitude];
+  const path: RoutePathCoordinate[] = useMemo(
+    () => normalizedRoute?.path ?? [],
+    [normalizedRoute]
+  );
 
-  // Traveled portion vs Remaining portion of route path
+  const hasVerifiedGps =
+    Boolean(location) &&
+    location?.source === "real-device-gps" &&
+    freshness.statusBadge !== "UNAVAILABLE";
+
+  const currentBusCoord: RoutePathCoordinate | null = useMemo(() => {
+    if (location && typeof location.latitude === "number" && typeof location.longitude === "number") {
+      return { latitude: location.latitude, longitude: location.longitude };
+    }
+    if (stops.length > 0) {
+      return { latitude: stops[0].latitude, longitude: stops[0].longitude };
+    }
+    return null;
+  }, [location, stops]);
+
+  // Split route path into Traveled vs Remaining based on live bus pathIndex
   const busPathIndex = location?.pathIndex ?? 0;
-  const traveledPathCoords = useMemo(() => {
+
+  const traveledPathCoords: RoutePathCoordinate[] = useMemo(() => {
+    if (path.length === 0) return [];
     const subset = path.slice(0, Math.min(path.length, busPathIndex + 1));
-    const coords = subset.map((p) => [p.latitude, p.longitude] as [number, number]);
-    if (coords.length > 0) coords.push(busPosition);
-    return coords;
-  }, [path, busPathIndex, busPosition]);
+    if (currentBusCoord && subset.length > 0) {
+      return [...subset, currentBusCoord];
+    }
+    return subset;
+  }, [path, busPathIndex, currentBusCoord]);
 
-  const remainingPathCoords = useMemo(() => {
+  const remainingPathCoords: RoutePathCoordinate[] = useMemo(() => {
+    if (path.length === 0) return [];
     const subset = path.slice(Math.max(0, busPathIndex));
-    const coords = subset.map((p) => [p.latitude, p.longitude] as [number, number]);
-    if (coords.length > 0) coords.unshift(busPosition);
-    return coords;
-  }, [path, busPathIndex, busPosition]);
+    if (currentBusCoord && subset.length > 0) {
+      return [currentBusCoord, ...subset];
+    }
+    return subset;
+  }, [path, busPathIndex, currentBusCoord]);
 
-  const fullRouteBounds = useMemo(() => {
-    return path.map((p) => [p.latitude, p.longitude] as [number, number]);
-  }, [path]);
+  // Compute fallback Haversine ETA via adapted estimateEta.ts if needed (never on fake coordinates)
+  const targetStopModel = useMemo(() => {
+    if (stops.length === 0) return null;
+    return (
+      stops.find((s) => s.id === location?.nextStopId) ||
+      stops[location?.stopSequenceIndex ?? 0] ||
+      stops[0]
+    );
+  }, [stops, location]);
 
-  // OFFLINE MODE: clean switch to offline storage (executed after all hooks run unconditionally)
+  const fallbackEta = useMemo(() => {
+    if (!targetStopModel) return null;
+    return estimateEta({
+      busLocation:
+        hasVerifiedGps && location
+          ? {
+              latitude: location.latitude,
+              longitude: location.longitude,
+              speedKph: location.speed,
+            }
+          : null,
+      targetStop: targetStopModel,
+      freshness: freshness.statusBadge,
+    });
+  }, [targetStopModel, hasVerifiedGps, location, freshness.statusBadge]);
+
   if (!isOnline) {
-    return <OfflineMobilityView initialTab="routes" selectedBusId={effectiveBusId} />;
+    return (
+      <OfflineMobilityView
+        initialTab="routes"
+        selectedBusId={effectiveBusId}
+      />
+    );
   }
 
   if (busesQuery.isLoading && !bus) return <LoadingRows count={4} />;
-  if (busesQuery.isError) return <ErrorState onRetry={() => void busesQuery.refetch()} />;
+  if (busesQuery.isError)
+    return <ErrorState onRetry={() => void busesQuery.refetch()} />;
 
-  // Transmit real Browser Geolocation API coordinates as Driver GPS
-  const handleTransmitDeviceGps = () => {
-    if (!navigator.geolocation) {
-      setGpsStatusMessage('Browser does not support Geolocation.');
-      return;
-    }
-
-    setIsTransmittingGps(true);
-    setGpsStatusMessage('Acquiring device GPS coordinates…');
-
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const coords: Coordinate = {
-          latitude: Number(pos.coords.latitude.toFixed(6)),
-          longitude: Number(pos.coords.longitude.toFixed(6)),
-        };
-        const updated = await sendDriverGpsUpdate(effectiveBusId, coords);
-        setIsTransmittingGps(false);
-        if (updated) {
-          setGpsStatusMessage(`Driver GPS sent: ${coords.latitude}, ${coords.longitude} (Mode: Driver GPS)`);
-          void refreshLocation();
-        } else {
-          setGpsStatusMessage('Failed to ingest driver coordinates to server.');
-        }
-      },
-      (err) => {
-        setIsTransmittingGps(false);
-        setGpsStatusMessage(`GPS acquisition failed: ${err.message}. (Grant permission or test along campus path)`);
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  };
-
-  const nextStopName = location?.nextStop || bus?.nextStop || stops[1]?.name || 'Next stop';
-  const prevStopName = location?.previousStop || stops[0]?.name;
-  const isAtStop = location?.isAtStop ?? false;
-  const etaMinutes = location?.etaMinutes ?? bus?.etaMinutes ?? 4;
-  const formattedEta = location?.formattedEta || (etaMinutes <= 0 ? 'Arriving now' : `approximately ${etaMinutes} min`);
+  const nextStopName =
+    location?.nextStop ||
+    targetStopModel?.name ||
+    bus?.nextStop ||
+    "Awaiting route stop";
+  const prevStopName =
+    location?.previousStop || stops[0]?.name || origin;
+  const isAtStop = location?.isAtStop ?? fallbackEta?.isAtStop ?? false;
+  const formattedEta = hasVerifiedGps
+    ? location?.formattedEta ||
+      fallbackEta?.formattedEta ||
+      `${location?.etaMinutes ?? 1} min`
+    : "Waiting for live GPS";
 
   return (
     <div className="page-in space-y-6">
@@ -236,58 +236,75 @@ export default function LiveMap() {
       <PageHeading
         eyebrow="Real-Time Campus Transit"
         title="Live Bus Tracking"
-        description="Continuous geographic tracking, real-time stop sequence, and dynamic remaining distance ETA from verified onboard driver GPS."
+        description="Live Google Maps bus tracking powered by real onboard driver GPS, PostgreSQL persistence, and instant Server-Sent Events (SSE)."
         action={
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* Live Realtime / Stale Freshness Indicator */}
-            {isRealtimeConnected && freshness.statusBadge === 'LIVE' ? (
-              <div 
-                data-testid="badge-status-live" 
+            {/* Bus Selector so Student Phone B can select the exact same bus as Driver Phone A */}
+            {busesQuery.data && busesQuery.data.length > 0 && (
+              <select
+                value={effectiveBusId}
+                onChange={(e) => selectBus(e.target.value)}
+                data-testid="select-student-map-bus"
+                aria-label="Select bus to track"
+                className="h-9 rounded-full border border-border bg-card px-3 text-xs font-extrabold text-foreground outline-none focus:ring-2 focus:ring-ring"
+              >
+                {busesQuery.data.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    Bus #{b.busNumber} — {b.routeLabel}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {/* Live / Recent / Stale / Unavailable Freshness Badge */}
+            {freshness.statusBadge === "LIVE" ? (
+              <div
+                data-testid="badge-status-live"
                 className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-3.5 py-1.5 text-xs font-extrabold text-emerald-800 dark:text-emerald-300 shadow-xs"
               >
                 <span className="pulse-dot h-2 w-2 rounded-full bg-emerald-500" />
-                <span>LIVE REALTIME</span>
+                <span>LIVE</span>
                 <span className="text-[10px] font-medium text-emerald-700/80 dark:text-emerald-400/80">
                   · {freshness.freshnessLabel}
                 </span>
               </div>
-            ) : freshness.statusBadge === 'RECENT' ? (
-              <div 
-                data-testid="badge-status-recent" 
+            ) : freshness.statusBadge === "RECENT" ? (
+              <div
+                data-testid="badge-status-recent"
                 className="flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/15 px-3 py-1.5 text-xs font-extrabold text-blue-800 dark:text-blue-300"
               >
                 <Clock3 size={13} className="text-blue-600 dark:text-blue-400" />
-                <span>RECENT GPS</span>
+                <span>RECENT</span>
                 <span className="text-[10px] font-medium text-blue-700/80 dark:text-blue-400/80">
                   · {freshness.freshnessLabel}
                 </span>
               </div>
-            ) : freshness.statusBadge === 'STALE' ? (
-              <div 
-                data-testid="badge-status-stale" 
+            ) : freshness.statusBadge === "STALE" ? (
+              <div
+                data-testid="badge-status-stale"
                 className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/15 px-3 py-1.5 text-xs font-extrabold text-amber-800 dark:text-amber-300"
               >
                 <Clock3 size={13} className="text-amber-600 dark:text-amber-400" />
-                <span>LAST KNOWN LOCATION</span>
+                <span>STALE</span>
                 <span className="text-[10px] font-medium text-amber-700/80 dark:text-amber-400/80">
                   · {freshness.freshnessLabel}
                 </span>
               </div>
             ) : (
-              <div 
-                data-testid="badge-status-unavailable" 
+              <div
+                data-testid="badge-status-unavailable"
                 className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-extrabold text-muted-foreground"
               >
                 <span className="h-2 w-2 rounded-full bg-muted-foreground" />
-                <span>AWAITING DRIVER GPS</span>
+                <span>UNAVAILABLE · {freshness.freshnessLabel}</span>
               </div>
             )}
 
-            {/* Link to Phone B Driver Console for physical 2-phone test */}
+            {/* Link to Driver Console */}
             <Link
               href="/driver"
               className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-bold text-foreground hover:bg-muted transition"
-              title="Open Driver Phone Console on Device B"
+              title="Open Driver Phone Console"
             >
               <Smartphone size={13} className="text-accent-foreground" />
               <span>Driver Console</span>
@@ -307,12 +324,21 @@ export default function LiveMap() {
               </span>
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h2 className="display-font text-2xl font-black text-foreground sm:text-3xl">
                   Bus {busNumber}
                 </h2>
                 <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-extrabold text-secondary-foreground">
                   {routeName}
+                </span>
+                <span
+                  className={`rounded-full px-2.5 py-0.5 font-mono text-[10px] font-black ${
+                    isRealtimeConnected
+                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                      : "bg-amber-500/15 text-amber-700"
+                  }`}
+                >
+                  {isRealtimeConnected ? `SOCKET.IO ROOM bus:${effectiveBusId}` : "SOCKET RECONNECTING"}
                 </span>
               </div>
               <div className="mt-1 flex items-center gap-2 text-xs font-bold text-muted-foreground">
@@ -331,8 +357,8 @@ export default function LiveMap() {
               </div>
               <div className="mt-0.5 flex items-center gap-1.5 text-base font-extrabold text-foreground sm:text-lg">
                 <MapPin size={17} className="text-accent-foreground shrink-0" />
-                <span>{nextStopName}</span>
-                {isAtStop && (
+                <span data-testid="live-map-next-stop">{nextStopName}</span>
+                {isAtStop && hasVerifiedGps && (
                   <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300">
                     At Stop
                   </span>
@@ -342,23 +368,34 @@ export default function LiveMap() {
 
             <div className="border-l border-border pl-4 sm:pl-8">
               <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                {location?.etaLabel || "ETA"}
+                {hasVerifiedGps
+                  ? `${location?.etaLabel || "LIVE ETA"} (Haversine)`
+                  : "ETA STATUS"}
               </div>
               <div className="mt-0.5 flex items-center gap-2">
-                <span className="text-base font-extrabold text-primary dark:text-accent sm:text-lg">
+                <span
+                  data-testid="live-map-eta"
+                  className="text-base font-extrabold text-primary dark:text-accent sm:text-lg"
+                >
                   {formattedEta}
                 </span>
-                {location?.etaConfidence && location.etaConfidence !== "UNAVAILABLE" && (
-                  <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
-                    location.etaConfidence === "HIGH" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-muted text-muted-foreground"
-                  }`}>
-                    {location.etaConfidence}
-                  </span>
-                )}
+                {hasVerifiedGps &&
+                  location?.etaConfidence &&
+                  location.etaConfidence !== "UNAVAILABLE" && (
+                    <span
+                      className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
+                        location.etaConfidence === "HIGH"
+                          ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {location.etaConfidence}
+                    </span>
+                  )}
               </div>
             </div>
 
-            {location?.remainingDistanceKm !== undefined && (
+            {hasVerifiedGps && location?.remainingDistanceKm !== undefined && (
               <div className="hidden border-l border-border pl-4 sm:block sm:pl-8">
                 <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
                   Distance
@@ -372,46 +409,14 @@ export default function LiveMap() {
         </div>
       </section>
 
-      {/* Driver GPS Testing Panel (Transparently implements architecture flow without fake GPS) */}
-      {driverModeOpen && (
-        <section className="rounded-2xl border-2 border-dashed border-primary/30 bg-muted/20 p-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 font-bold text-foreground">
-              <Smartphone size={16} className="text-primary" />
-              <span>Driver GPS Ingestion Bridge</span>
-            </div>
-            <span className="mono text-[10px] uppercase text-muted-foreground">Future Driver Flow Tester</span>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Test the future driver pipeline: Driver Phone → Browser Geolocation API → Backend Ingestion (`/api/bus/location`) → Realtime Map.
-          </p>
-
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleTransmitDeviceGps}
-              disabled={isTransmittingGps}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            >
-              <Smartphone size={14} />
-              <span>{isTransmittingGps ? 'Reading GPS…' : 'Transmit My Browser Coordinates'}</span>
-            </button>
-
-            {gpsStatusMessage && (
-              <span className="text-xs font-medium text-foreground">{gpsStatusMessage}</span>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* Map & Stop Context Layout */}
+      {/* Google Map & Stop Sequence Layout */}
       <section className="grid gap-6 xl:grid-cols-[1.5fr_.7fr]">
-        {/* Live Map Engine Container */}
+        {/* Google Maps Container */}
         <div className="relative min-h-[520px] overflow-hidden rounded-[28px] border border-border bg-secondary/30 p-3 sm:p-5">
           {/* Top-Left Floating Info Overlay */}
-          <div className="absolute left-6 top-6 z-[500] flex flex-col gap-1 rounded-2xl border border-border bg-card/90 px-4 py-2.5 shadow-md backdrop-blur-md">
+          <div className="pointer-events-none absolute left-6 top-6 z-10 flex flex-col gap-1 rounded-2xl border border-border bg-card/95 px-4 py-2.5 shadow-md backdrop-blur-md">
             <div className="mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">
-              Route corridor
+              Google Maps Live Corridor
             </div>
             <div className="flex items-center gap-2 text-sm font-black text-foreground">
               <span className="grid h-6 w-6 place-items-center rounded-md bg-primary text-accent text-xs font-bold">
@@ -419,150 +424,97 @@ export default function LiveMap() {
               </span>
               <span>{routeName}</span>
             </div>
-            {location && location.speed !== null && (
-              <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-semibold">
-                <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                  {location.speed > 0 ? `${location.speed} km/h` : "Stationary"}
-                </span>
-                {location.heading !== null && (
-                  <span>· {Math.round(location.heading)}° bearing</span>
-                )}
+            {hasVerifiedGps && location && (
+              <div
+                data-testid="live-map-bus-coords"
+                className="font-mono text-[10px] font-bold text-muted-foreground"
+              >
+                GPS: {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
+                {location.speed != null ? ` · ${location.speed} km/h` : ""}
               </div>
             )}
           </div>
 
-          {/* Top-Right Camera & Map Controls */}
-          <div className="absolute right-6 top-6 z-[500] flex flex-wrap items-center gap-2">
-            {/* Map Engine Toggle */}
-            <div className="flex items-center rounded-xl border border-border bg-card/95 p-1 shadow-sm backdrop-blur">
+          {/* Top-Right Camera Controls */}
+          <div className="absolute right-6 top-6 z-10 flex items-center gap-2">
+            {userLocation && (
               <button
                 type="button"
-                onClick={() => setMapEngine('google')}
-                className={`rounded-lg px-2.5 py-1 text-xs font-black transition ${
-                  mapEngine === 'google'
-                    ? 'bg-primary text-primary-foreground shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
+                onClick={() => {
+                  setFollowBus(false);
+                  setCenterOnUserTrigger((c) => c + 1);
+                }}
+                title="Center on my current location"
+                data-testid="button-center-user-location"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card/95 px-3 py-2 text-xs font-extrabold text-foreground shadow-sm backdrop-blur hover:bg-card transition"
               >
-                Google Maps
+                <UserCheck size={14} className="text-blue-600" />
+                <span className="hidden sm:inline">My Location</span>
               </button>
-              <button
-                type="button"
-                onClick={() => setMapEngine('leaflet')}
-                className={`rounded-lg px-2.5 py-1 text-xs font-black transition ${
-                  mapEngine === 'leaflet'
-                    ? 'bg-primary text-primary-foreground shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                OSM
-              </button>
-            </div>
-
-            {/* Google Map Type Switcher */}
-            {mapEngine === 'google' && (
-              <div className="hidden sm:flex items-center rounded-xl border border-border bg-card/95 p-1 shadow-sm backdrop-blur">
-                <button
-                  type="button"
-                  onClick={() => setMapType('roadmap')}
-                  className={`rounded-lg px-2 py-1 text-[11px] font-bold transition ${
-                    mapType === 'roadmap'
-                      ? 'bg-secondary text-secondary-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  Road
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMapType('satellite')}
-                  className={`rounded-lg px-2 py-1 text-[11px] font-bold transition ${
-                    mapType === 'satellite'
-                      ? 'bg-secondary text-secondary-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  Satellite
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMapType('terrain')}
-                  className={`rounded-lg px-2 py-1 text-[11px] font-bold transition ${
-                    mapType === 'terrain'
-                      ? 'bg-secondary text-secondary-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  Terrain
-                </button>
-              </div>
             )}
-
-            {/* Follow Bus Mode Toggle */}
             <button
               type="button"
               onClick={() => setFollowBus((prev) => !prev)}
-              title={followBus ? 'Follow Bus Mode: Enabled' : 'Follow Bus Mode: Click to Enable'}
+              title={
+                followBus
+                  ? "Follow Bus Mode: Enabled"
+                  : "Follow Bus Mode: Click to Enable"
+              }
               data-testid="button-toggle-follow-bus"
               className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-extrabold shadow-sm backdrop-blur transition ${
                 followBus
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-border bg-card/90 text-muted-foreground hover:bg-card'
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card/95 text-muted-foreground hover:bg-card"
               }`}
             >
-              <LocateFixed size={14} className={followBus ? 'animate-pulse' : ''} />
-              <span>{followBus ? 'Following Bus' : 'Follow Bus'}</span>
+              <LocateFixed
+                size={14}
+                className={followBus ? "animate-pulse" : ""}
+              />
+              <span>{followBus ? "Following Bus" : "Follow Bus"}</span>
             </button>
           </div>
 
-          {/* Map Visualizer Engine */}
-          {mapEngine === 'google' ? (
-            <GoogleMapVisualizer
-              stops={stops}
-              traveledPath={traveledPathCoords}
-              remainingPath={remainingPathCoords}
-              busPosition={busPosition}
-              busNumber={busNumber}
-              location={location}
-              routeBounds={fullRouteBounds}
-              followBus={followBus}
-              userLocation={userLocation}
-              mapType={mapType}
-              onFollowToggle={() => setFollowBus((prev) => !prev)}
-            />
-          ) : (
-            <MapEngineVisualizer
-              stops={stops}
-              traveledPath={traveledPathCoords}
-              remainingPath={remainingPathCoords}
-              busPosition={busPosition}
-              busNumber={busNumber}
-              location={location}
-              routeBounds={fullRouteBounds}
-              followBus={followBus}
-            />
-          )}
+          {/* Google Maps Visualizer */}
+          <GoogleBusMap
+            busId={effectiveBusId}
+            busNumber={busNumber}
+            stops={stops}
+            traveledPath={traveledPathCoords}
+            remainingPath={remainingPathCoords}
+            fullPath={path}
+            location={location}
+            userLocation={userLocation}
+            followBus={followBus}
+            centerOnUserTrigger={centerOnUserTrigger}
+          />
 
           {/* Bottom Map Legend */}
-          <div className="pointer-events-none absolute bottom-5 left-5 right-5 z-[500] flex flex-wrap items-center gap-3.5 rounded-2xl border border-border bg-card/90 px-4 py-2.5 text-[11px] font-bold shadow-md backdrop-blur-md">
+          <div className="pointer-events-none absolute bottom-5 left-5 right-5 z-10 flex flex-wrap items-center gap-3.5 rounded-2xl border border-border bg-card/95 px-4 py-2.5 text-[11px] font-bold shadow-md backdrop-blur-md">
             <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-6 rounded-full bg-primary" />
+              <span className="h-2.5 w-6 rounded-full bg-teal-700" />
               <span>Remaining Route</span>
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-6 rounded-full border border-dashed border-slate-400 bg-slate-300 dark:bg-slate-700" />
+              <span className="h-2.5 w-6 rounded-full bg-slate-500" />
               <span>Traveled Portion</span>
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="h-3 w-3 rounded-full border-2 border-accent-foreground bg-accent" />
+              <span className="h-3 w-3 rounded-full border-2 border-slate-900 bg-amber-400" />
               <span>Next Stop</span>
             </span>
+            {userLocation && (
+              <span className="flex items-center gap-1.5">
+                <span className="h-3 w-3 rounded-full border-2 border-white bg-blue-600 shadow" />
+                <span>Your Location</span>
+              </span>
+            )}
             <span className="ml-auto flex items-center gap-1.5 text-muted-foreground">
               <Radio size={13} className="text-primary dark:text-accent" />
               <span>
-                {location?.source === 'real-device-gps' || location?.source === 'driver-gps'
-                  ? 'Verified Driver GPS Telemetry'
-                  : 'Real-Time Bus Location'}
+                {hasVerifiedGps
+                  ? `Real Device GPS (${freshness.statusBadge})`
+                  : "Waiting for Driver GPS"}
               </span>
             </span>
           </div>
@@ -580,7 +532,7 @@ export default function LiveMap() {
               </h3>
             </div>
             <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-extrabold text-secondary-foreground">
-              {location?.status || 'Active Line'}
+              {location?.status || "Standby"}
             </span>
           </div>
 
@@ -588,32 +540,55 @@ export default function LiveMap() {
           <div className="mt-6 space-y-0">
             {stops.map((stop, index) => {
               const isNext = stop.id === location?.nextStopId;
-              const isPassed = (stop.pathIndex ?? index * 6) < busPathIndex && !isNext;
-              const isThisStopActive = isAtStop && (location?.currentStop === stop.name || isNext);
+              const isPassed =
+                hasVerifiedGps &&
+                (stop.pathIndex ?? index * 6) < busPathIndex &&
+                !isNext;
+              const isThisStopActive = Boolean(
+                hasVerifiedGps && isAtStop && isNext
+              );
 
               return (
-                <div key={stop.id} data-testid={`stop-timeline-row-${stop.id}`} className="group relative flex gap-4 pb-6 last:pb-0">
+                <div
+                  key={stop.id}
+                  data-testid={`stop-timeline-row-${stop.id}`}
+                  className="group relative flex gap-4 pb-6 last:pb-0"
+                >
                   {/* Spine connection */}
                   <div className="relative flex w-4 justify-center">
                     <span
                       className={`z-10 mt-1 h-4 w-4 rounded-full border-4 transition-all ${
                         isThisStopActive
-                          ? 'border-emerald-500 bg-emerald-100 ring-4 ring-emerald-500/20'
+                          ? "border-emerald-500 bg-emerald-100 ring-4 ring-emerald-500/20"
                           : isNext
-                          ? 'border-accent-foreground bg-accent ring-4 ring-accent/30'
+                          ? "border-accent-foreground bg-accent ring-4 ring-accent/30"
                           : isPassed
-                          ? 'border-slate-400 bg-slate-300 dark:bg-slate-700'
-                          : 'border-muted bg-card'
+                          ? "border-slate-400 bg-slate-300 dark:bg-slate-700"
+                          : "border-muted bg-card"
                       }`}
                     />
                     {index < stops.length - 1 && (
-                      <span className={`absolute top-4 h-full w-0.5 ${isPassed ? 'bg-slate-400 dark:bg-slate-700' : 'bg-border'}`} />
+                      <span
+                        className={`absolute top-4 h-full w-0.5 ${
+                          isPassed
+                            ? "bg-slate-400 dark:bg-slate-700"
+                            : "bg-border"
+                        }`}
+                      />
                     )}
                   </div>
 
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
-                      <span className={`text-sm font-extrabold ${isNext ? 'text-primary dark:text-accent font-black' : isPassed ? 'text-muted-foreground' : 'text-foreground'}`}>
+                      <span
+                        className={`text-sm font-extrabold ${
+                          isNext
+                            ? "text-primary dark:text-accent font-black"
+                            : isPassed
+                            ? "text-muted-foreground"
+                            : "text-foreground"
+                        }`}
+                      >
                         {stop.name}
                       </span>
                       {isNext && (
@@ -630,7 +605,9 @@ export default function LiveMap() {
                     <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
                       {isNext ? (
                         <span className="font-bold text-accent-foreground">
-                          Arriving in {formattedEta}
+                          {hasVerifiedGps
+                            ? `Arriving in ${formattedEta}`
+                            : "Awaiting live driver GPS"}
                         </span>
                       ) : isPassed ? (
                         <span>Passed</span>
@@ -648,176 +625,27 @@ export default function LiveMap() {
           <div className="mt-6 rounded-2xl bg-muted/50 p-4 text-xs">
             <div className="flex items-center gap-2 font-bold text-foreground">
               <Navigation size={14} className="text-primary dark:text-accent" />
-              <span>Route Progress</span>
+              <span>Live Telemetry Status</span>
             </div>
             <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-              Bus #{busNumber} is moving from <strong>{prevStopName}</strong> toward <strong>{nextStopName}</strong>. 
-              {location?.remainingDistanceKm ? ` ~${location.remainingDistanceKm} km remaining.` : ''}
+              {hasVerifiedGps ? (
+                <>
+                  Bus #{busNumber} is moving from <strong>{prevStopName}</strong>{" "}
+                  toward <strong>{nextStopName}</strong>.
+                  {location?.remainingDistanceKm
+                    ? ` ~${location.remainingDistanceKm} km remaining.`
+                    : ""}
+                </>
+              ) : (
+                <>
+                  No active GPS broadcast for Bus #{busNumber} right now. Start
+                  a trip on <strong>/driver</strong> to stream live coordinates.
+                </>
+              )}
             </p>
           </div>
         </div>
       </section>
     </div>
   );
-}
-
-/**
- * Dedicated Leaflet Map Engine
- */
-function MapEngineVisualizer({
-  stops,
-  traveledPath,
-  remainingPath,
-  busPosition,
-  busNumber,
-  location,
-  routeBounds,
-  followBus,
-}: {
-  stops: RouteStop[];
-  traveledPath: [number, number][];
-  remainingPath: [number, number][];
-  busPosition: [number, number];
-  busNumber: string;
-  location: any;
-  routeBounds: [number, number][];
-  followBus: boolean;
-}) {
-  const busIcon = useMemo(() => {
-    return divIcon({
-      className: 'acims-bus-marker',
-      html: `
-        <div style="
-          position: relative;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 44px;
-          height: 44px;
-          background: hsl(195, 40%, 20%);
-          border: 3px solid hsl(67, 100%, 69%);
-          border-radius: 14px;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-          color: hsl(67, 100%, 69%);
-          font-family: monospace;
-          font-weight: 900;
-          font-size: 13px;
-        ">
-          #${busNumber}
-          <span style="
-            position: absolute;
-            top: -4px;
-            right: -4px;
-            width: 10px;
-            height: 10px;
-            background: #22c55e;
-            border-radius: 50%;
-            border: 2px solid white;
-          "></span>
-        </div>
-      `,
-      iconSize: [44, 44],
-      iconAnchor: [22, 22],
-    });
-  }, [busNumber]);
-
-  return (
-    <MapContainer
-      center={busPosition}
-      zoom={14}
-      scrollWheelZoom={false}
-      className="h-[500px] min-h-[480px] w-full rounded-[22px]"
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-
-      <MapCameraController
-        busPosition={busPosition}
-        routeBounds={routeBounds}
-        followBus={followBus}
-      />
-
-      {/* Traveled portion of route (muted/dashed) */}
-      {traveledPath.length > 1 && (
-        <Polyline
-          positions={traveledPath}
-          pathOptions={{
-            color: '#64748b',
-            weight: 5,
-            opacity: 0.65,
-            dashArray: '8 8',
-          }}
-        />
-      )}
-
-      {/* Remaining portion of route (vibrant primary) */}
-      {remainingPath.length > 1 && (
-        <Polyline
-          positions={remainingPath}
-          pathOptions={{
-            color: 'hsl(195, 40%, 20%)',
-            weight: 6,
-            opacity: 0.95,
-          }}
-        />
-      )}
-
-      {/* Route Stops */}
-      {stops.map((stop, idx) => {
-        const isNext = stop.id === location?.nextStopId;
-        const isAtThisStop = location?.isAtStop && (location?.currentStop === stop.name || isNext);
-
-        return (
-          <CircleMarker
-            key={stop.id}
-            center={[stop.latitude, stop.longitude]}
-            radius={isThisStopActive(isAtThisStop, isNext)}
-            pathOptions={{
-              color: isThisStopActive
-                ? '#10b981'
-                : isNext
-                ? 'hsl(39, 96%, 58%)'
-                : 'hsl(195, 40%, 20%)',
-              fillColor: isThisStopActive
-                ? '#10b981'
-                : isNext
-                ? 'hsl(67, 100%, 69%)'
-                : 'white',
-              fillOpacity: 1,
-              weight: isNext || isThisStopActive ? 4 : 2.5,
-            }}
-          >
-            <Tooltip direction="top" offset={[0, -10]}>
-              <div className="font-sans text-xs">
-                <strong>{stop.name}</strong>
-                <div>Stop #{idx + 1}</div>
-                {isNext && <div className="text-amber-600 font-bold">Next Stop · {location?.formattedEta || `${location?.etaMinutes} min`}</div>}
-                {isThisStopActive && <div className="text-emerald-600 font-bold">Bus Currently at Stop</div>}
-              </div>
-            </Tooltip>
-          </CircleMarker>
-        );
-      })}
-
-      {/* Bus Marker */}
-      <Marker position={busPosition} icon={busIcon}>
-        <Tooltip direction="top" offset={[0, -22]} permanent={false}>
-          <div className="font-sans text-xs">
-            <strong>Bus #{busNumber}</strong>
-            <div>Heading to: {location?.destination || 'Terminal'}</div>
-            <div>Next: {location?.nextStop} ({location?.formattedEta || `${location?.etaMinutes} min`})</div>
-            <div className="text-[10px] text-slate-500">Source: {location?.source || 'Verified Driver GPS'}</div>
-          </div>
-        </Tooltip>
-      </Marker>
-    </MapContainer>
-  );
-}
-
-function isThisStopActive(isAtThisStop: boolean, isNext: boolean): number {
-  if (isAtThisStop) return 11;
-  if (isNext) return 10;
-  return 7;
 }

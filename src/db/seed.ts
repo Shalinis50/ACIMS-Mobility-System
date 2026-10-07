@@ -1,9 +1,6 @@
 import { db } from './index.ts';
 import { eq } from 'drizzle-orm';
 import {
-  buses,
-  busRoutes,
-  busStops,
   campusLocations,
   campusPaths,
   profiles,
@@ -15,72 +12,9 @@ import {
 import { REC_BUILDINGS, REC_CAMPUS_STOPS, REC_POINTS_OF_INTEREST, REC_CAMPUS_PATHS } from '../../artifacts/api-server/src/services/campusData.ts';
 
 export async function seedDatabase() {
-  console.log('Seeding ACIMS PostgreSQL database...');
+  console.log('Seeding ACIMS campus map (college fleet comes from official REC Transport)...');
 
-  // 1. Seed Routes
-  const initialRoutes = [
-    { id: 'route-bus-18', routeName: 'Metro Connector Feeder', routeCode: '18', active: true },
-    { id: 'route-bus-12', routeName: 'Campus Loop A', routeCode: '12', active: true },
-    { id: 'route-bus-4b', routeName: 'Engineering Express', routeCode: '4B', active: true },
-    { id: 'route-bus-7', routeName: 'North Campus Shuttle', routeCode: '7', active: true },
-    { id: 'route-bus-21', routeName: 'South Perimeter Circle', routeCode: '21', active: true },
-  ];
-
-  for (const r of initialRoutes) {
-    await db.insert(busRoutes).values(r).onConflictDoNothing();
-  }
-
-  // 2. Seed Stops
-  const initialStops = [
-    // Route 18
-    { id: 'metro-central', routeId: 'route-bus-18', stopName: 'Metro Central Station', latitude: 12.9249, longitude: 80.1275, sequenceNumber: 1 },
-    { id: 'jb-estate', routeId: 'route-bus-18', stopName: 'JB Estate', latitude: 12.9272, longitude: 80.1302, sequenceNumber: 2 },
-    { id: 'ponnu', routeId: 'route-bus-18', stopName: 'Ponnu', latitude: 12.9301, longitude: 80.1336, sequenceNumber: 3 },
-    { id: 'ramratna', routeId: 'route-bus-18', stopName: 'Ramratna', latitude: 12.9338, longitude: 80.1368, sequenceNumber: 4 },
-    { id: 'med-sciences', routeId: 'route-bus-18', stopName: 'Medical Sciences Center', latitude: 12.9372, longitude: 80.1396, sequenceNumber: 5 },
-
-    // Route 12
-    { id: 'vandalur', routeId: 'route-bus-12', stopName: 'Vandalur Transit Hub', latitude: 12.8912, longitude: 80.0815, sequenceNumber: 1 },
-    { id: 'perungalathur', routeId: 'route-bus-12', stopName: 'Perungalathur Junction', latitude: 12.9042, longitude: 80.0965, sequenceNumber: 2 },
-    { id: 'tambaram', routeId: 'route-bus-12', stopName: 'Tambaram Terminal', latitude: 12.9254, longitude: 80.1198, sequenceNumber: 3 },
-    { id: 'chromepet', routeId: 'route-bus-12', stopName: 'Chromepet Station Gate', latitude: 12.9515, longitude: 80.1412, sequenceNumber: 4 },
-    { id: 'quad', routeId: 'route-bus-12', stopName: 'Academic Quad', latitude: 12.9734, longitude: 80.1589, sequenceNumber: 5 },
-
-    // Route 4B
-    { id: 'north-residence', routeId: 'route-bus-4b', stopName: 'North Residence Complex', latitude: 12.9421, longitude: 80.1245, sequenceNumber: 1 },
-    { id: 'bio-center', routeId: 'route-bus-4b', stopName: 'Bio-Engineering Center', latitude: 12.9375, longitude: 80.1292, sequenceNumber: 2 },
-    { id: 'nano-hub', routeId: 'route-bus-4b', stopName: 'Nano Research Facility', latitude: 12.9318, longitude: 80.1345, sequenceNumber: 3 },
-    { id: 'innovation-park', routeId: 'route-bus-4b', stopName: 'Tech & Innovation Park', latitude: 12.9262, longitude: 80.1415, sequenceNumber: 4 },
-
-    // Route 7
-    { id: 'hostel-village', routeId: 'route-bus-7', stopName: 'Hostel Village', latitude: 12.9145, longitude: 80.1122, sequenceNumber: 1 },
-    { id: 'athletics', routeId: 'route-bus-7', stopName: 'Athletic Pavilion', latitude: 12.9182, longitude: 80.1165, sequenceNumber: 2 },
-    { id: 'library', routeId: 'route-bus-7', stopName: 'Central Library & Union', latitude: 12.9221, longitude: 80.1215, sequenceNumber: 3 },
-
-    // Route 21
-    { id: 'south-lot', routeId: 'route-bus-21', stopName: 'South Commuter Lot', latitude: 12.9015, longitude: 80.0935, sequenceNumber: 1 },
-    { id: 'faculty-enclave', routeId: 'route-bus-21', stopName: 'Faculty Enclave', latitude: 12.9085, longitude: 80.1012, sequenceNumber: 2 },
-    { id: 'auditorium', routeId: 'route-bus-21', stopName: 'Main Auditorium', latitude: 12.9152, longitude: 80.1095, sequenceNumber: 3 },
-  ];
-
-  for (const s of initialStops) {
-    await db.insert(busStops).values(s).onConflictDoNothing();
-  }
-
-  // 3. Seed Buses
-  const initialBuses = [
-    { id: 'bus-18', busNumber: '18', registrationNumber: 'TN-11-AC-1018', routeId: 'route-bus-18', driverId: 'driver-rajesh', active: true },
-    { id: 'bus-12', busNumber: '12', registrationNumber: 'TN-11-AC-1012', routeId: 'route-bus-12', driverId: 'driver-arun', active: true },
-    { id: 'bus-4b', busNumber: '4B', registrationNumber: 'TN-11-AC-1044', routeId: 'route-bus-4b', driverId: 'driver-suresh', active: true },
-    { id: 'bus-7', busNumber: '7', registrationNumber: 'TN-11-AC-1007', routeId: 'route-bus-7', driverId: 'driver-venkat', active: true },
-    { id: 'bus-21', busNumber: '21', registrationNumber: 'TN-11-AC-1021', routeId: 'route-bus-21', driverId: 'driver-karthik', active: true },
-  ];
-
-  for (const b of initialBuses) {
-    await db.insert(buses).values(b).onConflictDoNothing();
-  }
-
-  // 4. Seed Campus Locations
+  // Campus locations
   for (const bldg of REC_BUILDINGS) {
     await db.insert(campusLocations).values({
       id: bldg.id,
@@ -169,14 +103,10 @@ export async function seedDatabase() {
         await db.insert(students).values({
           profileId: ins[0].id,
           registerNumber: '2024-CSD-014',
-          assignedBusId: 'bus-12',
-          assignedRouteId: 'route-bus-12',
-          pickupStopId: 'tambaram',
         });
       } else if (p.role === 'DRIVER') {
         await db.insert(drivers).values({
           profileId: ins[0].id,
-          assignedBusId: p.userId === 'driver-arun' ? 'bus-12' : 'bus-18',
         });
       }
     }

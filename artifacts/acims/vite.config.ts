@@ -25,6 +25,7 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   root: path.resolve(import.meta.dirname),
+  envDir: path.resolve(import.meta.dirname, '..', '..'),
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist'),
     emptyOutDir: true,
@@ -34,7 +35,8 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: true,
     fs: {
-      strict: true,
+      strict: false,
+      allow: [path.resolve(import.meta.dirname, '..', '..')],
     },
   },
   preview: {

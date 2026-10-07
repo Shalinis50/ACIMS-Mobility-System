@@ -21,6 +21,7 @@ import {
   Layers,
   HelpCircle,
 } from 'lucide-react';
+import { Link } from 'wouter';
 import { PageHeading } from '@/components/acims-ui';
 import { useNetworkStatus } from '@/hooks/use-network';
 
@@ -80,11 +81,22 @@ interface MissedBusAlternative {
 }
 
 const PRESETS = [
-  { start: 'Tambaram', destination: 'Chennai Beach', label: 'Tambaram ↔ Chennai Beach (Suburban EMU)' },
-  { start: 'Airport', destination: 'Wimco Nagar', label: 'Airport ↔ Wimco Nagar (CMRL Blue Line)' },
-  { start: 'Tambaram', destination: 'Broadway', label: 'Tambaram ↔ Broadway (MTC 500 / 29A)' },
-  { start: 'Thandalam', destination: 'Poonamallee', label: 'Thandalam (REC) ↔ Poonamallee (MTC Bus)' },
+  { start: 'Tambaram', destination: 'Thandalam', label: 'Tambaram → Thandalam (REC)' },
+  { start: 'Poonamallee', destination: 'Thandalam', label: 'Poonamallee → Thandalam (REC)' },
+  { start: 'Avadi', destination: 'Thandalam', label: 'Avadi → Thandalam (REC)' },
+  { start: 'Avadi', destination: 'Poonamallee', label: 'Avadi → Poonamallee' },
+  { start: 'Velachery', destination: 'Thandalam', label: 'Velachery → Thandalam (REC)' },
 ];
+
+type CorridorPreview = {
+  label: string;
+  start: string;
+  destination: string;
+  routeNumber?: string;
+  durationMinutes?: number;
+  boardingTime?: string;
+  count: number;
+};
 
 export default function PublicTransportPage() {
   const { isOnline } = useNetworkStatus();
@@ -94,7 +106,8 @@ export default function PublicTransportPage() {
 
   // Journey Search State
   const [start, setStart] = useState('Tambaram');
-  const [destination, setDestination] = useState('Chennai Beach');
+  const [destination, setDestination] = useState('Thandalam');
+  const [corridorPreviews, setCorridorPreviews] = useState<CorridorPreview[]>([]);
   const [agencyFilter, setAgencyFilter] = useState('ALL');
   const [journeys, setJourneys] = useState<TransitJourneyOption[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -205,11 +218,8 @@ export default function PublicTransportPage() {
     );
   };
 
-  // Trigger Missed Bus Assistant
-  const handleMissedBusCheck = async () => {
+  const fetchMissedBusAlternatives = async (lat: number, lon: number) => {
     setIsCheckingMissedBus(true);
-    const lat = userCoords?.lat || 13.0084; // REC Thandalam
-    const lon = userCoords?.lon || 80.0033;
     try {
       const res = await fetch(`/api/transit/missed-bus-alternatives?lat=${lat}&lon=${lon}`);
       if (res.ok) {
@@ -221,41 +231,80 @@ export default function PublicTransportPage() {
     }
   };
 
-  // Run initial searches on mount
+  const handleMissedBusCheck = async () => {
+    const lat = userCoords?.lat ?? 13.0084;
+    const lon = userCoords?.lon ?? 80.0033;
+    await fetchMissedBusAlternatives(lat, lon);
+  };
+
   useEffect(() => {
-    handleJourneySearch('Tambaram', 'Chennai Beach');
-    handleRouteSearch('29A');
-    handleLocateMe();
+    fetch('/api/transit/rec-corridors')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: Array<{ preset: typeof PRESETS[number]; options: TransitJourneyOption[] }>) => {
+        setCorridorPreviews(
+          rows.map((row) => {
+            const top = row.options[0];
+            return {
+              label: row.preset.label,
+              start: row.preset.start,
+              destination: row.preset.destination,
+              count: row.options.length,
+              routeNumber: top?.routeNumber,
+              durationMinutes: top?.durationMinutes,
+              boardingTime: top?.boardingTime,
+            };
+          }),
+        );
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('missed') !== '1') return;
+
+    setActiveTab('missed_bus');
+    if (!navigator.geolocation) {
+      void fetchMissedBusAlternatives(13.0084, 80.0033);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        setUserCoords(coords);
+        void fetchMissedBusAlternatives(coords.lat, coords.lon);
+      },
+      () => {
+        void fetchMissedBusAlternatives(13.0084, 80.0033);
+      },
+      { timeout: 7000 },
+    );
   }, []);
 
   return (
     <div className="page-in space-y-6">
       <PageHeading
-        eyebrow="Chennai Public Transport Layer"
-        title="Real Chennai Public Transit"
-        description="Authoritative schedules and network data for Metropolitan Transport Corporation (MTC) buses, Chennai Metro (CMRL), and Southern Railway suburban rail."
+        eyebrow="Backup commute"
+        title="Public transport"
+        description="If you miss the college bus, plan MTC, metro, or suburban rail from where you are now."
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="flex items-center gap-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
-              <Database size={13} />
-              <span>4,627 Real Routes Loaded</span>
-            </span>
-            <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
-              <CheckCircle2 size={13} />
-              <span>CUMTA / MTC GTFS Verified</span>
-            </span>
-          </div>
+          <Link
+            href="/rec-routes"
+            className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-bold hover:bg-muted"
+          >
+            <RouteIcon size={13} />
+            <span>REC city bus route map</span>
+          </Link>
         }
       />
 
       {/* Navigation Mode Tabs */}
       <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
         {[
-          { id: 'search', label: 'Journey Search & Timetables', icon: Search },
-          { id: 'nearby', label: 'Nearby Real Stops & Stations', icon: LocateFixed },
-          { id: 'routes', label: 'MTC & Metro Route Directory', icon: RouteIcon },
-          { id: 'missed_bus', label: 'Missed Bus Assistant', icon: AlertTriangle },
-          { id: 'provenance', label: 'Data Provenance & Source', icon: Database },
+          { id: 'missed_bus', label: 'Missed college bus', icon: AlertTriangle },
+          { id: 'nearby', label: 'Near me', icon: LocateFixed },
+          { id: 'search', label: 'Plan a trip', icon: Search },
+          { id: 'routes', label: 'Route directory', icon: RouteIcon },
         ].map((tab) => {
           const Icon = tab.icon;
           return (
@@ -289,22 +338,35 @@ export default function PublicTransportPage() {
           {/* Quick Presets */}
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-4">
             <span className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground mr-1">
-              Common Corridors:
+              REC campus corridors:
             </span>
-            {PRESETS.map((p) => (
-              <button
-                key={p.label}
-                type="button"
-                onClick={() => {
-                  setStart(p.start);
-                  setDestination(p.destination);
-                  handleJourneySearch(p.start, p.destination);
-                }}
-                className="rounded-lg border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-muted"
-              >
-                {p.label}
-              </button>
-            ))}
+            {PRESETS.map((p) => {
+              const preview = corridorPreviews.find(
+                (c) => c.start === p.start && c.destination === p.destination,
+              );
+              return (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => {
+                    setStart(p.start);
+                    setDestination(p.destination);
+                    handleJourneySearch(p.start, p.destination);
+                  }}
+                  className="flex max-w-full flex-col items-start rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-muted"
+                >
+                  <span>{p.label}</span>
+                  {preview && preview.count > 0 ? (
+                    <span className="mt-0.5 text-[10px] font-medium text-muted-foreground">
+                      MTC {preview.routeNumber} · ~{preview.durationMinutes} min
+                      {preview.boardingTime ? ` · dep ${preview.boardingTime.slice(0, 5)}` : ''}
+                    </span>
+                  ) : (
+                    <span className="mt-0.5 text-[10px] font-medium text-muted-foreground">Tap to load schedule</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           {/* Search Inputs */}
@@ -379,7 +441,7 @@ export default function PublicTransportPage() {
               <BusFront size={28} className="mx-auto text-muted-foreground" />
               <div className="mt-2 text-sm font-bold text-foreground">No direct schedule found for this corridor</div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Try searching for main hubs such as &ldquo;Tambaram&rdquo;, &ldquo;Beach&rdquo;, &ldquo;Broadway&rdquo;, or &ldquo;Poonamallee&rdquo;.
+                Try REC corridors: Tambaram, Poonamallee, Avadi, or Velachery → Thandalam.
               </p>
             </div>
           ) : (

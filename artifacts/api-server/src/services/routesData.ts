@@ -390,7 +390,106 @@ const routeBus21: RouteDefinition = {
   averageSpeedKmh: 22,
 };
 
+const mtc21gWaypoints: Coordinate[] = [
+  { latitude: 12.9249, longitude: 80.1275 }, // Tambaram Terminal
+  { latitude: 12.9516, longitude: 80.1462 }, // Chromepet
+  { latitude: 13.0067, longitude: 80.2206 }, // Guindy
+  { latitude: 13.0827, longitude: 80.2707 }, // Broadway / Central
+];
+const mtc21gPath = interpolateWaypoints(mtc21gWaypoints, 8);
+const mtc21gCumulative = calculateCumulativeDistances(mtc21gPath);
+
+const routeMtc21g: RouteDefinition = {
+  id: "route-MTC_21G",
+  routeNumber: "MTC_21G",
+  name: "MTC 21G Express Corridor",
+  origin: "Tambaram Terminal",
+  destination: "Broadway / Central",
+  stops: [
+    {
+      id: "mtc21g-tambaram",
+      name: "Tambaram Terminal",
+      sequence: 0,
+      pathIndex: 0,
+      latitude: mtc21gPath[0].latitude,
+      longitude: mtc21gPath[0].longitude,
+      minutesFromPrevious: 0,
+    },
+    {
+      id: "mtc21g-chromepet",
+      name: "Chromepet Station",
+      sequence: 1,
+      pathIndex: 8,
+      latitude: mtc21gPath[8].latitude,
+      longitude: mtc21gPath[8].longitude,
+      minutesFromPrevious: 6,
+    },
+    {
+      id: "mtc21g-guindy",
+      name: "Guindy Transit Hub",
+      sequence: 2,
+      pathIndex: 16,
+      latitude: mtc21gPath[16].latitude,
+      longitude: mtc21gPath[16].longitude,
+      minutesFromPrevious: 10,
+    },
+    {
+      id: "mtc21g-broadway",
+      name: "Broadway / Central",
+      sequence: 3,
+      pathIndex: 24,
+      latitude: mtc21gPath[24].latitude,
+      longitude: mtc21gPath[24].longitude,
+      minutesFromPrevious: 12,
+    },
+  ],
+  path: mtc21gPath,
+  cumulativeDistances: mtc21gCumulative,
+  totalDistanceKm: Number(mtc21gCumulative[mtc21gCumulative.length - 1].toFixed(2)),
+  averageSpeedKmh: 26,
+};
+
+const routeMtc27b: RouteDefinition = {
+  id: "route-MTC_27B",
+  routeNumber: "MTC_27B",
+  name: "MTC 27B Koyambedu Link",
+  origin: "CMBT Koyambedu",
+  destination: "Anna Square",
+  stops: [
+    {
+      id: "mtc27b-cmbt",
+      name: "CMBT Koyambedu",
+      sequence: 0,
+      pathIndex: 0,
+      latitude: 13.0694,
+      longitude: 80.2058,
+      minutesFromPrevious: 0,
+    },
+    {
+      id: "mtc27b-anna",
+      name: "Anna Square",
+      sequence: 1,
+      pathIndex: 8,
+      latitude: 13.0658,
+      longitude: 80.2848,
+      minutesFromPrevious: 15,
+    },
+  ],
+  path: interpolateWaypoints(
+    [
+      { latitude: 13.0694, longitude: 80.2058 },
+      { latitude: 13.0658, longitude: 80.2848 },
+    ],
+    8
+  ),
+  cumulativeDistances: [0, 8.5],
+  totalDistanceKm: 8.5,
+  averageSpeedKmh: 24,
+};
+
 const routeRegistry: Record<string, RouteDefinition> = {
+  "route-MTC_21G": routeMtc21g,
+  "route-MTC_27B": routeMtc27b,
   "route-bus-18": routeBus18,
   "route-bus-12": routeBus12,
   "route-bus-4b": routeBus4b,
@@ -399,6 +498,8 @@ const routeRegistry: Record<string, RouteDefinition> = {
 };
 
 const busToRouteMap: Record<string, string> = {
+  "MTC_21G": "route-MTC_21G",
+  "MTC_27B": "route-MTC_27B",
   "bus-18": "route-bus-18",
   "bus-12": "route-bus-12",
   "bus-4b": "route-bus-4b",
@@ -411,8 +512,21 @@ export function getRouteById(routeId: string): RouteDefinition | undefined {
 }
 
 export function getRouteForBus(busId: string): RouteDefinition {
-  const routeId = busToRouteMap[busId] || "route-bus-18";
-  return routeRegistry[routeId] || routeBus18;
+  const routeId = busToRouteMap[busId];
+  const known = routeId ? routeRegistry[routeId] : undefined;
+  if (known) return known;
+  return {
+    id: busId,
+    routeNumber: "",
+    name: "College bus",
+    origin: "",
+    destination: "",
+    stops: [],
+    path: [],
+    cumulativeDistances: [0],
+    totalDistanceKm: 0,
+    averageSpeedKmh: 22,
+  };
 }
 
 export function getAllRoutes(): RouteDefinition[] {

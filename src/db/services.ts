@@ -1,4 +1,4 @@
-import { db, query } from './index.ts';
+import { db } from './index.ts';
 import {
   buses,
   busRoutes,
@@ -33,100 +33,133 @@ export async function getOrCreateProfile(
   role: 'STUDENT' | 'DRIVER' | 'ADMIN' | 'PARENT' = 'STUDENT'
 ) {
   try {
-    const existing = await query<any>(
-      `SELECT * FROM profiles WHERE user_id = $1 LIMIT 1;`,
-      [userId]
-    );
+    const existing = await db.select().from(profiles).where(eq(profiles.userId, userId));
     if (existing.length > 0) {
       return existing[0];
     }
 
-    const inserted = await query<any>(
-      `INSERT INTO profiles (user_id, email, name, role) VALUES ($1, $2, $3, $4) RETURNING *;`,
-      [userId, email, name, role]
-    );
+    const inserted = await db
+      .insert(profiles)
+      .values({
+        userId,
+        email,
+        name,
+        role,
+      })
+      .returning();
 
     const newProfile = inserted[0];
 
     // Create corresponding role table entry
     if (role === 'STUDENT') {
-      await query(
-        `INSERT INTO students (profile_id, register_number, assigned_bus_id, assigned_route_id, pickup_stop_id)
-         VALUES ($1, $2, $3, $4, $5);`,
-        [
-          newProfile.id,
-          userId.startsWith('student-') ? userId : `REG-${newProfile.id}`,
-          'bus-12',
-          'route-bus-12',
-          'tambaram',
-        ]
-      ).catch(() => {});
+      let assignedBusId: string | null = null;
+      let assignedRouteId: string | null = null;
+      let pickupStopId: string | null = null;
+      try {
+        const { getMvpCollegeRoute, isMvpCollegeRouteActive } = await import(
+          '../../artifacts/api-server/src/services/mvpCollegeRouteService.ts'
+        );
+        if (isMvpCollegeRouteActive()) {
+          const mvp = getMvpCollegeRoute();
+          assignedBusId = mvp.busId;
+          assignedRouteId = mvp.routeId;
+        }
+      } catch {
+        /* leave unassigned until student picks an official pickup */
+      }
+      await db.insert(students).values({
+        profileId: newProfile.id,
+        registerNumber: userId.startsWith('student-') ? userId : `REG-${newProfile.id}`,
+        assignedBusId,
+        assignedRouteId,
+        pickupStopId,
+      });
     } else if (role === 'DRIVER') {
-      await query(
-        `INSERT INTO drivers (profile_id, assigned_bus_id) VALUES ($1, $2);`,
-        [newProfile.id, 'bus-12']
-      ).catch(() => {});
+      await db.insert(drivers).values({
+        profileId: newProfile.id,
+      });
     }
 
     return newProfile;
   } catch (error) {
     console.error('Error in getOrCreateProfile:', error);
-    return {
-      id: 1,
-      userId,
-      email,
-      name,
-      phone: null,
-      role,
-      createdAt: new Date(),
-    };
+    throw new Error('Database profile operation failed', { cause: error });
   }
 }
 
 export async function getProfileWithDetails(userId: string) {
   try {
-    const userProfiles = await query<any>(
-      `SELECT * FROM profiles WHERE user_id = $1 LIMIT 1;`,
-      [userId]
-    );
+    const userProfiles = await db.select().from(profiles).where(eq(profiles.userId, userId));
     if (userProfiles.length === 0) return null;
 
     const profile = userProfiles[0];
     let details: any = { ...profile };
 
     if (profile.role === 'STUDENT') {
-      const studentRecs = await query<any>(
-        `SELECT * FROM students WHERE profile_id = $1 LIMIT 1;`,
-        [profile.id]
-      );
+      const studentRecs = await db.select().from(students).where(eq(students.profileId, profile.id));
       if (studentRecs.length > 0) {
-        details = { ...details, ...studentRecs[0] };
+        const s = studentRecs[0];
+        details = {
+          ...details,
+          registerNumber: s.registerNumber,
+          pickupStopId: s.pickupStopId,
+          assignedBusId: s.assignedBusId,
+          assignedRouteId: s.assignedRouteId,
+        };
       }
     } else if (profile.role === 'DRIVER') {
-      const driverRecs = await query<any>(
-        `SELECT * FROM drivers WHERE profile_id = $1 LIMIT 1;`,
-        [profile.id]
-      );
+      const driverRecs = await db.select().from(drivers).where(eq(drivers.profileId, profile.id));
       if (driverRecs.length > 0) {
-        details = { ...details, ...driverRecs[0] };
+        const d = driverRecs[0];
+        details = {
+          ...details,
+          assignedBusId: d.assignedBusId,
+        };
       }
     }
 
     return details;
   } catch (error) {
     console.error('Error in getProfileWithDetails:', error);
-    return null;
+    throw new Error('Database profile lookup failed', { cause: error });
   }
 }
 
 // -------------------------------------------------------------
 // BUSES & ROUTES
 // -------------------------------------------------------------
+export async function getStudentUserIdsForBus(busId: string): Promise<string[]> {
+  try {
+    const studentRows = await db.select().from(students).where(eq(students.assignedBusId, busId));
+    const userIds: string[] = [];
+    for (const row of studentRows) {
+      const prof = await db.select().from(profiles).where(eq(profiles.id, row.profileId)).limit(1);
+      if (prof[0]?.userId) userIds.push(prof[0].userId);
+      else if (row.registerNumber) userIds.push(row.registerNumber);
+    }
+    return userIds;
+  } catch {
+    return [];
+  }
+}
+
+export async function bindStudentPickupByUserId(userId: string, pickupPointId: string) {
+  const profile = await getProfileWithDetails(userId);
+  if (!profile?.id) return null;
+  const updated = await db
+    .update(students)
+    .set({ pickupStopId: pickupPointId })
+    .where(eq(students.profileId, profile.id))
+    .returning();
+  return updated[0] ?? null;
+}
+
 export async function getDbBuses() {
   try {
-    const rows = await query<any>(`SELECT * FROM buses ORDER BY bus_number ASC;`);
-    if (rows.length > 0) return rows;
-    return await db.select().from(buses).orderBy(buses.busNumber);
+    const { DUMMY_BUS_IDS } = await import("../../artifacts/api-server/src/services/recTransport/collegeFleetService.ts");
+    const rows = await db.select().from(buses).orderBy(buses.busNumber);
+    const official = rows.filter((b) => !(DUMMY_BUS_IDS as readonly string[]).includes(b.id));
+    return official.length > 0 ? official : rows;
   } catch (error) {
     console.error('Error fetching buses from DB:', error);
     return [];
@@ -135,8 +168,6 @@ export async function getDbBuses() {
 
 export async function getDbBusById(busId: string) {
   try {
-    const rows = await query<any>(`SELECT * FROM buses WHERE id = $1 LIMIT 1;`, [busId]);
-    if (rows.length > 0) return rows[0];
     const result = await db.select().from(buses).where(eq(buses.id, busId));
     return result[0] || null;
   } catch (error) {
@@ -184,7 +215,10 @@ export async function updateDbBus(busId: string, updates: Partial<{
 
 export async function getDbRoutes() {
   try {
-    return await db.select().from(busRoutes).orderBy(busRoutes.routeCode);
+    const { DUMMY_ROUTE_IDS } = await import("../../artifacts/api-server/src/services/recTransport/collegeFleetService.ts");
+    const rows = await db.select().from(busRoutes).orderBy(busRoutes.routeCode);
+    const official = rows.filter((r) => !(DUMMY_ROUTE_IDS as readonly string[]).includes(r.id));
+    return official.length > 0 ? official : rows;
   } catch (error) {
     console.error('Error fetching routes:', error);
     return [];
@@ -247,16 +281,41 @@ export async function updateDbRoute(routeId: string, updates: Partial<{
 
 export async function getDbStopsByRoute(routeId: string) {
   try {
-    const rows = await query<any>(
-      `SELECT * FROM bus_stops WHERE route_id = $1 ORDER BY sequence_number ASC;`,
-      [routeId]
-    );
-    if (rows.length > 0) return rows;
-    return await db
+    const directStops = await db
       .select()
       .from(busStops)
       .where(eq(busStops.routeId, routeId))
       .orderBy(busStops.sequenceNumber);
+    if (directStops.length > 0) {
+      return directStops;
+    }
+
+    const { recTransportStops } = await import("./schema.ts");
+    const recStops = await db
+      .select()
+      .from(recTransportStops)
+      .where(and(eq(recTransportStops.routeId, routeId), eq(recTransportStops.active, true)))
+      .orderBy(recTransportStops.sequenceNumber);
+
+    if (recStops.length > 0) {
+      // REC Thandalam Campus destination coordinates (13.0087, 80.0038)
+      const total = Math.max(1, recStops.length - 1);
+      return recStops.map((s, idx) => {
+        const progress = idx / total;
+        const fallbackLat = Number((13.0650 - progress * (13.0650 - 13.0087)).toFixed(6));
+        const fallbackLng = Number((80.1950 - progress * (80.1950 - 80.0038)).toFixed(6));
+        return {
+          id: s.id,
+          routeId: s.routeId,
+          stopName: s.stopName,
+          latitude: typeof s.latitude === "number" ? s.latitude : fallbackLat,
+          longitude: typeof s.longitude === "number" ? s.longitude : fallbackLng,
+          sequenceNumber: s.sequenceNumber,
+        };
+      });
+    }
+
+    return [];
   } catch (error) {
     console.error('Error fetching stops:', error);
     return [];
@@ -282,43 +341,38 @@ export async function recordBusLocation(location: {
   try {
     const recordedDate = location.recordedAt ? new Date(location.recordedAt) : new Date();
     const receivedDate = location.receivedAt ? new Date(location.receivedAt) : new Date();
-    const recordedIso = recordedDate.toISOString();
-    const receivedIso = receivedDate.toISOString();
 
-    const rows = await query<any>(
-      `INSERT INTO bus_locations (bus_id, driver_id, latitude, longitude, accuracy, altitude, altitude_accuracy, speed, heading, recorded_at, received_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING *;`,
-      [
-        location.busId,
-        location.driverId || null,
-        location.latitude,
-        location.longitude,
-        location.accuracy ?? null,
-        location.altitude ?? null,
-        location.altitudeAccuracy ?? null,
-        location.speed ?? null,
-        location.heading ?? null,
-        recordedIso,
-        receivedIso,
-      ]
-    );
+    const inserted = await db
+      .insert(busLocations)
+      .values({
+        busId: location.busId,
+        driverId: location.driverId || null,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: typeof location.accuracy === "number" ? location.accuracy : null,
+        altitude: typeof location.altitude === "number" ? location.altitude : null,
+        altitudeAccuracy: typeof location.altitudeAccuracy === "number" ? location.altitudeAccuracy : null,
+        speed: typeof location.speed === "number" ? location.speed : null,
+        heading: typeof location.heading === "number" ? location.heading : null,
+        recordedAt: recordedDate,
+        receivedAt: receivedDate,
+        createdAt: new Date(),
+      })
+      .returning();
 
-    await query(
-      `UPDATE tracking_sessions SET last_location_at = $1 WHERE bus_id = $2 AND status = 'ACTIVE'`,
-      [recordedIso, location.busId]
-    ).catch(() => {});
+    // Touch active tracking session last_location_at
+    await db
+      .update(trackingSessions)
+      .set({ lastLocationAt: recordedDate })
+      .where(
+        and(
+          eq(trackingSessions.busId, location.busId),
+          eq(trackingSessions.status, 'ACTIVE')
+        )
+      )
+      .catch(() => {});
 
-    return rows[0] || {
-      busId: location.busId,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      speed: location.speed,
-      heading: location.heading,
-      accuracy: location.accuracy,
-      recordedAt: recordedIso,
-      receivedAt: receivedIso,
-    };
+    return inserted[0];
   } catch (error) {
     console.error('Error recording bus location:', error);
     throw new Error('Failed to save bus location', { cause: error });
@@ -327,11 +381,13 @@ export async function recordBusLocation(location: {
 
 export async function getLatestBusLocation(busId: string) {
   try {
-    const rows = await query<any>(
-      `SELECT * FROM bus_locations WHERE bus_id = $1 ORDER BY recorded_at DESC LIMIT 1;`,
-      [busId]
-    );
-    return rows[0] || null;
+    const result = await db
+      .select()
+      .from(busLocations)
+      .where(eq(busLocations.busId, busId))
+      .orderBy(desc(busLocations.recordedAt))
+      .limit(1);
+    return result[0] || null;
   } catch (error) {
     console.error(`Error getting latest location for bus ${busId}:`, error);
     return null;
@@ -340,10 +396,12 @@ export async function getLatestBusLocation(busId: string) {
 
 export async function getRecentBusLocations(busId: string, limit = 50) {
   try {
-    return await query<any>(
-      `SELECT * FROM bus_locations WHERE bus_id = $1 ORDER BY recorded_at DESC LIMIT $2;`,
-      [busId, limit]
-    );
+    return await db
+      .select()
+      .from(busLocations)
+      .where(eq(busLocations.busId, busId))
+      .orderBy(desc(busLocations.recordedAt))
+      .limit(limit);
   } catch (error) {
     console.error(`Error getting recent locations for bus ${busId}:`, error);
     return [];
@@ -359,9 +417,19 @@ export async function startTrackingSession(busId: string, driverId: string) {
       .where(
         and(
           eq(trackingSessions.busId, busId),
-          eq(trackingSessions.status, 'ACTIVE')
+          or(
+            eq(trackingSessions.status, 'ACTIVE'),
+            eq(trackingSessions.status, 'PAUSED')
+          )
         )
       );
+
+    // Associate the bus with this active driver
+    await db
+      .update(buses)
+      .set({ driverId, active: true })
+      .where(eq(buses.id, busId))
+      .catch(() => {});
 
     const sessionId = `session-${busId}-${Date.now()}`;
     const inserted = await db
@@ -478,6 +546,17 @@ export async function verifyDriverBusAssignment(driverId: string, busId: string)
     if (!bus) return false;
     if (bus.driverId === driverId) return true;
 
+    // Check if another driver is actively broadcasting on this bus right now
+    const activeSession = await getBusTrackingSession(busId);
+    if (
+      activeSession &&
+      activeSession.status === 'ACTIVE' &&
+      activeSession.driverId &&
+      activeSession.driverId !== driverId
+    ) {
+      return false;
+    }
+
     // Also check profiles and drivers table
     const profile = await db
       .select()
@@ -491,12 +570,16 @@ export async function verifyDriverBusAssignment(driverId: string, busId: string)
         .from(drivers)
         .where(eq(drivers.profileId, profile[0].id))
         .limit(1);
-      if (driverRecord.length > 0 && driverRecord[0].assignedBusId === busId) {
-        return true;
+      if (driverRecord.length > 0) {
+        if (!driverRecord[0].assignedBusId || driverRecord[0].assignedBusId === busId) {
+          return true;
+        }
+        return false;
       }
     }
 
-    return false;
+    // Allow authenticated driver to claim uncontested bus on trip start
+    return true;
   } catch {
     return false;
   }

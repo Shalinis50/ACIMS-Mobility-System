@@ -7,13 +7,11 @@ import {
   Compass,
   LocateFixed,
   MapPin,
-  ShieldCheck,
   Sparkles,
-  UsersRound,
   WifiOff,
 } from 'lucide-react';
 import { Link } from 'wouter';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getGetBusLocationQueryKey,
   getGetBusQueryKey,
@@ -28,7 +26,6 @@ import {
   ErrorState,
   formatUpdatedAt,
   PageHeading,
-  useSelectedBusId,
 } from '@/components/acims-ui';
 import { useNetworkStatus } from '@/hooks/use-network';
 import {
@@ -39,19 +36,28 @@ import {
 } from '@/lib/offline-storage';
 import { PersonalizedPublicTransportCard } from '@/components/PersonalizedPublicTransportCard';
 import { useAuth } from '@/lib/auth-context';
+import { studentMobilityHeaders } from '@/lib/mobilityApi';
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
-  const rawSelectedBusId = useSelectedBusId();
-  const { profile } = useAuth();
-  const selectedBusId = profile?.assignedBusId || rawSelectedBusId || 'bus-12';
+  const { profile, token, refreshProfile } = useAuth();
+
+  const collegeRouteQuery = useQuery({
+    queryKey: ['mvp', 'college-route'],
+    queryFn: async () => {
+      const res = await fetch('/api/mvp/college-route');
+      if (!res.ok) return null;
+      return res.json() as Promise<{ busId: string; routeId: string; routeLabel: string }>;
+    },
+  });
+
+  const selectedBusId =
+    collegeRouteQuery.data?.busId || profile?.assignedBusId || 'bus-12';
   const { isOnline } = useNetworkStatus();
 
   // Student Real Device Location state
   const [deviceLocation, setDeviceLocation] = useState<{ latitude: number; longitude: number; accuracy?: number } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'prompt' | 'granted' | 'denied'>('prompt');
-  const [myQueueStatus, setMyQueueStatus] = useState<{ inQueue: boolean; queue: any } | null>(null);
-
   // Request Real Device GPS on load
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -86,17 +92,6 @@ export default function Dashboard() {
     );
   }, [profile?.userId]);
 
-  // Fetch student active queue
-  useEffect(() => {
-    const studentId = profile?.userId || 'student-20418';
-    fetch(`/api/queue/my-active?studentId=${studentId}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data) setMyQueueStatus(data);
-      })
-      .catch(() => {});
-  }, [profile?.userId, isOnline]);
-
   // Live bus fleet query
   const busesQuery = useListBuses({
     query: {
@@ -124,7 +119,7 @@ export default function Dashboard() {
       busNumber: match?.busNumber ?? '12',
       origin: match?.origin ?? 'Vandalur Transit Hub',
       destination: match?.destination ?? 'Academic Quad',
-      routeLabel: match?.routeLabel ?? 'Campus Loop A',
+      routeLabel: match?.routeLabel ?? 'College bus',
       capacity: snap?.capacity ?? 45,
       currentLocation: { latitude: 12.9161, longitude: 80.1119 },
       nextStop: snap?.lastStop ?? match?.stops?.[2]?.name ?? 'Tambaram Terminal',
@@ -138,6 +133,89 @@ export default function Dashboard() {
   }, [busesQuery.data, selectedBusId, offlineRoutes, snapshots]);
 
   const busId = activeBus?.id ?? '';
+  const pickupStopId = profile?.pickupStopId ?? '';
+  const routeId =
+    collegeRouteQuery.data?.routeId || profile?.assignedRouteId || activeBus?.routeId || '';
+
+  const pickupPointsQuery = useQuery({
+    queryKey: ['mobility', 'pickup-points', profile?.userId, profile?.assignedRouteId],
+    queryFn: async () => {
+      const res = await fetch('/api/student/pickup-point/options', {
+        headers: studentMobilityHeaders(token, profile),
+      });
+      if (!res.ok) {
+        const fallback = await fetch('/api/mobility/pickup-points');
+        if (!fallback.ok) throw new Error('pickup points');
+        return (await fallback.json()) as Array<{
+          id: string;
+          stopName: string;
+          routeId?: string;
+          scheduledTimeDisplay?: string | null;
+        }>;
+      }
+      return (await res.json()) as Array<{
+        id: string;
+        stopName: string;
+        routeId?: string;
+        scheduledTimeDisplay?: string | null;
+      }>;
+    },
+    enabled: isOnline,
+  });
+
+  const dailyShiftsQuery = useQuery({
+    queryKey: ['mobility', 'daily-shifts'],
+    queryFn: async () => {
+      const res = await fetch('/api/mobility/daily-shifts');
+      if (!res.ok) throw new Error('daily shifts');
+      return (await res.json()) as Array<{
+        shiftType: string;
+        name: string;
+        startTimeDisplay: string;
+        directionLabel: string;
+        busNumber: string;
+      }>;
+    },
+    enabled: isOnline,
+    refetchInterval: isOnline ? 60000 : false,
+  });
+
+  const pickupEtaQuery = useQuery({
+    queryKey: ['mobility', 'eta', profile?.userId, busId, pickupStopId],
+    queryFn: async () => {
+      const res = await fetch('/api/mobility/eta/pickup', {
+        headers: studentMobilityHeaders(token, profile),
+      });
+      if (!res.ok) throw new Error('pickup eta');
+      return (await res.json()) as {
+        etaMinutes: number;
+        pickupStopName: string;
+        formattedEta: string;
+        delay?: { delayMinutes: number; status: string };
+      };
+    },
+    enabled: isOnline && !!busId && !!profile?.userId && !!pickupStopId,
+    refetchInterval: isOnline ? 10000 : false,
+  });
+
+  const [pickupSaving, setPickupSaving] = useState(false);
+
+  const savePickupPoint = async (nextId: string) => {
+    const studentId = profile?.userId;
+    if (!studentId) return;
+    setPickupSaving(true);
+    try {
+      await fetch(`/api/mobility/students/${encodeURIComponent(studentId)}/pickup-point`, {
+        method: 'PUT',
+        headers: studentMobilityHeaders(token, profile),
+        body: JSON.stringify({ pickupPointId: nextId }),
+      });
+      await refreshProfile();
+      window.alert('Pickup point updated successfully.');
+    } finally {
+      setPickupSaving(false);
+    }
+  };
 
   const busQuery = useGetBus(busId, {
     query: {
@@ -211,13 +289,16 @@ export default function Dashboard() {
   const isStaleGps = (location as any)?.freshness === "STALE";
   const isUnavailable = !isLiveGps && !isStaleGps;
 
-  const rawEta = location?.etaMinutes ?? currentBus.etaMinutes ?? 0;
-  const etaDisplay = isUnavailable
+  const pickupEta = pickupEtaQuery.data;
+  const rawEta =
+    pickupEta?.etaMinutes ?? location?.etaMinutes ?? currentBus.etaMinutes ?? 0;
+  const etaDisplay = isUnavailable && !pickupEta
     ? '—'
     : rawEta === 0
     ? 'Arriving'
     : `${rawEta}`;
-  const isArriving = rawEta === 0 && !isUnavailable;
+  const isArriving = rawEta === 0 && (!isUnavailable || !!pickupEta);
+  const delayLabel = pickupEta?.delay?.status?.replace(/_/g, ' ');
 
   return (
     <div className="page-in max-w-4xl mx-auto space-y-6">
@@ -313,24 +394,58 @@ export default function Dashboard() {
         }
       />
 
-      {/* ACTIVE QUEUE STATUS BANNER (If student has a spot in line) */}
-      {myQueueStatus?.inQueue && (
-        <div className="rounded-2xl border border-accent/40 bg-accent/15 p-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent text-accent-foreground">
-              <UsersRound size={18} />
-            </span>
-            <div>
-              <div className="text-xs font-bold text-foreground">You are in the Boarding Queue</div>
-              <div className="text-xs text-muted-foreground">
-                Holding place <strong>#{myQueueStatus.queue?.queuePosition}</strong> for Bus #{myQueueStatus.queue?.busNumber} at {myQueueStatus.queue?.boardingStop}
+      {(dailyShiftsQuery.data?.length ?? 0) > 0 && (
+        <section className="rounded-2xl border border-border bg-card p-4 sm:p-5" data-testid="daily-shifts-card">
+          <h3 className="text-sm font-extrabold">Today&apos;s college buses</h3>
+          <div className="mt-3 space-y-3">
+            {dailyShiftsQuery.data?.map((shift) => (
+              <div key={shift.shiftType} className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs">
+                <div className="font-extrabold">
+                  {shift.shiftType === 'MORNING' ? '🌅' : '🌆'} {shift.name}
+                </div>
+                <div className="mt-1 text-muted-foreground">{shift.startTimeDisplay}</div>
+                <div className="text-muted-foreground">{shift.directionLabel}</div>
+                <div className="mt-1 font-bold">Bus: {shift.busNumber}</div>
               </div>
-            </div>
+            ))}
           </div>
-          <Link href="/queue" className="rounded-lg bg-accent px-3 py-1.5 text-xs font-extrabold text-accent-foreground hover:opacity-90">
-            View Queue
-          </Link>
-        </div>
+        </section>
+      )}
+
+      {(pickupPointsQuery.data?.length ?? 0) > 0 && (
+        <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-extrabold">
+              <MapPin size={16} className="text-primary" />
+              Official pickup point
+            </div>
+            <select
+              data-testid="select-pickup-point"
+              disabled={pickupSaving || !profile?.userId}
+              value={pickupStopId}
+              onChange={(e) => void savePickupPoint(e.target.value)}
+              className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-bold"
+            >
+              <option value="">Select official pickup point</option>
+              {(pickupPointsQuery.data ?? []).map((p) => {
+                const routeNo = p.routeId?.startsWith('rec-route-')
+                  ? p.routeId.slice('rec-route-'.length).toUpperCase()
+                  : '';
+                const label = [routeNo, p.stopName, p.scheduledTimeDisplay].filter(Boolean).join(' · ');
+                return (
+                  <option key={p.id} value={p.id}>{label || p.stopName}</option>
+                );
+              })}
+            </select>
+          </div>
+          {pickupEta?.pickupStopName && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              ETA to {pickupEta.pickupStopName}
+              {delayLabel ? ` · ${delayLabel}` : ''}
+              {pickupEta.delay?.delayMinutes ? ` (~${pickupEta.delay.delayMinutes} min)` : ''}
+            </p>
+          )}
+        </section>
       )}
 
       {/* MAIN SELECTED BUS CARD */}
@@ -452,23 +567,6 @@ export default function Dashboard() {
             <div className="mt-3">
               <div className="text-xs font-extrabold text-foreground">Live Map View</div>
               <p className="mt-0.5 text-[11px] text-muted-foreground">Track buses along campus routes</p>
-            </div>
-          </Link>
-
-          <Link
-            href="/queue"
-            data-testid="quick-action-queue"
-            className="group flex flex-col justify-between rounded-2xl border border-border bg-card p-4 transition hover:border-primary/40 hover:bg-muted/40"
-          >
-            <div className="flex items-center justify-between">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-secondary text-secondary-foreground">
-                <ShieldCheck size={18} />
-              </span>
-              <ArrowUpRight size={15} className="text-muted-foreground transition group-hover:text-foreground" />
-            </div>
-            <div className="mt-3">
-              <div className="text-xs font-extrabold text-foreground">Boarding Queue</div>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">Hold your spot for campus bus</p>
             </div>
           </Link>
 

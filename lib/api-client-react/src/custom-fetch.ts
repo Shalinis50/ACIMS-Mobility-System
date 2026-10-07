@@ -336,8 +336,13 @@ export async function customFetch<T = unknown>(
   }
 
   const headers = mergeHeaders(isRequest(input) ? input.headers : undefined, headersInit);
-  if (resolveUrl(input).includes("/api/admin/") && !headers.has("x-acims-role")) {
-    headers.set("x-acims-role", "admin");
+  if (resolveUrl(input).includes("/api/admin/")) {
+    if (!headers.has("x-acims-role")) {
+      headers.set("x-acims-role", "admin");
+    }
+    if (!headers.has("x-acims-user-id")) {
+      headers.set("x-acims-user-id", "admin-demo");
+    }
   }
 
   if (

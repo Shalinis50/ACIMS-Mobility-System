@@ -36,6 +36,8 @@ export const buses = pgTable("buses", {
   routeId: text("route_id"),
   driverId: text("driver_id"),
   active: boolean("active").notNull().default(true),
+  source: text("source").notNull().default("ADMIN"),
+  manuallyEdited: boolean("manually_edited").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -44,6 +46,12 @@ export const busRoutes = pgTable("bus_routes", {
   id: text("id").primaryKey(), // e.g. 'route-bus-18'
   routeName: text("route_name").notNull(),
   routeCode: text("route_code").notNull(),
+  startingTimeDisplay: text("starting_time_display"),
+  startingTime24: text("starting_time_24"),
+  campusArrivalDisplay: text("campus_arrival_display"),
+  campusArrival24: text("campus_arrival_24"),
+  source: text("source").notNull().default("ADMIN"),
+  manuallyEdited: boolean("manually_edited").notNull().default(false),
   active: boolean("active").notNull().default(true),
 });
 
@@ -55,6 +63,124 @@ export const busStops = pgTable("bus_stops", {
   latitude: doublePrecision("latitude").notNull(),
   longitude: doublePrecision("longitude").notNull(),
   sequenceNumber: integer("sequence_number").notNull(),
+});
+
+/** Official student pickup points (geofenced stops on a route). */
+export const officialPickupPoints = pgTable("official_pickup_points", {
+  id: text("id").primaryKey(),
+  routeId: text("route_id").notNull(),
+  stopName: text("stop_name").notNull(),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
+  sequenceNumber: integer("sequence_number").notNull(),
+  geofenceRadiusM: integer("geofence_radius_m").notNull().default(150),
+  /** Minutes from shift start when bus is expected at this stop (schedule profile). */
+  expectedOffsetMinutes: integer("expected_offset_minutes").notNull().default(0),
+  scheduledTimeDisplay: text("scheduled_time_display"),
+  scheduledTime24: text("scheduled_time_24"),
+  source: text("source").notNull().default("ADMIN"),
+  active: boolean("active").notNull().default(true),
+});
+
+/** Configurable operating shift (morning/evening slots; timings set by admin). */
+export const shifts = pgTable("shifts", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  shiftType: text("shift_type"), // MORNING | EVENING (canonical slots)
+  startTime: text("start_time"), // HH:MM 24h — unset until admin configures
+  endTime: text("end_time"),
+  direction: text("direction").notNull().default("TO_COLLEGE"), // TO_COLLEGE | FROM_COLLEGE
+  routeId: text("route_id"),
+  busId: text("bus_id"),
+  driverId: text("driver_id"),
+  operatingDays: text("operating_days").notNull().default("MON,TUE,WED,THU,FRI"),
+  active: boolean("active").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const shiftAssignments = pgTable("shift_assignments", {
+  id: text("id").primaryKey(),
+  shiftId: text("shift_id").notNull(),
+  busId: text("bus_id").notNull(),
+  driverId: text("driver_id").notNull(),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+/** Executed trip (shift instance) with lifecycle. */
+export const trips = pgTable(
+  "trips",
+  {
+    id: text("id").primaryKey(),
+    shiftId: text("shift_id"),
+    busId: text("bus_id").notNull(),
+    driverId: text("driver_id").notNull(),
+    routeId: text("route_id").notNull(),
+    trackingSessionId: text("tracking_session_id"),
+    status: text("status").notNull().default("SCHEDULED"), // SCHEDULED | STARTED | ACTIVE | COMPLETED | CANCELLED
+    scheduledStartAt: timestamp("scheduled_start_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    delayMinutes: integer("delay_minutes").notNull().default(0),
+    /** Snapshot of shift window when trip was scheduled/started (immutable for history). */
+    shiftStartSnapshot: text("shift_start_snapshot"),
+    shiftEndSnapshot: text("shift_end_snapshot"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("trips_bus_id_idx").on(table.busId),
+    index("trips_status_idx").on(table.status),
+    index("trips_shift_id_idx").on(table.shiftId),
+  ],
+);
+
+/** Administrative configuration and assignment audit trail. */
+export const adminAuditLogs = pgTable(
+  "admin_audit_logs",
+  {
+    id: text("id").primaryKey(),
+    adminId: text("admin_id").notNull(),
+    action: text("action").notNull(),
+    entityType: text("entity_type"),
+    entityId: text("entity_id"),
+    detail: text("detail"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("admin_audit_logs_created_at_idx").on(table.createdAt)],
+);
+
+/** Per-trip notification deduplication and audit (ETA, delay, arrival). */
+export const tripNotificationEvents = pgTable(
+  "trip_notification_events",
+  {
+    id: text("id").primaryKey(),
+    tripId: text("trip_id"),
+    studentId: text("student_id").notNull(),
+    pickupPointId: text("pickup_point_id").notNull(),
+    eventType: text("event_type").notNull(),
+    triggeredAt: timestamp("triggered_at", { withTimezone: true }).defaultNow(),
+    etaAtTrigger: integer("eta_at_trigger"),
+    delayMinutes: integer("delay_minutes"),
+    notificationStatus: text("notification_status").notNull().default("SENT"),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("trip_notif_student_idx").on(table.studentId),
+    index("trip_notif_trip_idx").on(table.tripId),
+  ],
+);
+
+/** Deduped mobility notification events per student/trip. */
+export const mobilityEvents = pgTable("mobility_events", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  busId: text("bus_id").notNull(),
+  tripId: text("trip_id"),
+  pickupPointId: text("pickup_point_id"),
+  eventType: text("event_type").notNull(),
+  payload: text("payload").notNull().default("{}"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
 // STUDENT PICKUP POINTS
@@ -223,4 +349,69 @@ export const studentLocations = pgTable("student_locations", {
   accuracy: doublePrecision("accuracy"),
   recordedAt: timestamp("recorded_at", { withTimezone: true }).defaultNow(),
 });
+
+/** MOBI assistant query audit (no voice recordings). */
+export const mobiQueryLogs = pgTable(
+  "mobi_query_logs",
+  {
+    id: text("id").primaryKey(),
+    studentId: text("student_id").notNull(),
+    intent: text("intent").notNull(),
+    toolsCalled: text("tools_called").notNull().default("[]"),
+    success: boolean("success").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("mobi_query_logs_student_idx").on(table.studentId), index("mobi_query_logs_created_at_idx").on(table.createdAt)],
+);
+
+/** Official REC college-bus catalog from rectransport.com (updateable by re-sync). */
+export const recTransportRoutes = pgTable(
+  "rec_transport_routes",
+  {
+    id: text("id").primaryKey(),
+    routeNumber: text("route_number").notNull(),
+    routeName: text("route_name").notNull(),
+    startingTimeDisplay: text("starting_time_display"),
+    startingTime24: text("starting_time_24"),
+    boardingPageUrl: text("boarding_page_url"),
+    viaNotes: text("via_notes"),
+    campusArrivalDisplay: text("campus_arrival_display"),
+    campusArrival24: text("campus_arrival_24"),
+    sourceUrl: text("source_url").notNull(),
+    active: boolean("active").notNull().default(true),
+    manuallyEdited: boolean("manually_edited").notNull().default(false),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+  },
+  (table) => [index("rec_transport_routes_number_idx").on(table.routeNumber)],
+);
+
+export const recTransportStops = pgTable(
+  "rec_transport_stops",
+  {
+    id: text("id").primaryKey(),
+    routeId: text("route_id").notNull(),
+    stopName: text("stop_name").notNull(),
+    sequenceNumber: integer("sequence_number").notNull(),
+    timeDisplay: text("time_display"),
+    time24: text("time_24"),
+    isCampus: boolean("is_campus").notNull().default(false),
+    latitude: doublePrecision("latitude"),
+    longitude: doublePrecision("longitude"),
+    active: boolean("active").notNull().default(true),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+  },
+  (table) => [index("rec_transport_stops_route_idx").on(table.routeId, table.sequenceNumber)],
+);
+
+export const recTransportSyncStatus = pgTable("rec_transport_sync_status", {
+  id: integer("id").primaryKey(),
+  timetableUrl: text("timetable_url").notNull(),
+  connectionStatus: text("connection_status").notNull().default("PENDING"),
+  lastSuccessfulSync: timestamp("last_successful_sync", { withTimezone: true }),
+  routesCount: integer("routes_count").notNull().default(0),
+  stopsCount: integer("stops_count").notNull().default(0),
+  lastError: text("last_error"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 

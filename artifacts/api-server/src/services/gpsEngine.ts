@@ -40,7 +40,9 @@ export interface ComputedTelemetry {
   accuracy?: number | null;
   speed?: number | null;
   heading?: number | null;
+  bearing?: number | null;
   altitude?: number | null;
+  timestamp?: number;
   
   // Next Stop Engine
   nextStop: string;
@@ -71,6 +73,7 @@ export interface ComputedTelemetry {
   secondsAgo: number;
   quality: GpsQuality;
   source: "real-device-gps" | "unverified";
+  pathIndex?: number;
 }
 
 /**
@@ -146,29 +149,29 @@ export function validateGpsCoordinate(
     };
   }
 
-  // 3. Accuracy quality grading
+  // 3. Accuracy quality grading (real phones may start with coarse cell/Wi-Fi fix before satellite lock)
   const accuracy = typeof point.accuracy === "number" && !isNaN(point.accuracy) ? point.accuracy : 15;
   let quality: GpsQuality = "ACCEPTABLE";
   if (accuracy <= 15) {
     quality = "HIGH";
   } else if (accuracy <= 40) {
     quality = "ACCEPTABLE";
-  } else if (accuracy <= 100) {
+  } else if (accuracy <= 5000) {
     quality = "POOR";
   } else {
     quality = "INVALID";
     return {
       isValid: false,
       quality: "INVALID",
-      rejectionReason: `GPS accuracy too low (±${Math.round(accuracy)}m exceeds 100m maximum tolerance)`,
+      rejectionReason: `GPS accuracy too low (±${Math.round(accuracy)}m exceeds 5000m maximum tolerance)`,
       isAnomaly: false,
       networkDelayMs,
     };
   }
 
-  // 4. Kinematic jump / anomaly check against previous point
+  // 4. Kinematic jump / anomaly check against previous point (only when both fixes have fine accuracy)
   let isAnomaly = false;
-  if (lastValidPoint) {
+  if (lastValidPoint && accuracy <= 50) {
     const prevDate = new Date(lastValidPoint.recordedAt);
     const timeDeltaSec = (recordedDate.getTime() - prevDate.getTime()) / 1000;
     
@@ -179,8 +182,8 @@ export function validateGpsCoordinate(
       );
       const calculatedSpeedKmh = (distanceKm / timeDeltaSec) * 3600;
 
-      // College bus maximum plausible ground speed = 120 km/h
-      if (calculatedSpeedKmh > 120 && distanceKm > 0.2) {
+      // College bus maximum plausible ground speed = 150 km/h
+      if (calculatedSpeedKmh > 150 && distanceKm > 0.5) {
         return {
           isValid: false,
           quality: "INVALID",

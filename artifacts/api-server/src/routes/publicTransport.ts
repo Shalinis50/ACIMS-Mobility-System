@@ -10,6 +10,7 @@ import {
   getMissedBusAlternatives,
   getRoutesForStop,
   getStopDepartures,
+  getRecCorridorJourneys,
 } from "../services/publicTransitService";
 import {
   getPersonalizedTransit,
@@ -214,6 +215,10 @@ router.get("/transit/nearby", (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+router.get("/transit/rec-corridors", (_req, res) => {
+  res.json(getRecCorridorJourneys());
 });
 
 router.get("/transit/search", (req, res) => {

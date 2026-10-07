@@ -1,1174 +1,15 @@
-var __defProp = Object.defineProperty;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
-};
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-
-// src/db/schema.ts
-var schema_exports = {};
-__export(schema_exports, {
-  boardingQueue: () => boardingQueue,
-  busLocations: () => busLocations,
-  busRoutes: () => busRoutes,
-  busStops: () => busStops,
-  buses: () => buses,
-  campusLocations: () => campusLocations,
-  campusPaths: () => campusPaths,
-  drivers: () => drivers,
-  emergencyContacts: () => emergencyContacts,
-  notificationPreferences: () => notificationPreferences,
-  notifications: () => notifications,
-  profiles: () => profiles,
-  publicTransportDepartures: () => publicTransportDepartures,
-  publicTransportStops: () => publicTransportStops,
-  safetyReports: () => safetyReports,
-  studentLocations: () => studentLocations,
-  studentPickupPoints: () => studentPickupPoints,
-  studentPreferences: () => studentPreferences,
-  students: () => students,
-  trackingSessions: () => trackingSessions
-});
-import { boolean, doublePrecision, integer, pgTable, serial, text, timestamp, index } from "drizzle-orm/pg-core";
-var profiles, students, drivers, buses, busRoutes, busStops, studentPickupPoints, busLocations, trackingSessions, notifications, notificationPreferences, campusLocations, campusPaths, safetyReports, emergencyContacts, publicTransportStops, publicTransportDepartures, boardingQueue, studentPreferences, studentLocations;
-var init_schema = __esm({
-  "src/db/schema.ts"() {
-    "use strict";
-    profiles = pgTable("profiles", {
-      id: serial("id").primaryKey(),
-      userId: text("user_id").notNull().unique(),
-      // Firebase Auth UID
-      name: text("name").notNull(),
-      email: text("email").notNull(),
-      phone: text("phone"),
-      role: text("role").notNull().default("STUDENT"),
-      // STUDENT, DRIVER, ADMIN, PARENT
-      createdAt: timestamp("created_at", { withTimezone: true }).defaultNow()
-    });
-    students = pgTable("students", {
-      id: serial("id").primaryKey(),
-      profileId: integer("profile_id").references(() => profiles.id).notNull(),
-      registerNumber: text("register_number"),
-      pickupStopId: text("pickup_stop_id"),
-      assignedBusId: text("assigned_bus_id"),
-      assignedRouteId: text("assigned_route_id")
-    });
-    drivers = pgTable("drivers", {
-      id: serial("id").primaryKey(),
-      profileId: integer("profile_id").references(() => profiles.id).notNull(),
-      assignedBusId: text("assigned_bus_id")
-    });
-    buses = pgTable("buses", {
-      id: text("id").primaryKey(),
-      // e.g., 'bus-18'
-      busNumber: text("bus_number").notNull(),
-      registrationNumber: text("registration_number"),
-      routeId: text("route_id"),
-      driverId: text("driver_id"),
-      active: boolean("active").notNull().default(true),
-      createdAt: timestamp("created_at", { withTimezone: true }).defaultNow()
-    });
-    busRoutes = pgTable("bus_routes", {
-      id: text("id").primaryKey(),
-      // e.g. 'route-bus-18'
-      routeName: text("route_name").notNull(),
-      routeCode: text("route_code").notNull(),
-      active: boolean("active").notNull().default(true)
-    });
-    busStops = pgTable("bus_stops", {
-      id: text("id").primaryKey(),
-      routeId: text("route_id").notNull(),
-      stopName: text("stop_name").notNull(),
-      latitude: doublePrecision("latitude").notNull(),
-      longitude: doublePrecision("longitude").notNull(),
-      sequenceNumber: integer("sequence_number").notNull()
-    });
-    studentPickupPoints = pgTable("student_pickup_points", {
-      id: text("id").primaryKey(),
-      studentId: text("student_id").notNull(),
-      stopId: text("stop_id").notNull(),
-      latitude: doublePrecision("latitude").notNull(),
-      longitude: doublePrecision("longitude").notNull(),
-      isPrimary: boolean("is_primary").notNull().default(true)
-    });
-    busLocations = pgTable(
-      "bus_locations",
-      {
-        id: serial("id").primaryKey(),
-        busId: text("bus_id").notNull(),
-        driverId: text("driver_id"),
-        latitude: doublePrecision("latitude").notNull(),
-        longitude: doublePrecision("longitude").notNull(),
-        accuracy: doublePrecision("accuracy"),
-        altitude: doublePrecision("altitude"),
-        altitudeAccuracy: doublePrecision("altitude_accuracy"),
-        speed: doublePrecision("speed"),
-        heading: doublePrecision("heading"),
-        recordedAt: timestamp("recorded_at", { withTimezone: true }).defaultNow().notNull(),
-        receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
-        createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
-      },
-      (table) => [
-        index("bus_locations_bus_id_idx").on(table.busId),
-        index("bus_locations_recorded_at_idx").on(table.recordedAt),
-        index("bus_locations_driver_id_idx").on(table.driverId)
-      ]
-    );
-    trackingSessions = pgTable(
-      "tracking_sessions",
-      {
-        id: text("id").primaryKey(),
-        busId: text("bus_id").notNull(),
-        driverId: text("driver_id").notNull(),
-        startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
-        endedAt: timestamp("ended_at", { withTimezone: true }),
-        lastLocationAt: timestamp("last_location_at", { withTimezone: true }),
-        status: text("status").notNull().default("ACTIVE")
-        // ACTIVE, PAUSED, ENDED
-      },
-      (table) => [
-        index("tracking_sessions_bus_id_idx").on(table.busId),
-        index("tracking_sessions_driver_id_idx").on(table.driverId),
-        index("tracking_sessions_status_idx").on(table.status)
-      ]
-    );
-    notifications = pgTable("notifications", {
-      id: serial("id").primaryKey(),
-      userId: text("user_id").notNull(),
-      type: text("type").notNull(),
-      title: text("title").notNull(),
-      message: text("message").notNull(),
-      createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-      readAt: timestamp("read_at", { withTimezone: true })
-    });
-    notificationPreferences = pgTable("notification_preferences", {
-      id: serial("id").primaryKey(),
-      userId: text("user_id").notNull().unique(),
-      preferences: text("preferences").notNull().default("{}")
-    });
-    campusLocations = pgTable("campus_locations", {
-      id: text("id").primaryKey(),
-      name: text("name").notNull(),
-      category: text("category").notNull(),
-      latitude: doublePrecision("latitude").notNull(),
-      longitude: doublePrecision("longitude").notNull(),
-      description: text("description")
-    });
-    campusPaths = pgTable("campus_paths", {
-      id: text("id").primaryKey(),
-      fromLocationId: text("from_location_id").notNull(),
-      toLocationId: text("to_location_id").notNull(),
-      distanceMeters: doublePrecision("distance_meters").notNull(),
-      pathPoints: text("path_points").notNull()
-      // JSON array of [lat, lng]
-    });
-    safetyReports = pgTable("safety_reports", {
-      id: text("id").primaryKey(),
-      studentId: text("student_id").notNull(),
-      reportType: text("report_type").notNull(),
-      description: text("description").notNull(),
-      latitude: doublePrecision("latitude").notNull(),
-      longitude: doublePrecision("longitude").notNull(),
-      status: text("status").notNull().default("OPEN"),
-      createdAt: timestamp("created_at", { withTimezone: true }).defaultNow()
-    });
-    emergencyContacts = pgTable("emergency_contacts", {
-      id: text("id").primaryKey(),
-      userId: text("user_id").notNull(),
-      name: text("name").notNull(),
-      relationship: text("relationship").notNull(),
-      phone: text("phone").notNull()
-    });
-    publicTransportStops = pgTable("public_transport_stops", {
-      id: text("id").primaryKey(),
-      name: text("name").notNull(),
-      latitude: doublePrecision("latitude").notNull(),
-      longitude: doublePrecision("longitude").notNull(),
-      routesServed: text("routes_served").notNull()
-    });
-    publicTransportDepartures = pgTable("public_transport_departures", {
-      id: text("id").primaryKey(),
-      stopId: text("stop_id").notNull(),
-      routeNumber: text("route_number").notNull(),
-      destination: text("destination").notNull(),
-      departureTime: text("departure_time").notNull(),
-      // HH:MM
-      serviceDays: text("service_days").notNull().default("MON,TUE,WED,THU,FRI,SAT"),
-      isLive: boolean("is_live").notNull().default(false)
-    });
-    boardingQueue = pgTable("boarding_queue", {
-      id: serial("id").primaryKey(),
-      studentId: text("student_id").notNull(),
-      busId: text("bus_id").notNull(),
-      boardingStop: text("boarding_stop").notNull(),
-      status: text("status").notNull().default("WAITING"),
-      // WAITING, BOARDED, CANCELLED
-      joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow(),
-      updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow()
-    });
-    studentPreferences = pgTable("student_preferences", {
-      id: serial("id").primaryKey(),
-      userId: text("user_id").notNull().unique(),
-      savedPickupStopId: text("saved_pickup_stop_id"),
-      preferredBusId: text("preferred_bus_id"),
-      savedDestinationName: text("saved_destination_name"),
-      savedDestinationLat: doublePrecision("saved_destination_lat"),
-      savedDestinationLng: doublePrecision("saved_destination_lng"),
-      notificationArrivals: boolean("notification_arrivals").default(true),
-      notificationDelays: boolean("notification_delays").default(true),
-      updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow()
-    });
-    studentLocations = pgTable("student_locations", {
-      id: serial("id").primaryKey(),
-      userId: text("user_id").notNull(),
-      latitude: doublePrecision("latitude").notNull(),
-      longitude: doublePrecision("longitude").notNull(),
-      accuracy: doublePrecision("accuracy"),
-      recordedAt: timestamp("recorded_at", { withTimezone: true }).defaultNow()
-    });
-  }
-});
-
-// artifacts/api-server/src/services/campusData.ts
-var REC_BUILDINGS, REC_CAMPUS_STOPS, REC_POINTS_OF_INTEREST, REC_CAMPUS_PATHS, REC_CAMPUS_CENTER, REC_CAMPUS_BOUNDS;
-var init_campusData = __esm({
-  "artifacts/api-server/src/services/campusData.ts"() {
-    "use strict";
-    REC_BUILDINGS = [
-      {
-        id: "rec-main-block",
-        name: "Main Block",
-        category: "admin",
-        description: "Principal's Office, Administrative Wing, Dean Offices, and central conference halls.",
-        code: "MB",
-        latitude: 13.0112,
-        longitude: 80.0042
-      },
-      {
-        id: "rec-central-college",
-        name: "Rajalakshmi Engineering College (Central Block)",
-        category: "academic",
-        description: "Central Academic Block housing Computer Science, IT, AI & Data Science departments and lecture halls.",
-        code: "CB",
-        latitude: 13.0084,
-        longitude: 80.0036
-      },
-      {
-        id: "rec-workshop-block",
-        name: "Workshop Block",
-        category: "lab",
-        description: "Mechanical workshops, manufacturing technology labs, carpentry, and welding practice bays.",
-        code: "WB",
-        latitude: 13.0098,
-        longitude: 80.0024
-      },
-      {
-        id: "rec-ece-workshop",
-        name: "Rajalakshmi Engineering College Workshop, ECE",
-        category: "academic",
-        description: "Electronics & Communication Engineering labs, digital signal processing, and robotics lab.",
-        code: "ECE",
-        latitude: 13.009,
-        longitude: 80.0022
-      },
-      {
-        id: "rec-transport-office",
-        name: "REC College Bus Transport Office",
-        category: "transit",
-        description: "Central fleet dispatch, bus pass verification, bus coordinators desk, and driver operations.",
-        code: "TO",
-        latitude: 13.0108,
-        longitude: 80.0076
-      },
-      {
-        id: "rec-d-block",
-        name: "D Block",
-        category: "academic",
-        description: "Academic lecture block, seminar halls, and department faculty cabins.",
-        code: "DB",
-        latitude: 13.0062,
-        longitude: 80.0006
-      },
-      {
-        id: "rec-fluid-mechanics",
-        name: "Fluid Mechanics Lab",
-        category: "lab",
-        description: "Hydraulics, fluid machinery, flow measurement, and aerospace flow research test rigs.",
-        code: "FML",
-        latitude: 13.006,
-        longitude: 80.002
-      },
-      {
-        id: "rec-automobile-block",
-        name: "Rajalakshmi Engineering College - Automobile Block",
-        category: "academic",
-        description: "Automobile engineering chassis lab, engine testing bays, and vehicular dynamics center.",
-        code: "AUTO",
-        latitude: 13.0068,
-        longitude: 80.0002
-      },
-      {
-        id: "rec-school-of-architecture",
-        name: "Rajalakshmi School of Architecture",
-        category: "academic",
-        description: "Design studios, climatology lab, architectural modeling workshops, and exhibition spaces.",
-        code: "RSA",
-        latitude: 13.0072,
-        longitude: 79.9972
-      },
-      {
-        id: "rec-indoor-stadium",
-        name: "Indoor Stadium",
-        category: "recreation",
-        description: "Wooden badminton courts, table tennis, basketball arena, and fitness gymnasium.",
-        code: "IS",
-        latitude: 13.0075,
-        longitude: 80.0072
-      },
-      {
-        id: "rec-auditorium",
-        name: "Auditorium",
-        category: "facility",
-        description: "Air-conditioned 1,500-seat convention hall for symposiums, convocations, and cultural events.",
-        code: "AUD",
-        latitude: 13.007,
-        longitude: 80.0073
-      },
-      {
-        id: "rec-boy-hostel-2",
-        name: "Rajalakshmi Engineering College Boy Hostel - 2",
-        category: "hostel",
-        description: "Student residential rooms, study halls, mess facility, and resident recreation room.",
-        code: "BH2",
-        latitude: 13.0048,
-        longitude: 80.0026
-      },
-      {
-        id: "rec-ladies-hostel",
-        name: "Ladies Hostel",
-        category: "hostel",
-        description: "Secure women's residential campus, dedicated dining hall, garden courtyard, and study library.",
-        code: "LH",
-        latitude: 13.0045,
-        longitude: 80.0068
-      }
-    ];
-    REC_CAMPUS_STOPS = [
-      {
-        id: "rec-main-gate-stop",
-        name: "REC Main Gate Terminal",
-        servedRoutes: ["Bus 12 (Campus Loop A)", "Bus 18 (Metro Connector)", "Bus 4B (Express)", "Bus 21 (Perimeter)"],
-        description: "Primary arrival/departure terminus right at the REC Main Security Gate on NH4.",
-        latitude: 13.0118,
-        longitude: 80.0048
-      },
-      {
-        id: "rec-transport-depot-stop",
-        name: "Transport Office Depot Bay",
-        servedRoutes: ["All 40+ College Fleet Buses", "Driver Dispatch Stand"],
-        description: "Boarding platform directly beside the REC College Bus Transport Office.",
-        latitude: 13.0108,
-        longitude: 80.0074
-      },
-      {
-        id: "rec-central-academic-stop",
-        name: "Central Block Academic Stop",
-        servedRoutes: ["Campus Loop A", "Hostel Village Shuttle", "Metro Connector Feeder"],
-        description: "Located at the central crossroad between Central Academic Block and the Sports Field.",
-        latitude: 13.0084,
-        longitude: 80.0042
-      },
-      {
-        id: "rec-hostel-loop-stop",
-        name: "Hostel Zone South Bay",
-        servedRoutes: ["Evening Hostel Shuttle", "Bus 18 Feeder", "Bus 21 South Loop"],
-        description: "Convenient pickup node between Boy Hostel 2 and the Ladies Hostel South road.",
-        latitude: 13.0049,
-        longitude: 80.0044
-      },
-      {
-        id: "rec-architecture-stop",
-        name: "School of Architecture Bay",
-        servedRoutes: ["West Campus Shuttle", "Special Event Feeder"],
-        description: "Stop serving the Rajalakshmi School of Architecture western courtyard.",
-        latitude: 13.0071,
-        longitude: 79.9978
-      }
-    ];
-    REC_POINTS_OF_INTEREST = [
-      {
-        id: "poi-rec-main-gate",
-        name: "REC Main Gate (\u0BAE\u0BC6\u0BAF\u0BBF\u0BA9\u0BCD \u0B95\u0BC7\u0B9F\u0BCD)",
-        category: "gate",
-        landmarkNear: "Opposite NH4 highway corridor & Main Block",
-        latitude: 13.012,
-        longitude: 80.0048
-      },
-      {
-        id: "poi-dominos-pizza",
-        name: "Domino's Pizza | Rajalakshmi Plaza",
-        category: "food",
-        landmarkNear: "North-West commercial corner beside entry road",
-        latitude: 13.0115,
-        longitude: 80.0016
-      },
-      {
-        id: "poi-cafe-coffee-day",
-        name: "Cafe Coffee Day (\u0B95\u0B83\u0BAA\u0BC7 \u0B95\u0BBE\u0BAA\u0BCD\u0BAA\u0BBF \u0B9F\u0BC7)",
-        category: "food",
-        landmarkNear: "East avenue, north of Indoor Stadium",
-        latitude: 13.0088,
-        longitude: 80.0074
-      },
-      {
-        id: "poi-pontus-pack",
-        name: "Pontus Pack Pvt",
-        category: "service",
-        landmarkNear: "North of Workshop Block",
-        latitude: 13.0105,
-        longitude: 80.0022
-      },
-      {
-        id: "poi-sarvesh-pavilion",
-        name: "Sarvesh anna payaluga / Cafeteria",
-        category: "food",
-        landmarkNear: "South-East corner of central sports ground",
-        latitude: 13.0062,
-        longitude: 80.004
-      },
-      {
-        id: "poi-sports-ground",
-        name: "REC Central Sports Field & Track",
-        category: "recreation",
-        landmarkNear: "Between Central Academic Block and Indoor Stadium",
-        latitude: 13.0085,
-        longitude: 80.0058
-      }
-    ];
-    REC_CAMPUS_PATHS = [
-      {
-        id: "path-main-entry-avenue",
-        name: "REC Main Gate to Central Spine",
-        type: "road",
-        coordinates: [
-          { latitude: 13.012, longitude: 80.0048 },
-          // Main Gate
-          { latitude: 13.011, longitude: 80.0044 },
-          // Main Block South
-          { latitude: 13.0098, longitude: 80.0042 },
-          { latitude: 13.0084, longitude: 80.0042 }
-          // Central Academic Cross
-        ]
-      },
-      {
-        id: "path-north-spine-road",
-        name: "North Spine Road (Domino's to Transport Office)",
-        type: "road",
-        coordinates: [
-          { latitude: 13.0115, longitude: 80.0016 },
-          // Domino's
-          { latitude: 13.0104, longitude: 80.0018 },
-          { latitude: 13.0104, longitude: 80.0042 },
-          // Below Main Block
-          { latitude: 13.0106, longitude: 80.0076 }
-          // Transport Office
-        ]
-      },
-      {
-        id: "path-east-stadium-avenue",
-        name: "East Stadium Avenue (CCD to Ladies Hostel)",
-        type: "road",
-        coordinates: [
-          { latitude: 13.0106, longitude: 80.0076 },
-          // Transport Office
-          { latitude: 13.0088, longitude: 80.0074 },
-          // Cafe Coffee Day
-          { latitude: 13.0075, longitude: 80.0072 },
-          // Indoor Stadium
-          { latitude: 13.0068, longitude: 80.0072 },
-          // Auditorium
-          { latitude: 13.0048, longitude: 80.007 },
-          // East Turn
-          { latitude: 13.0045, longitude: 80.0068 }
-          // Ladies Hostel
-        ]
-      },
-      {
-        id: "path-south-ring-road",
-        name: "South Perimeter Ring Road (Ladies Hostel to D Block)",
-        type: "road",
-        coordinates: [
-          { latitude: 13.0045, longitude: 80.0068 },
-          // Ladies Hostel
-          { latitude: 13.0048, longitude: 80.0062 },
-          { latitude: 13.0048, longitude: 80.0044 },
-          // South Spine Junction
-          { latitude: 13.0048, longitude: 80.0026 },
-          // Boy Hostel 2
-          { latitude: 13.0055, longitude: 80.0018 },
-          // Fluid Mechanics
-          { latitude: 13.0062, longitude: 80.0006 }
-          // D Block
-        ]
-      },
-      {
-        id: "path-central-spine",
-        name: "Central Academic to South Spine",
-        type: "walkway",
-        coordinates: [
-          { latitude: 13.0084, longitude: 80.0042 },
-          // Central Block
-          { latitude: 13.0065, longitude: 80.0042 },
-          // Sarvesh Pavilion
-          { latitude: 13.0048, longitude: 80.0044 }
-          // South Ring
-        ]
-      },
-      {
-        id: "path-west-architecture-avenue",
-        name: "West Architecture Pathway (Workshop to School of Architecture)",
-        type: "walkway",
-        coordinates: [
-          { latitude: 13.009, longitude: 80.0022 },
-          // ECE Workshop
-          { latitude: 13.0082, longitude: 80.0016 },
-          { latitude: 13.0074, longitude: 80.0002 },
-          // Automobile Block Junction
-          { latitude: 13.0073, longitude: 79.9986 },
-          { latitude: 13.0072, longitude: 79.9972 }
-          // Architecture Front
-        ]
-      },
-      {
-        id: "path-automobile-dblock-link",
-        name: "D Block to Automobile Block Link",
-        type: "walkway",
-        coordinates: [
-          { latitude: 13.0074, longitude: 80.0002 },
-          // Automobile
-          { latitude: 13.0062, longitude: 80.0006 }
-          // D Block
-        ]
-      }
-    ];
-    REC_CAMPUS_CENTER = {
-      latitude: 13.0084,
-      longitude: 80.0033
-    };
-    REC_CAMPUS_BOUNDS = [
-      [13.0035, 79.996],
-      // South-West
-      [13.013, 80.009]
-      // North-East
-    ];
-  }
-});
-
-// src/db/seed.ts
-var seed_exports = {};
-__export(seed_exports, {
-  seedDatabase: () => seedDatabase
-});
-import { eq } from "drizzle-orm";
-async function seedDatabase() {
-  console.log("Seeding ACIMS PostgreSQL database...");
-  const initialRoutes = [
-    { id: "route-bus-18", routeName: "Metro Connector Feeder", routeCode: "18", active: true },
-    { id: "route-bus-12", routeName: "Campus Loop A", routeCode: "12", active: true },
-    { id: "route-bus-4b", routeName: "Engineering Express", routeCode: "4B", active: true },
-    { id: "route-bus-7", routeName: "North Campus Shuttle", routeCode: "7", active: true },
-    { id: "route-bus-21", routeName: "South Perimeter Circle", routeCode: "21", active: true }
-  ];
-  for (const r of initialRoutes) {
-    await db.insert(busRoutes).values(r).onConflictDoNothing();
-  }
-  const initialStops = [
-    // Route 18
-    { id: "metro-central", routeId: "route-bus-18", stopName: "Metro Central Station", latitude: 12.9249, longitude: 80.1275, sequenceNumber: 1 },
-    { id: "jb-estate", routeId: "route-bus-18", stopName: "JB Estate", latitude: 12.9272, longitude: 80.1302, sequenceNumber: 2 },
-    { id: "ponnu", routeId: "route-bus-18", stopName: "Ponnu", latitude: 12.9301, longitude: 80.1336, sequenceNumber: 3 },
-    { id: "ramratna", routeId: "route-bus-18", stopName: "Ramratna", latitude: 12.9338, longitude: 80.1368, sequenceNumber: 4 },
-    { id: "med-sciences", routeId: "route-bus-18", stopName: "Medical Sciences Center", latitude: 12.9372, longitude: 80.1396, sequenceNumber: 5 },
-    // Route 12
-    { id: "vandalur", routeId: "route-bus-12", stopName: "Vandalur Transit Hub", latitude: 12.8912, longitude: 80.0815, sequenceNumber: 1 },
-    { id: "perungalathur", routeId: "route-bus-12", stopName: "Perungalathur Junction", latitude: 12.9042, longitude: 80.0965, sequenceNumber: 2 },
-    { id: "tambaram", routeId: "route-bus-12", stopName: "Tambaram Terminal", latitude: 12.9254, longitude: 80.1198, sequenceNumber: 3 },
-    { id: "chromepet", routeId: "route-bus-12", stopName: "Chromepet Station Gate", latitude: 12.9515, longitude: 80.1412, sequenceNumber: 4 },
-    { id: "quad", routeId: "route-bus-12", stopName: "Academic Quad", latitude: 12.9734, longitude: 80.1589, sequenceNumber: 5 },
-    // Route 4B
-    { id: "north-residence", routeId: "route-bus-4b", stopName: "North Residence Complex", latitude: 12.9421, longitude: 80.1245, sequenceNumber: 1 },
-    { id: "bio-center", routeId: "route-bus-4b", stopName: "Bio-Engineering Center", latitude: 12.9375, longitude: 80.1292, sequenceNumber: 2 },
-    { id: "nano-hub", routeId: "route-bus-4b", stopName: "Nano Research Facility", latitude: 12.9318, longitude: 80.1345, sequenceNumber: 3 },
-    { id: "innovation-park", routeId: "route-bus-4b", stopName: "Tech & Innovation Park", latitude: 12.9262, longitude: 80.1415, sequenceNumber: 4 },
-    // Route 7
-    { id: "hostel-village", routeId: "route-bus-7", stopName: "Hostel Village", latitude: 12.9145, longitude: 80.1122, sequenceNumber: 1 },
-    { id: "athletics", routeId: "route-bus-7", stopName: "Athletic Pavilion", latitude: 12.9182, longitude: 80.1165, sequenceNumber: 2 },
-    { id: "library", routeId: "route-bus-7", stopName: "Central Library & Union", latitude: 12.9221, longitude: 80.1215, sequenceNumber: 3 },
-    // Route 21
-    { id: "south-lot", routeId: "route-bus-21", stopName: "South Commuter Lot", latitude: 12.9015, longitude: 80.0935, sequenceNumber: 1 },
-    { id: "faculty-enclave", routeId: "route-bus-21", stopName: "Faculty Enclave", latitude: 12.9085, longitude: 80.1012, sequenceNumber: 2 },
-    { id: "auditorium", routeId: "route-bus-21", stopName: "Main Auditorium", latitude: 12.9152, longitude: 80.1095, sequenceNumber: 3 }
-  ];
-  for (const s of initialStops) {
-    await db.insert(busStops).values(s).onConflictDoNothing();
-  }
-  const initialBuses = [
-    { id: "bus-18", busNumber: "18", registrationNumber: "TN-11-AC-1018", routeId: "route-bus-18", driverId: "driver-rajesh", active: true },
-    { id: "bus-12", busNumber: "12", registrationNumber: "TN-11-AC-1012", routeId: "route-bus-12", driverId: "driver-arun", active: true },
-    { id: "bus-4b", busNumber: "4B", registrationNumber: "TN-11-AC-1044", routeId: "route-bus-4b", driverId: "driver-suresh", active: true },
-    { id: "bus-7", busNumber: "7", registrationNumber: "TN-11-AC-1007", routeId: "route-bus-7", driverId: "driver-venkat", active: true },
-    { id: "bus-21", busNumber: "21", registrationNumber: "TN-11-AC-1021", routeId: "route-bus-21", driverId: "driver-karthik", active: true }
-  ];
-  for (const b of initialBuses) {
-    await db.insert(buses).values(b).onConflictDoNothing();
-  }
-  for (const bldg of REC_BUILDINGS) {
-    await db.insert(campusLocations).values({
-      id: bldg.id,
-      name: bldg.name,
-      category: bldg.category,
-      latitude: bldg.latitude,
-      longitude: bldg.longitude,
-      description: bldg.description
-    }).onConflictDoNothing();
-  }
-  for (const stop of REC_CAMPUS_STOPS) {
-    await db.insert(campusLocations).values({
-      id: stop.id,
-      name: stop.name,
-      category: "transit",
-      latitude: stop.latitude,
-      longitude: stop.longitude,
-      description: stop.description
-    }).onConflictDoNothing();
-  }
-  for (const poi of REC_POINTS_OF_INTEREST) {
-    await db.insert(campusLocations).values({
-      id: poi.id,
-      name: poi.name,
-      category: poi.category,
-      latitude: poi.latitude,
-      longitude: poi.longitude,
-      description: `Near ${poi.landmarkNear}`
-    }).onConflictDoNothing();
-  }
-  for (const path5 of REC_CAMPUS_PATHS) {
-    const coords = path5.coordinates;
-    if (coords.length >= 2) {
-      await db.insert(campusPaths).values({
-        id: path5.id,
-        fromLocationId: path5.name.split(" to ")[0] || path5.id,
-        toLocationId: path5.name.split(" to ")[1] || path5.id,
-        distanceMeters: Math.round(coords.length * 25),
-        pathPoints: JSON.stringify(coords.map((c) => [c.latitude, c.longitude]))
-      }).onConflictDoNothing();
-    }
-  }
-  const ptStops = [
-    { id: "pt-thandalam", name: "Thandalam REC Main Gate", latitude: 13.0084, longitude: 80.0033, routesServed: "597, 54B, 578, 597A" },
-    { id: "pt-tambaram", name: "Tambaram Central Bus Terminus", latitude: 12.9254, longitude: 80.1198, routesServed: "554, 578, 597, 114, 202" },
-    { id: "pt-poonamallee", name: "Poonamallee Bus Terminus", latitude: 13.0489, longitude: 80.0934, routesServed: "54, 54B, 597, 153" },
-    { id: "pt-guindy", name: "Guindy Estate Bus Station", latitude: 13.0067, longitude: 80.2012, routesServed: "54, 54B, 597" }
-  ];
-  for (const stop of ptStops) {
-    await db.insert(publicTransportStops).values(stop).onConflictDoNothing();
-  }
-  const ptDepartures = [
-    { id: "dep-597-1", stopId: "pt-thandalam", routeNumber: "597", destination: "Tambaram Terminal", departureTime: "07:30", serviceDays: "MON,TUE,WED,THU,FRI,SAT", isLive: true },
-    { id: "dep-597-2", stopId: "pt-thandalam", routeNumber: "597", destination: "Tambaram Terminal", departureTime: "08:15", serviceDays: "MON,TUE,WED,THU,FRI,SAT", isLive: false },
-    { id: "dep-54b-1", stopId: "pt-thandalam", routeNumber: "54B", destination: "Poonamallee / T.Nagar", departureTime: "07:45", serviceDays: "MON,TUE,WED,THU,FRI,SAT", isLive: true },
-    { id: "dep-578-1", stopId: "pt-thandalam", routeNumber: "578", destination: "Sriperumbudur / Kanchipuram", departureTime: "08:00", serviceDays: "MON,TUE,WED,THU,FRI,SAT", isLive: false },
-    { id: "dep-tam-597-1", stopId: "pt-tambaram", routeNumber: "597", destination: "Thandalam (REC Campus)", departureTime: "07:15", serviceDays: "MON,TUE,WED,THU,FRI,SAT", isLive: true },
-    { id: "dep-tam-554-1", stopId: "pt-tambaram", routeNumber: "554", destination: "Sriperumbudur via REC", departureTime: "07:40", serviceDays: "MON,TUE,WED,THU,FRI,SAT", isLive: false }
-  ];
-  for (const dep of ptDepartures) {
-    await db.insert(publicTransportDepartures).values(dep).onConflictDoNothing();
-  }
-  const defaultProfiles = [
-    { userId: "admin", name: "Campus Transport Controller", email: "admin@rec.edu.in", role: "ADMIN" },
-    { userId: "student-20418", name: "Rithvik S (CSD)", email: "student-20418@rec.edu.in", role: "STUDENT" },
-    { userId: "driver-arun", name: "Driver Arun", email: "arun.driver@rec.edu.in", role: "DRIVER" },
-    { userId: "driver-rajesh", name: "Driver Rajesh", email: "rajesh.driver@rec.edu.in", role: "DRIVER" }
-  ];
-  for (const p of defaultProfiles) {
-    const existing = await db.select().from(profiles).where(eq(profiles.userId, p.userId));
-    if (existing.length === 0) {
-      const ins = await db.insert(profiles).values(p).returning();
-      if (p.role === "STUDENT") {
-        await db.insert(students).values({
-          profileId: ins[0].id,
-          registerNumber: "2024-CSD-014",
-          assignedBusId: "bus-12",
-          assignedRouteId: "route-bus-12",
-          pickupStopId: "tambaram"
-        });
-      } else if (p.role === "DRIVER") {
-        await db.insert(drivers).values({
-          profileId: ins[0].id,
-          assignedBusId: p.userId === "driver-arun" ? "bus-12" : "bus-18"
-        });
-      }
-    }
-  }
-  console.log("Seeding completed successfully!");
-}
-var init_seed = __esm({
-  "src/db/seed.ts"() {
-    "use strict";
-    init_db();
-    init_schema();
-    init_campusData();
-  }
-});
-
-// src/db/index.ts
-import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
-import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
-import { PGlite } from "@electric-sql/pglite";
-import pg from "pg";
-import path from "path";
-import fs from "fs";
-function getActiveDb() {
-  if (externalDbHealthy && externalDrizzleDb) {
-    return externalDrizzleDb;
-  }
-  return pgliteDb;
-}
-async function query(sql, params = []) {
-  if (externalDbHealthy && externalPool) {
-    try {
-      const res = await externalPool.query(sql, params);
-      return res.rows;
-    } catch (err) {
-      console.warn("[ACIMS DB] External query failed, falling back to PGlite:", err.message);
-      externalDbHealthy = false;
-    }
-  }
-  if (global._pgliteInstance) {
-    const res = await global._pgliteInstance.query(sql, params);
-    return res.rows;
-  }
-  return [];
-}
-async function ensureDatabaseInitialized() {
-  try {
-    if (externalPool) {
-      try {
-        const timeoutPromise = new Promise(
-          (_, reject) => setTimeout(() => reject(new Error("External PostgreSQL connection timeout")), 1500)
-        );
-        await Promise.race([externalPool.query("SELECT 1"), timeoutPromise]);
-        externalDbHealthy = true;
-        console.log("[ACIMS DB] Successfully connected to external PostgreSQL.");
-      } catch (err) {
-        console.warn(`[ACIMS DB] External PostgreSQL not reachable (${err.message}). Using persistent PGlite engine.`);
-        externalDbHealthy = false;
-      }
-    } else {
-      console.log("[ACIMS DB] Operating with persistent embedded PGlite engine at data/postgres");
-    }
-    const rawExec = async (sql) => {
-      if (global._pgliteInstance) {
-        await global._pgliteInstance.exec(sql);
-      }
-      if (externalDbHealthy && externalPool) {
-        try {
-          await externalPool.query(sql);
-        } catch (e) {
-          console.warn("[ACIMS DB] External DDL notice:", e.message);
-        }
-      }
-    };
-    await rawExec(`
-      CREATE TABLE IF NOT EXISTS profiles (
-        id SERIAL PRIMARY KEY,
-        user_id TEXT NOT NULL UNIQUE,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL,
-        phone TEXT,
-        role TEXT NOT NULL DEFAULT 'STUDENT',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS students (
-        id SERIAL PRIMARY KEY,
-        profile_id INTEGER NOT NULL REFERENCES profiles(id),
-        register_number TEXT,
-        pickup_stop_id TEXT,
-        assigned_bus_id TEXT,
-        assigned_route_id TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS drivers (
-        id SERIAL PRIMARY KEY,
-        profile_id INTEGER NOT NULL REFERENCES profiles(id),
-        assigned_bus_id TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS buses (
-        id TEXT PRIMARY KEY,
-        bus_number TEXT NOT NULL,
-        registration_number TEXT,
-        route_id TEXT,
-        driver_id TEXT,
-        active BOOLEAN NOT NULL DEFAULT true,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS bus_routes (
-        id TEXT PRIMARY KEY,
-        route_name TEXT NOT NULL,
-        route_code TEXT NOT NULL,
-        active BOOLEAN NOT NULL DEFAULT true
-      );
-
-      CREATE TABLE IF NOT EXISTS bus_stops (
-        id TEXT PRIMARY KEY,
-        route_id TEXT NOT NULL,
-        stop_name TEXT NOT NULL,
-        latitude DOUBLE PRECISION NOT NULL,
-        longitude DOUBLE PRECISION NOT NULL,
-        sequence_number INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS student_pickup_points (
-        id TEXT PRIMARY KEY,
-        student_id TEXT NOT NULL,
-        stop_id TEXT NOT NULL,
-        latitude DOUBLE PRECISION NOT NULL,
-        longitude DOUBLE PRECISION NOT NULL,
-        is_primary BOOLEAN NOT NULL DEFAULT true
-      );
-
-      CREATE TABLE IF NOT EXISTS bus_locations (
-        id SERIAL PRIMARY KEY,
-        bus_id TEXT NOT NULL,
-        driver_id TEXT,
-        latitude DOUBLE PRECISION NOT NULL,
-        longitude DOUBLE PRECISION NOT NULL,
-        accuracy DOUBLE PRECISION,
-        altitude DOUBLE PRECISION,
-        altitude_accuracy DOUBLE PRECISION,
-        speed DOUBLE PRECISION,
-        heading DOUBLE PRECISION,
-        recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        received_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS tracking_sessions (
-        id TEXT PRIMARY KEY,
-        bus_id TEXT NOT NULL,
-        driver_id TEXT NOT NULL,
-        started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        ended_at TIMESTAMP WITH TIME ZONE,
-        last_location_at TIMESTAMP WITH TIME ZONE,
-        status TEXT NOT NULL DEFAULT 'ACTIVE'
-      );
-
-      CREATE TABLE IF NOT EXISTS notifications (
-        id SERIAL PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        type TEXT NOT NULL,
-        title TEXT NOT NULL,
-        message TEXT NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        read_at TIMESTAMP WITH TIME ZONE
-      );
-
-      CREATE TABLE IF NOT EXISTS notification_preferences (
-        id SERIAL PRIMARY KEY,
-        user_id TEXT NOT NULL UNIQUE,
-        preferences TEXT NOT NULL DEFAULT '{}'
-      );
-
-      CREATE TABLE IF NOT EXISTS campus_locations (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        category TEXT NOT NULL,
-        latitude DOUBLE PRECISION NOT NULL,
-        longitude DOUBLE PRECISION NOT NULL,
-        description TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS campus_paths (
-        id TEXT PRIMARY KEY,
-        from_location_id TEXT NOT NULL,
-        to_location_id TEXT NOT NULL,
-        distance_meters DOUBLE PRECISION NOT NULL,
-        path_points TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS safety_reports (
-        id TEXT PRIMARY KEY,
-        student_id TEXT NOT NULL,
-        report_type TEXT NOT NULL,
-        description TEXT NOT NULL,
-        latitude DOUBLE PRECISION NOT NULL,
-        longitude DOUBLE PRECISION NOT NULL,
-        status TEXT NOT NULL DEFAULT 'OPEN',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS emergency_contacts (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        relationship TEXT NOT NULL,
-        phone TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS public_transport_stops (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        latitude DOUBLE PRECISION NOT NULL,
-        longitude DOUBLE PRECISION NOT NULL,
-        routes_served TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS public_transport_departures (
-        id TEXT PRIMARY KEY,
-        stop_id TEXT NOT NULL,
-        route_number TEXT NOT NULL,
-        destination TEXT NOT NULL,
-        departure_time TEXT NOT NULL,
-        service_days TEXT NOT NULL DEFAULT 'MON,TUE,WED,THU,FRI,SAT',
-        is_live BOOLEAN NOT NULL DEFAULT false
-      );
-
-      CREATE TABLE IF NOT EXISTS boarding_queue (
-        id SERIAL PRIMARY KEY,
-        student_id TEXT NOT NULL,
-        bus_id TEXT NOT NULL,
-        boarding_stop TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'WAITING',
-        joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS student_preferences (
-        id SERIAL PRIMARY KEY,
-        user_id TEXT NOT NULL UNIQUE,
-        saved_pickup_stop_id TEXT,
-        preferred_bus_id TEXT,
-        saved_destination_name TEXT,
-        saved_destination_lat DOUBLE PRECISION,
-        saved_destination_lng DOUBLE PRECISION,
-        notification_arrivals BOOLEAN DEFAULT true,
-        notification_delays BOOLEAN DEFAULT true,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS student_locations (
-        id SERIAL PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        latitude DOUBLE PRECISION NOT NULL,
-        longitude DOUBLE PRECISION NOT NULL,
-        accuracy DOUBLE PRECISION,
-        recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-    try {
-      const { seedDatabase: seedDatabase2 } = await Promise.resolve().then(() => (init_seed(), seed_exports));
-      await seedDatabase2();
-      console.log("[ACIMS DB] Transit database verified and seeded successfully.");
-    } catch (seedErr) {
-      console.warn("[ACIMS DB] Notice during transit dataset seeding:", seedErr.message);
-    }
-  } catch (err) {
-    console.error("Database initialization notice:", err);
-  }
-}
-var Pool, dataDir, pgliteDb, externalPool, externalDrizzleDb, externalDbHealthy, rawDbUrl, hasHost, isLocalAddress, db;
-var init_db = __esm({
-  "src/db/index.ts"() {
-    "use strict";
-    init_schema();
-    ({ Pool } = pg);
-    dataDir = path.resolve(process.cwd(), "data/postgres");
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    if (!global._pgliteInstance) {
-      global._pgliteInstance = new PGlite(dataDir);
-    }
-    pgliteDb = drizzlePglite(global._pgliteInstance, { schema: schema_exports });
-    externalPool = null;
-    externalDrizzleDb = null;
-    externalDbHealthy = false;
-    rawDbUrl = process.env.DATABASE_URL?.trim();
-    hasHost = Boolean(process.env.SQL_HOST && process.env.SQL_USER);
-    isLocalAddress = rawDbUrl ? rawDbUrl.includes("localhost") || rawDbUrl.includes("127.0.0.1") : false;
-    if (rawDbUrl && !isLocalAddress || hasHost) {
-      try {
-        externalPool = rawDbUrl ? new Pool({
-          connectionString: rawDbUrl,
-          ssl: { rejectUnauthorized: false },
-          max: 10,
-          connectionTimeoutMillis: 2e3
-        }) : new Pool({
-          host: process.env.SQL_HOST,
-          user: process.env.SQL_USER,
-          password: process.env.SQL_PASSWORD,
-          database: process.env.SQL_DB_NAME,
-          max: 10,
-          connectionTimeoutMillis: 2e3
-        });
-        externalPool.on("error", (err) => {
-          console.warn("[ACIMS DB] External pool connection error:", err.message);
-          externalDbHealthy = false;
-        });
-        externalDrizzleDb = drizzlePg(externalPool, { schema: schema_exports });
-      } catch (err) {
-        console.warn("[ACIMS DB] Could not initialize external pool:", err.message);
-        externalPool = null;
-      }
-    }
-    db = new Proxy({}, {
-      get(_target, prop) {
-        const active = getActiveDb();
-        const val = active[prop];
-        if (typeof val === "function") {
-          return val.bind(active);
-        }
-        return val;
-      }
-    });
-  }
-});
-
 // server-app.ts
 import express from "express";
-import path4 from "path";
-import fs4 from "fs";
+import path2 from "path";
+import fs2 from "fs";
 import { fileURLToPath } from "url";
 import cors from "cors";
 
 // artifacts/api-server/src/routes/index.ts
-import { Router as Router13 } from "express";
+import { Router as Router11 } from "express";
 
 // artifacts/api-server/src/routes/health.ts
 import { Router } from "express";
-
-// node_modules/.bun/zod@3.25.76/node_modules/zod/v3/external.js
-var external_exports = {};
-__export(external_exports, {
-  BRAND: () => BRAND,
-  DIRTY: () => DIRTY,
-  EMPTY_PATH: () => EMPTY_PATH,
-  INVALID: () => INVALID,
-  NEVER: () => NEVER,
-  OK: () => OK,
-  ParseStatus: () => ParseStatus,
-  Schema: () => ZodType,
-  ZodAny: () => ZodAny,
-  ZodArray: () => ZodArray,
-  ZodBigInt: () => ZodBigInt,
-  ZodBoolean: () => ZodBoolean,
-  ZodBranded: () => ZodBranded,
-  ZodCatch: () => ZodCatch,
-  ZodDate: () => ZodDate,
-  ZodDefault: () => ZodDefault,
-  ZodDiscriminatedUnion: () => ZodDiscriminatedUnion,
-  ZodEffects: () => ZodEffects,
-  ZodEnum: () => ZodEnum,
-  ZodError: () => ZodError,
-  ZodFirstPartyTypeKind: () => ZodFirstPartyTypeKind,
-  ZodFunction: () => ZodFunction,
-  ZodIntersection: () => ZodIntersection,
-  ZodIssueCode: () => ZodIssueCode,
-  ZodLazy: () => ZodLazy,
-  ZodLiteral: () => ZodLiteral,
-  ZodMap: () => ZodMap,
-  ZodNaN: () => ZodNaN,
-  ZodNativeEnum: () => ZodNativeEnum,
-  ZodNever: () => ZodNever,
-  ZodNull: () => ZodNull,
-  ZodNullable: () => ZodNullable,
-  ZodNumber: () => ZodNumber,
-  ZodObject: () => ZodObject,
-  ZodOptional: () => ZodOptional,
-  ZodParsedType: () => ZodParsedType,
-  ZodPipeline: () => ZodPipeline,
-  ZodPromise: () => ZodPromise,
-  ZodReadonly: () => ZodReadonly,
-  ZodRecord: () => ZodRecord,
-  ZodSchema: () => ZodType,
-  ZodSet: () => ZodSet,
-  ZodString: () => ZodString,
-  ZodSymbol: () => ZodSymbol,
-  ZodTransformer: () => ZodEffects,
-  ZodTuple: () => ZodTuple,
-  ZodType: () => ZodType,
-  ZodUndefined: () => ZodUndefined,
-  ZodUnion: () => ZodUnion,
-  ZodUnknown: () => ZodUnknown,
-  ZodVoid: () => ZodVoid,
-  addIssueToContext: () => addIssueToContext,
-  any: () => anyType,
-  array: () => arrayType,
-  bigint: () => bigIntType,
-  boolean: () => booleanType,
-  coerce: () => coerce,
-  custom: () => custom,
-  date: () => dateType,
-  datetimeRegex: () => datetimeRegex,
-  defaultErrorMap: () => en_default,
-  discriminatedUnion: () => discriminatedUnionType,
-  effect: () => effectsType,
-  enum: () => enumType,
-  function: () => functionType,
-  getErrorMap: () => getErrorMap,
-  getParsedType: () => getParsedType,
-  instanceof: () => instanceOfType,
-  intersection: () => intersectionType,
-  isAborted: () => isAborted,
-  isAsync: () => isAsync,
-  isDirty: () => isDirty,
-  isValid: () => isValid,
-  late: () => late,
-  lazy: () => lazyType,
-  literal: () => literalType,
-  makeIssue: () => makeIssue,
-  map: () => mapType,
-  nan: () => nanType,
-  nativeEnum: () => nativeEnumType,
-  never: () => neverType,
-  null: () => nullType,
-  nullable: () => nullableType,
-  number: () => numberType,
-  object: () => objectType,
-  objectUtil: () => objectUtil,
-  oboolean: () => oboolean,
-  onumber: () => onumber,
-  optional: () => optionalType,
-  ostring: () => ostring,
-  pipeline: () => pipelineType,
-  preprocess: () => preprocessType,
-  promise: () => promiseType,
-  quotelessJson: () => quotelessJson,
-  record: () => recordType,
-  set: () => setType,
-  setErrorMap: () => setErrorMap,
-  strictObject: () => strictObjectType,
-  string: () => stringType,
-  symbol: () => symbolType,
-  transformer: () => effectsType,
-  tuple: () => tupleType,
-  undefined: () => undefinedType,
-  union: () => unionType,
-  unknown: () => unknownType,
-  util: () => util,
-  void: () => voidType
-});
 
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/helpers/util.js
 var util;
@@ -1323,10 +164,6 @@ var ZodIssueCode = util.arrayToEnum([
   "not_multiple_of",
   "not_finite"
 ]);
-var quotelessJson = (obj) => {
-  const json = JSON.stringify(obj, null, 2);
-  return json.replace(/"([^"]+)":/g, "$1:");
-};
 var ZodError = class _ZodError extends Error {
   get errors() {
     return this.issues;
@@ -1527,17 +364,14 @@ var en_default = errorMap;
 
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
-function setErrorMap(map) {
-  overrideErrorMap = map;
-}
 function getErrorMap() {
   return overrideErrorMap;
 }
 
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path5, errorMaps, issueData } = params;
-  const fullPath = [...path5, ...issueData.path || []];
+  const { data, path: path3, errorMaps, issueData } = params;
+  const fullPath = [...path3, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -1560,7 +394,6 @@ var makeIssue = (params) => {
     message: errorMessage
   };
 };
-var EMPTY_PATH = [];
 function addIssueToContext(ctx, issueData) {
   const overrideMap = getErrorMap();
   const issue = makeIssue({
@@ -1653,11 +486,11 @@ var errorUtil;
 
 // node_modules/.bun/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path5, key) {
+  constructor(parent, value, path3, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path5;
+    this._path = path3;
     this._key = key;
   }
   get path() {
@@ -3663,10 +2496,10 @@ var ZodObject = class _ZodObject extends ZodType {
   //   }) as any;
   //   return merged;
   // }
-  catchall(index2) {
+  catchall(index) {
     return new _ZodObject({
       ...this._def,
-      catchall: index2
+      catchall: index
     });
   }
   pick(mask) {
@@ -3984,9 +2817,9 @@ function mergeValues(a, b) {
       return { valid: false };
     }
     const newArray = [];
-    for (let index2 = 0; index2 < a.length; index2++) {
-      const itemA = a[index2];
-      const itemB = b[index2];
+    for (let index = 0; index < a.length; index++) {
+      const itemA = a[index];
+      const itemB = b[index];
       const sharedValue = mergeValues(itemA, itemB);
       if (!sharedValue.valid) {
         return { valid: false };
@@ -4192,10 +3025,10 @@ var ZodMap = class extends ZodType {
     }
     const keyType = this._def.keyType;
     const valueType = this._def.valueType;
-    const pairs = [...ctx.data.entries()].map(([key, value], index2) => {
+    const pairs = [...ctx.data.entries()].map(([key, value], index) => {
       return {
-        key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, [index2, "key"])),
-        value: valueType._parse(new ParseInputLazyPath(ctx, value, ctx.path, [index2, "value"]))
+        key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, [index, "key"])),
+        value: valueType._parse(new ParseInputLazyPath(ctx, value, ctx.path, [index, "value"]))
       };
     });
     if (ctx.common.async) {
@@ -4886,7 +3719,6 @@ ZodNaN.create = (params) => {
     ...processCreateParams(params)
   });
 };
-var BRAND = /* @__PURE__ */ Symbol("zod_brand");
 var ZodBranded = class extends ZodType {
   _parse(input) {
     const { ctx } = this._processInputParams(input);
@@ -4978,33 +3810,6 @@ ZodReadonly.create = (type, params) => {
     ...processCreateParams(params)
   });
 };
-function cleanParams(params, data) {
-  const p = typeof params === "function" ? params(data) : typeof params === "string" ? { message: params } : params;
-  const p2 = typeof p === "string" ? { message: p } : p;
-  return p2;
-}
-function custom(check, _params = {}, fatal) {
-  if (check)
-    return ZodAny.create().superRefine((data, ctx) => {
-      const r = check(data);
-      if (r instanceof Promise) {
-        return r.then((r2) => {
-          if (!r2) {
-            const params = cleanParams(_params, data);
-            const _fatal = params.fatal ?? fatal ?? true;
-            ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
-          }
-        });
-      }
-      if (!r) {
-        const params = cleanParams(_params, data);
-        const _fatal = params.fatal ?? fatal ?? true;
-        ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
-      }
-      return;
-    });
-  return ZodAny.create();
-}
 var late = {
   object: ZodObject.lazycreate
 };
@@ -5047,9 +3852,6 @@ var ZodFirstPartyTypeKind;
   ZodFirstPartyTypeKind2["ZodPipeline"] = "ZodPipeline";
   ZodFirstPartyTypeKind2["ZodReadonly"] = "ZodReadonly";
 })(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
-var instanceOfType = (cls, params = {
-  message: `Input not instance of ${cls.name}`
-}) => custom((data) => data instanceof cls, params);
 var stringType = ZodString.create;
 var numberType = ZodNumber.create;
 var nanType = ZodNaN.create;
@@ -5084,9 +3886,6 @@ var optionalType = ZodOptional.create;
 var nullableType = ZodNullable.create;
 var preprocessType = ZodEffects.createWithPreprocess;
 var pipelineType = ZodPipeline.create;
-var ostring = () => stringType().optional();
-var onumber = () => numberType().optional();
-var oboolean = () => booleanType().optional();
 var coerce = {
   string: ((arg) => ZodString.create({ ...arg, coerce: true })),
   number: ((arg) => ZodNumber.create({ ...arg, coerce: true })),
@@ -5097,7 +3896,6 @@ var coerce = {
   bigint: ((arg) => ZodBigInt.create({ ...arg, coerce: true })),
   date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
 };
-var NEVER = INVALID;
 
 // lib/api-zod/src/generated/api.ts
 var HealthCheckResponse = objectType({
@@ -5744,709 +4542,8 @@ router.get("/healthz", (_req, res) => {
 });
 var health_default = router;
 
-// artifacts/api-server/src/routes/auth.ts
-import { Router as Router2 } from "express";
-
-// src/db/services.ts
-init_db();
-init_schema();
-import { eq as eq2, desc, and, ilike, or } from "drizzle-orm";
-async function getOrCreateProfile(userId, email, name, role = "STUDENT") {
-  try {
-    const existing = await query(
-      `SELECT * FROM profiles WHERE user_id = $1 LIMIT 1;`,
-      [userId]
-    );
-    if (existing.length > 0) {
-      return existing[0];
-    }
-    const inserted = await query(
-      `INSERT INTO profiles (user_id, email, name, role) VALUES ($1, $2, $3, $4) RETURNING *;`,
-      [userId, email, name, role]
-    );
-    const newProfile = inserted[0];
-    if (role === "STUDENT") {
-      await query(
-        `INSERT INTO students (profile_id, register_number, assigned_bus_id, assigned_route_id, pickup_stop_id)
-         VALUES ($1, $2, $3, $4, $5);`,
-        [
-          newProfile.id,
-          userId.startsWith("student-") ? userId : `REG-${newProfile.id}`,
-          "bus-12",
-          "route-bus-12",
-          "tambaram"
-        ]
-      ).catch(() => {
-      });
-    } else if (role === "DRIVER") {
-      await query(
-        `INSERT INTO drivers (profile_id, assigned_bus_id) VALUES ($1, $2);`,
-        [newProfile.id, "bus-12"]
-      ).catch(() => {
-      });
-    }
-    return newProfile;
-  } catch (error) {
-    console.error("Error in getOrCreateProfile:", error);
-    return {
-      id: 1,
-      userId,
-      email,
-      name,
-      phone: null,
-      role,
-      createdAt: /* @__PURE__ */ new Date()
-    };
-  }
-}
-async function getProfileWithDetails(userId) {
-  try {
-    const userProfiles = await query(
-      `SELECT * FROM profiles WHERE user_id = $1 LIMIT 1;`,
-      [userId]
-    );
-    if (userProfiles.length === 0) return null;
-    const profile = userProfiles[0];
-    let details = { ...profile };
-    if (profile.role === "STUDENT") {
-      const studentRecs = await query(
-        `SELECT * FROM students WHERE profile_id = $1 LIMIT 1;`,
-        [profile.id]
-      );
-      if (studentRecs.length > 0) {
-        details = { ...details, ...studentRecs[0] };
-      }
-    } else if (profile.role === "DRIVER") {
-      const driverRecs = await query(
-        `SELECT * FROM drivers WHERE profile_id = $1 LIMIT 1;`,
-        [profile.id]
-      );
-      if (driverRecs.length > 0) {
-        details = { ...details, ...driverRecs[0] };
-      }
-    }
-    return details;
-  } catch (error) {
-    console.error("Error in getProfileWithDetails:", error);
-    return null;
-  }
-}
-async function getDbBuses() {
-  try {
-    const rows = await query(`SELECT * FROM buses ORDER BY bus_number ASC;`);
-    if (rows.length > 0) return rows;
-    return await db.select().from(buses).orderBy(buses.busNumber);
-  } catch (error) {
-    console.error("Error fetching buses from DB:", error);
-    return [];
-  }
-}
-async function getDbBusById(busId) {
-  try {
-    const rows = await query(`SELECT * FROM buses WHERE id = $1 LIMIT 1;`, [busId]);
-    if (rows.length > 0) return rows[0];
-    const result = await db.select().from(buses).where(eq2(buses.id, busId));
-    return result[0] || null;
-  } catch (error) {
-    console.error(`Error fetching bus ${busId}:`, error);
-    return null;
-  }
-}
-async function createDbBus(data) {
-  try {
-    const inserted = await db.insert(buses).values(data).returning();
-    return inserted[0];
-  } catch (error) {
-    console.error("Error creating bus:", error);
-    throw new Error("Failed to create bus in database", { cause: error });
-  }
-}
-async function updateDbBus(busId, updates) {
-  try {
-    const updated = await db.update(buses).set(updates).where(eq2(buses.id, busId)).returning();
-    return updated[0] || null;
-  } catch (error) {
-    console.error(`Error updating bus ${busId}:`, error);
-    throw new Error("Failed to update bus in database", { cause: error });
-  }
-}
-async function getDbRoutes() {
-  try {
-    return await db.select().from(busRoutes).orderBy(busRoutes.routeCode);
-  } catch (error) {
-    console.error("Error fetching routes:", error);
-    return [];
-  }
-}
-async function getDbRouteById(routeId) {
-  try {
-    const route = await db.select().from(busRoutes).where(eq2(busRoutes.id, routeId));
-    if (route.length === 0) return null;
-    const stops = await db.select().from(busStops).where(eq2(busStops.routeId, routeId)).orderBy(busStops.sequenceNumber);
-    return {
-      ...route[0],
-      stops
-    };
-  } catch (error) {
-    console.error(`Error fetching route ${routeId}:`, error);
-    return null;
-  }
-}
-async function createDbRoute(data) {
-  try {
-    const inserted = await db.insert(busRoutes).values(data).returning();
-    return inserted[0];
-  } catch (error) {
-    console.error("Error creating route:", error);
-    throw new Error("Failed to create route", { cause: error });
-  }
-}
-async function updateDbRoute(routeId, updates) {
-  try {
-    const updated = await db.update(busRoutes).set(updates).where(eq2(busRoutes.id, routeId)).returning();
-    return updated[0] || null;
-  } catch (error) {
-    console.error(`Error updating route ${routeId}:`, error);
-    throw new Error("Failed to update route", { cause: error });
-  }
-}
-async function getDbStopsByRoute(routeId) {
-  try {
-    const rows = await query(
-      `SELECT * FROM bus_stops WHERE route_id = $1 ORDER BY sequence_number ASC;`,
-      [routeId]
-    );
-    if (rows.length > 0) return rows;
-    return await db.select().from(busStops).where(eq2(busStops.routeId, routeId)).orderBy(busStops.sequenceNumber);
-  } catch (error) {
-    console.error("Error fetching stops:", error);
-    return [];
-  }
-}
-async function recordBusLocation(location) {
-  try {
-    const recordedDate = location.recordedAt ? new Date(location.recordedAt) : /* @__PURE__ */ new Date();
-    const receivedDate = location.receivedAt ? new Date(location.receivedAt) : /* @__PURE__ */ new Date();
-    const recordedIso = recordedDate.toISOString();
-    const receivedIso = receivedDate.toISOString();
-    const rows = await query(
-      `INSERT INTO bus_locations (bus_id, driver_id, latitude, longitude, accuracy, altitude, altitude_accuracy, speed, heading, recorded_at, received_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING *;`,
-      [
-        location.busId,
-        location.driverId || null,
-        location.latitude,
-        location.longitude,
-        location.accuracy ?? null,
-        location.altitude ?? null,
-        location.altitudeAccuracy ?? null,
-        location.speed ?? null,
-        location.heading ?? null,
-        recordedIso,
-        receivedIso
-      ]
-    );
-    await query(
-      `UPDATE tracking_sessions SET last_location_at = $1 WHERE bus_id = $2 AND status = 'ACTIVE'`,
-      [recordedIso, location.busId]
-    ).catch(() => {
-    });
-    return rows[0] || {
-      busId: location.busId,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      speed: location.speed,
-      heading: location.heading,
-      accuracy: location.accuracy,
-      recordedAt: recordedIso,
-      receivedAt: receivedIso
-    };
-  } catch (error) {
-    console.error("Error recording bus location:", error);
-    throw new Error("Failed to save bus location", { cause: error });
-  }
-}
-async function getLatestBusLocation(busId) {
-  try {
-    const rows = await query(
-      `SELECT * FROM bus_locations WHERE bus_id = $1 ORDER BY recorded_at DESC LIMIT 1;`,
-      [busId]
-    );
-    return rows[0] || null;
-  } catch (error) {
-    console.error(`Error getting latest location for bus ${busId}:`, error);
-    return null;
-  }
-}
-async function getRecentBusLocations(busId, limit = 50) {
-  try {
-    return await query(
-      `SELECT * FROM bus_locations WHERE bus_id = $1 ORDER BY recorded_at DESC LIMIT $2;`,
-      [busId, limit]
-    );
-  } catch (error) {
-    console.error(`Error getting recent locations for bus ${busId}:`, error);
-    return [];
-  }
-}
-async function startTrackingSession(busId, driverId) {
-  try {
-    await db.update(trackingSessions).set({ status: "ENDED", endedAt: /* @__PURE__ */ new Date() }).where(
-      and(
-        eq2(trackingSessions.busId, busId),
-        eq2(trackingSessions.status, "ACTIVE")
-      )
-    );
-    const sessionId = `session-${busId}-${Date.now()}`;
-    const inserted = await db.insert(trackingSessions).values({
-      id: sessionId,
-      busId,
-      driverId,
-      status: "ACTIVE",
-      startedAt: /* @__PURE__ */ new Date()
-    }).returning();
-    return inserted[0];
-  } catch (error) {
-    console.error("Error starting tracking session:", error);
-    throw new Error("Failed to start tracking session", { cause: error });
-  }
-}
-async function pauseTrackingSession(busId) {
-  try {
-    const updated = await db.update(trackingSessions).set({ status: "PAUSED" }).where(
-      and(
-        eq2(trackingSessions.busId, busId),
-        eq2(trackingSessions.status, "ACTIVE")
-      )
-    ).returning();
-    return updated[0] || null;
-  } catch (error) {
-    console.error("Error pausing tracking session:", error);
-    throw new Error("Failed to pause tracking session", { cause: error });
-  }
-}
-async function resumeTrackingSession(busId) {
-  try {
-    const updated = await db.update(trackingSessions).set({ status: "ACTIVE" }).where(
-      and(
-        eq2(trackingSessions.busId, busId),
-        eq2(trackingSessions.status, "PAUSED")
-      )
-    ).returning();
-    return updated[0] || null;
-  } catch (error) {
-    console.error("Error resuming tracking session:", error);
-    throw new Error("Failed to resume tracking session", { cause: error });
-  }
-}
-async function stopTrackingSession(busId) {
-  try {
-    const updated = await db.update(trackingSessions).set({
-      status: "ENDED",
-      endedAt: /* @__PURE__ */ new Date()
-    }).where(
-      and(
-        eq2(trackingSessions.busId, busId),
-        or(
-          eq2(trackingSessions.status, "ACTIVE"),
-          eq2(trackingSessions.status, "PAUSED")
-        )
-      )
-    ).returning();
-    return updated[0] || null;
-  } catch (error) {
-    console.error("Error stopping tracking session:", error);
-    throw new Error("Failed to stop tracking session", { cause: error });
-  }
-}
-async function getBusTrackingSession(busId) {
-  try {
-    const sessions2 = await db.select().from(trackingSessions).where(eq2(trackingSessions.busId, busId)).orderBy(desc(trackingSessions.startedAt)).limit(1);
-    return sessions2[0] || null;
-  } catch (error) {
-    return null;
-  }
-}
-async function isBusTrackingActive(busId) {
-  try {
-    const session = await getBusTrackingSession(busId);
-    return {
-      isActive: session?.status === "ACTIVE",
-      isPaused: session?.status === "PAUSED",
-      status: session?.status || "IDLE",
-      session
-    };
-  } catch (error) {
-    return { isActive: false, isPaused: false, status: "IDLE", session: null };
-  }
-}
-async function verifyDriverBusAssignment(driverId, busId) {
-  try {
-    const bus = await getDbBusById(busId);
-    if (!bus) return false;
-    if (bus.driverId === driverId) return true;
-    const profile = await db.select().from(profiles).where(eq2(profiles.userId, driverId)).limit(1);
-    if (profile.length > 0) {
-      const driverRecord = await db.select().from(drivers).where(eq2(drivers.profileId, profile[0].id)).limit(1);
-      if (driverRecord.length > 0 && driverRecord[0].assignedBusId === busId) {
-        return true;
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-async function getUserNotifications(userId) {
-  try {
-    return await db.select().from(notifications).where(eq2(notifications.userId, userId)).orderBy(desc(notifications.createdAt)).limit(50);
-  } catch (error) {
-    console.error("Error fetching notifications:", error);
-    return [];
-  }
-}
-async function getDbCampusLocations(category) {
-  try {
-    if (category && category !== "all") {
-      return await db.select().from(campusLocations).where(eq2(campusLocations.category, category)).orderBy(campusLocations.name);
-    }
-    return await db.select().from(campusLocations).orderBy(campusLocations.name);
-  } catch (error) {
-    console.error("Error fetching campus locations:", error);
-    return [];
-  }
-}
-async function searchDbCampusLocations(term) {
-  try {
-    const pattern = `%${term.trim()}%`;
-    return await db.select().from(campusLocations).where(
-      or(
-        ilike(campusLocations.name, pattern),
-        ilike(campusLocations.description, pattern),
-        ilike(campusLocations.category, pattern)
-      )
-    ).orderBy(campusLocations.name).limit(20);
-  } catch (error) {
-    console.error("Error searching campus locations:", error);
-    return [];
-  }
-}
-async function getDbCampusPaths() {
-  try {
-    return await db.select().from(campusPaths);
-  } catch (error) {
-    console.error("Error fetching campus paths:", error);
-    return [];
-  }
-}
-async function getDbQueueStatus(busId, studentId) {
-  try {
-    const activeWaiting = await db.select().from(boardingQueue).where(and(eq2(boardingQueue.busId, busId), eq2(boardingQueue.status, "WAITING"))).orderBy(boardingQueue.joinedAt);
-    let studentEntry = null;
-    let studentPosition = null;
-    if (studentId) {
-      const idx = activeWaiting.findIndex((q) => q.studentId === studentId);
-      if (idx !== -1) {
-        studentEntry = activeWaiting[idx];
-        studentPosition = idx + 1;
-      }
-    }
-    return {
-      busId,
-      queueSize: activeWaiting.length,
-      userInQueue: Boolean(studentEntry),
-      queuePosition: studentPosition,
-      entry: studentEntry,
-      status: activeWaiting.length > 0 ? "ACTIVE" : "EMPTY",
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-  } catch (error) {
-    console.error(`Error getting queue status for bus ${busId}:`, error);
-    return {
-      busId,
-      queueSize: 0,
-      userInQueue: false,
-      queuePosition: null,
-      entry: null,
-      status: "UNAVAILABLE",
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-  }
-}
-async function joinDbQueue(busId, studentId, boardingStop) {
-  try {
-    const existing = await db.select().from(boardingQueue).where(
-      and(
-        eq2(boardingQueue.busId, busId),
-        eq2(boardingQueue.studentId, studentId),
-        eq2(boardingQueue.status, "WAITING")
-      )
-    );
-    if (existing.length > 0) {
-      const status2 = await getDbQueueStatus(busId, studentId);
-      return { duplicate: true, status: status2 };
-    }
-    const inserted = await db.insert(boardingQueue).values({
-      busId,
-      studentId,
-      boardingStop,
-      status: "WAITING"
-    }).returning();
-    const status = await getDbQueueStatus(busId, studentId);
-    return { duplicate: false, entry: inserted[0], status };
-  } catch (error) {
-    console.error("Error joining database queue:", error);
-    throw new Error("Failed to join queue", { cause: error });
-  }
-}
-async function leaveDbQueue(busId, studentId) {
-  try {
-    await db.update(boardingQueue).set({
-      status: "CANCELLED",
-      updatedAt: /* @__PURE__ */ new Date()
-    }).where(
-      and(
-        eq2(boardingQueue.busId, busId),
-        eq2(boardingQueue.studentId, studentId),
-        eq2(boardingQueue.status, "WAITING")
-      )
-    );
-    return await getDbQueueStatus(busId, studentId);
-  } catch (error) {
-    console.error("Error leaving database queue:", error);
-    throw new Error("Failed to leave queue", { cause: error });
-  }
-}
-async function getDbStudentActiveQueue(studentId) {
-  try {
-    const active = await db.select().from(boardingQueue).where(and(eq2(boardingQueue.studentId, studentId), eq2(boardingQueue.status, "WAITING"))).orderBy(desc(boardingQueue.joinedAt)).limit(1);
-    if (active.length === 0) return null;
-    const busQueue = await getDbQueueStatus(active[0].busId, studentId);
-    return {
-      ...active[0],
-      queuePosition: busQueue.queuePosition,
-      totalInQueue: busQueue.queueSize
-    };
-  } catch (error) {
-    console.error(`Error fetching active queue for student ${studentId}:`, error);
-    return null;
-  }
-}
-async function getDbStudentPreferences(userId) {
-  try {
-    const prefs = await db.select().from(studentPreferences).where(eq2(studentPreferences.userId, userId));
-    return prefs[0] || null;
-  } catch (error) {
-    console.error(`Error fetching preferences for ${userId}:`, error);
-    return null;
-  }
-}
-async function upsertDbStudentPreferences(userId, data) {
-  try {
-    const existing = await db.select().from(studentPreferences).where(eq2(studentPreferences.userId, userId));
-    if (existing.length > 0) {
-      const updated = await db.update(studentPreferences).set({
-        ...data,
-        updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq2(studentPreferences.userId, userId)).returning();
-      return updated[0];
-    }
-    const inserted = await db.insert(studentPreferences).values({
-      userId,
-      ...data
-    }).returning();
-    return inserted[0];
-  } catch (error) {
-    console.error(`Error saving preferences for ${userId}:`, error);
-    throw new Error("Failed to save student preferences", { cause: error });
-  }
-}
-async function recordStudentLocation(data) {
-  try {
-    const inserted = await db.insert(studentLocations).values(data).returning();
-    return inserted[0];
-  } catch (error) {
-    console.error("Error recording student location:", error);
-    return null;
-  }
-}
-async function getLatestStudentLocation(userId) {
-  try {
-    const loc = await db.select().from(studentLocations).where(eq2(studentLocations.userId, userId)).orderBy(desc(studentLocations.recordedAt)).limit(1);
-    return loc[0] || null;
-  } catch (error) {
-    console.error(`Error getting latest location for student ${userId}:`, error);
-    return null;
-  }
-}
-async function calculateDbCampusWalkingRoute(startIdOrCoords, destId) {
-  try {
-    let haversineMeters3 = function(c1, c2) {
-      const R = 6371e3;
-      const dLat = (c2.latitude - c1.latitude) * Math.PI / 180;
-      const dLon = (c2.longitude - c1.longitude) * Math.PI / 180;
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(c1.latitude * Math.PI / 180) * Math.cos(c2.latitude * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    };
-    var haversineMeters2 = haversineMeters3;
-    const allLocations = await db.select().from(campusLocations);
-    const allPaths = await db.select().from(campusPaths);
-    const dest = allLocations.find((l) => l.id === destId || l.name.toLowerCase() === destId.toLowerCase());
-    if (!dest) {
-      return null;
-    }
-    let startCoord;
-    let startName = "Current Location";
-    if (typeof startIdOrCoords === "string") {
-      const startLoc = allLocations.find((l) => l.id === startIdOrCoords || l.name.toLowerCase() === startIdOrCoords.toLowerCase());
-      if (!startLoc) return null;
-      startCoord = { latitude: startLoc.latitude, longitude: startLoc.longitude };
-      startName = startLoc.name;
-    } else {
-      startCoord = startIdOrCoords;
-    }
-    let matchedPath = null;
-    for (const p of allPaths) {
-      if (p.fromLocationId.toLowerCase().includes(dest.name.toLowerCase()) || p.toLocationId.toLowerCase().includes(dest.name.toLowerCase()) || dest.description && (p.fromLocationId.includes(dest.id) || p.toLocationId.includes(dest.id))) {
-        matchedPath = p;
-        break;
-      }
-    }
-    const directDistance = Math.round(haversineMeters3(startCoord, { latitude: dest.latitude, longitude: dest.longitude }));
-    const distanceMeters = matchedPath ? Math.round(matchedPath.distanceMeters) : directDistance;
-    const walkingMinutes = Math.max(1, Math.round(distanceMeters / 80));
-    let pathCoordinates = [];
-    if (matchedPath && matchedPath.pathPoints) {
-      try {
-        pathCoordinates = JSON.parse(matchedPath.pathPoints);
-      } catch (e) {
-        pathCoordinates = [
-          [startCoord.latitude, startCoord.longitude],
-          [dest.latitude, dest.longitude]
-        ];
-      }
-    } else {
-      pathCoordinates = [
-        [startCoord.latitude, startCoord.longitude],
-        [dest.latitude, dest.longitude]
-      ];
-    }
-    return {
-      startLocation: startName,
-      destination: dest.name,
-      destinationCategory: dest.category,
-      distanceMeters,
-      walkingMinutes,
-      steps: [
-        `Depart from ${startName}`,
-        `Follow pedestrian walkway towards ${dest.name}`,
-        `Arrive at ${dest.name} (${dest.category})`
-      ],
-      pathPoints: pathCoordinates,
-      verifiedSource: "Cloud SQL campus_paths & campus_locations"
-    };
-  } catch (error) {
-    console.error("Error calculating campus walking route:", error);
-    return null;
-  }
-}
-
-// artifacts/api-server/src/routes/auth.ts
-init_db();
-init_schema();
-import { eq as eq3 } from "drizzle-orm";
-var router2 = Router2();
-router2.post("/auth/profile", async (req, res) => {
-  try {
-    const { uid, email, name, role = "STUDENT" } = req.body;
-    if (!uid) {
-      return res.status(400).json({ error: "Missing uid" });
-    }
-    const profile = await getOrCreateProfile(
-      uid,
-      email || `${uid}@rec.edu.in`,
-      name || "Campus Member",
-      role
-    );
-    const details = await getProfileWithDetails(uid);
-    res.json({ profile: details || profile });
-  } catch (err) {
-    console.error("Error syncing profile:", err);
-    res.status(500).json({ error: "Failed to sync profile" });
-  }
-});
-router2.post("/auth/campus-login", async (req, res) => {
-  try {
-    const { identifier, role = "STUDENT" } = req.body;
-    if (!identifier) {
-      return res.status(400).json({ error: "Identifier is required" });
-    }
-    const cleanId = String(identifier).trim();
-    let effectiveRole = "STUDENT";
-    if (role === "ADMIN" || cleanId.toLowerCase() === "admin") {
-      effectiveRole = "ADMIN";
-    } else if (role === "DRIVER" || cleanId.toLowerCase().startsWith("driver-")) {
-      effectiveRole = "DRIVER";
-    } else if (role === "PARENT") {
-      effectiveRole = "PARENT";
-    }
-    const email = `${cleanId.replace(/[^a-zA-Z0-9]/g, "").toLowerCase()}@rec.edu.in`;
-    const name = effectiveRole === "DRIVER" ? cleanId.startsWith("driver-") ? cleanId.replace("driver-", "Driver ").toUpperCase() : `Driver ${cleanId}` : effectiveRole === "ADMIN" ? "Transport Administrator" : `Student (${cleanId})`;
-    const profile = await getOrCreateProfile(cleanId, email, name, effectiveRole);
-    const details = await getProfileWithDetails(cleanId);
-    res.json({
-      profile: details || profile,
-      token: `campus-token-${cleanId}-${Date.now()}`
-    });
-  } catch (err) {
-    console.error("Error in campus login:", err);
-    res.status(500).json({ error: "Login failed" });
-  }
-});
-router2.get("/auth/profile/:userId", async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const details = await getProfileWithDetails(userId);
-    if (!details) {
-      return res.status(404).json({ error: "Profile not found" });
-    }
-    res.json({ profile: details });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch profile" });
-  }
-});
-router2.put("/auth/profile/:userId", async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { name, phone, pickupStopId, assignedBusId } = req.body;
-    const existingProfiles = await db.select().from(profiles).where(eq3(profiles.userId, userId));
-    if (existingProfiles.length === 0) {
-      return res.status(404).json({ error: "Profile not found" });
-    }
-    const currentProfile = existingProfiles[0];
-    if (name || phone) {
-      await db.update(profiles).set({
-        ...name ? { name } : {},
-        ...phone ? { phone } : {}
-      }).where(eq3(profiles.userId, userId));
-    }
-    if (currentProfile.role === "STUDENT" && (pickupStopId || assignedBusId)) {
-      await db.update(students).set({
-        ...pickupStopId ? { pickupStopId } : {},
-        ...assignedBusId ? { assignedBusId } : {}
-      }).where(eq3(students.profileId, currentProfile.id));
-    }
-    const updated = await getProfileWithDetails(userId);
-    res.json({ profile: updated });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to update profile" });
-  }
-});
-var auth_default = router2;
-
 // artifacts/api-server/src/routes/buses.ts
-import { Router as Router3 } from "express";
+import { Router as Router2 } from "express";
 
 // artifacts/api-server/src/services/routesData.ts
 function toRad(degrees) {
@@ -6462,10 +4559,10 @@ function haversineDistance(c1, c2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
-function calculateCumulativeDistances(path5) {
+function calculateCumulativeDistances(path3) {
   const cumulative = [0];
-  for (let i = 1; i < path5.length; i++) {
-    cumulative.push(cumulative[i - 1] + haversineDistance(path5[i - 1], path5[i]));
+  for (let i = 1; i < path3.length; i++) {
+    cumulative.push(cumulative[i - 1] + haversineDistance(path3[i - 1], path3[i]));
   }
   return cumulative;
 }
@@ -6794,1120 +4891,34 @@ function getAllRoutes() {
   return Object.values(routeRegistry);
 }
 
-// artifacts/api-server/src/services/gpsEngine.ts
-function haversineDistanceKm(coord1, coord2) {
-  const R = 6371;
-  const dLat = (coord2.latitude - coord1.latitude) * Math.PI / 180;
-  const dLon = (coord2.longitude - coord1.longitude) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(coord1.latitude * Math.PI / 180) * Math.cos(coord2.latitude * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-function validateGpsCoordinate(point, lastValidPoint, receivedAt = /* @__PURE__ */ new Date()) {
-  const recordedDate = new Date(point.recordedAt);
-  const networkDelayMs = Math.max(0, receivedAt.getTime() - recordedDate.getTime());
-  if (typeof point.latitude !== "number" || typeof point.longitude !== "number" || isNaN(point.latitude) || isNaN(point.longitude) || point.latitude < -90 || point.latitude > 90 || point.longitude < -180 || point.longitude > 180) {
-    return {
-      isValid: false,
-      quality: "INVALID",
-      rejectionReason: "Coordinates outside valid terrestrial latitude/longitude range",
-      isAnomaly: true,
-      networkDelayMs
-    };
-  }
-  if (Math.abs(point.latitude) < 1e-4 && Math.abs(point.longitude) < 1e-4) {
-    return {
-      isValid: false,
-      quality: "INVALID",
-      rejectionReason: "Coordinate at (0,0) indicates uncalibrated GPS hardware",
-      isAnomaly: true,
-      networkDelayMs
-    };
-  }
-  const accuracy = typeof point.accuracy === "number" && !isNaN(point.accuracy) ? point.accuracy : 15;
-  let quality = "ACCEPTABLE";
-  if (accuracy <= 15) {
-    quality = "HIGH";
-  } else if (accuracy <= 40) {
-    quality = "ACCEPTABLE";
-  } else if (accuracy <= 100) {
-    quality = "POOR";
-  } else {
-    quality = "INVALID";
-    return {
-      isValid: false,
-      quality: "INVALID",
-      rejectionReason: `GPS accuracy too low (\xB1${Math.round(accuracy)}m exceeds 100m maximum tolerance)`,
-      isAnomaly: false,
-      networkDelayMs
-    };
-  }
-  let isAnomaly = false;
-  if (lastValidPoint) {
-    const prevDate = new Date(lastValidPoint.recordedAt);
-    const timeDeltaSec = (recordedDate.getTime() - prevDate.getTime()) / 1e3;
-    if (timeDeltaSec > 0 && timeDeltaSec < 10) {
-      const distanceKm = haversineDistanceKm(
-        { latitude: lastValidPoint.latitude, longitude: lastValidPoint.longitude },
-        { latitude: point.latitude, longitude: point.longitude }
-      );
-      const calculatedSpeedKmh = distanceKm / timeDeltaSec * 3600;
-      if (calculatedSpeedKmh > 120 && distanceKm > 0.2) {
-        return {
-          isValid: false,
-          quality: "INVALID",
-          rejectionReason: `Impossible coordinate displacement: ${Math.round(distanceKm * 1e3)}m in ${Math.round(timeDeltaSec)}s (${Math.round(calculatedSpeedKmh)} km/h)`,
-          isAnomaly: true,
-          networkDelayMs
-        };
-      }
-    }
-  }
-  return {
-    isValid: true,
-    quality,
-    isAnomaly,
-    networkDelayMs
-  };
-}
-function evaluateFreshness(recordedAt, trackingStatus = "IDLE", currentTime = /* @__PURE__ */ new Date()) {
-  if (!recordedAt) {
-    return { freshness: "UNAVAILABLE", secondsAgo: Infinity };
-  }
-  const recordedDate = new Date(recordedAt);
-  const diffSec = Math.max(0, Math.floor((currentTime.getTime() - recordedDate.getTime()) / 1e3));
-  if (trackingStatus === "ENDED" || trackingStatus === "IDLE") {
-    return { freshness: "UNAVAILABLE", secondsAgo: diffSec };
-  }
-  if (trackingStatus === "PAUSED") {
-    return { freshness: "STALE", secondsAgo: diffSec };
-  }
-  if (diffSec <= 30) {
-    return { freshness: "LIVE", secondsAgo: diffSec };
-  } else if (diffSec <= 90) {
-    return { freshness: "RECENT", secondsAgo: diffSec };
-  } else {
-    return { freshness: "STALE", secondsAgo: diffSec };
-  }
-}
-function calculateNextStopAndEta(currentCoord, stops, freshness) {
-  if (!stops || stops.length === 0) {
-    return {
-      nextStop: "Depot",
-      nextStopId: "depot",
-      isAtStop: false,
-      isApproachingStop: false,
-      stopSequenceIndex: 0,
-      remainingDistanceKm: 0,
-      etaMinutes: 0,
-      formattedEta: "Unavailable",
-      etaLabel: "UNAVAILABLE",
-      etaConfidence: "UNAVAILABLE",
-      statusText: "Route stops unavailable"
-    };
-  }
-  let closestStopIndex = 0;
-  let minStopDistanceKm = Infinity;
-  stops.forEach((stop, idx) => {
-    const distKm = haversineDistanceKm(currentCoord, {
-      latitude: stop.latitude,
-      longitude: stop.longitude
-    });
-    if (distKm < minStopDistanceKm) {
-      minStopDistanceKm = distKm;
-      closestStopIndex = idx;
-    }
-  });
-  const isAtStop = minStopDistanceKm <= 0.08;
-  const isApproachingStop = minStopDistanceKm <= 0.25 && !isAtStop;
-  let targetStopIndex = closestStopIndex;
-  if (isAtStop && closestStopIndex < stops.length - 1) {
-    targetStopIndex = closestStopIndex + 1;
-  }
-  const targetStop = stops[targetStopIndex] || stops[stops.length - 1];
-  const previousStopObj = targetStopIndex > 0 ? stops[targetStopIndex - 1] : void 0;
-  const directDistanceToStopKm = haversineDistanceKm(currentCoord, {
-    latitude: targetStop.latitude,
-    longitude: targetStop.longitude
-  });
-  const effectiveSpeedKmh = typeof currentCoord.speed === "number" && currentCoord.speed > 5 ? currentCoord.speed : 22;
-  let etaMinutes = Math.round(directDistanceToStopKm / effectiveSpeedKmh * 60);
-  if (isAtStop) {
-    etaMinutes = 0;
-  } else if (isApproachingStop) {
-    etaMinutes = 1;
-  } else {
-    etaMinutes = Math.max(1, etaMinutes);
-  }
-  let etaLabel = "UNAVAILABLE";
-  let etaConfidence = "UNAVAILABLE";
-  if (freshness === "LIVE") {
-    etaLabel = "LIVE ETA";
-    etaConfidence = directDistanceToStopKm < 5 ? "HIGH" : "MEDIUM";
-  } else if (freshness === "RECENT") {
-    etaLabel = "ESTIMATED ETA";
-    etaConfidence = "MEDIUM";
-  } else if (freshness === "STALE") {
-    etaLabel = "SCHEDULED";
-    etaConfidence = "LOW";
-  } else {
-    etaLabel = "UNAVAILABLE";
-    etaConfidence = "UNAVAILABLE";
-  }
-  const formattedEta = isAtStop ? "Arriving now" : etaMinutes === 1 ? "1 min" : `${etaMinutes} min`;
-  let statusText = "";
-  if (isAtStop) {
-    statusText = `At Stop: ${targetStop.name}`;
-  } else if (isApproachingStop) {
-    statusText = `Approaching: ${targetStop.name}`;
-  } else if (freshness === "LIVE") {
-    statusText = `In Transit to ${targetStop.name}`;
-  } else if (freshness === "RECENT") {
-    statusText = `In Transit to ${targetStop.name} (Recent GPS)`;
-  } else if (freshness === "STALE") {
-    statusText = `Signal Delayed \xB7 Last near ${targetStop.name}`;
-  } else {
-    statusText = `Tracking Inactive`;
-  }
-  return {
-    nextStop: targetStop.name,
-    nextStopId: targetStop.id,
-    previousStop: previousStopObj?.name,
-    previousStopId: previousStopObj?.id,
-    isAtStop,
-    isApproachingStop,
-    stopSequenceIndex: targetStopIndex,
-    remainingDistanceKm: Number(directDistanceToStopKm.toFixed(2)),
-    etaMinutes,
-    formattedEta,
-    etaLabel,
-    etaConfidence,
-    statusText
-  };
-}
-
-// artifacts/api-server/src/services/realtimeHub.ts
-var RealtimeLocationHub = class {
-  clients = /* @__PURE__ */ new Map();
-  heartbeatTimer = null;
-  clientIdCounter = 0;
-  constructor() {
-    this.startHeartbeat();
-  }
-  startHeartbeat() {
-    this.heartbeatTimer = setInterval(() => {
-      const pingPayload = `: ping ${Date.now()}
-
-`;
-      for (const [id, client] of this.clients.entries()) {
-        try {
-          client.res.write(pingPayload);
-        } catch {
-          this.removeClient(id);
-        }
-      }
-    }, 15e3);
-  }
-  /**
-   * Registers a client for Server-Sent Events (SSE) updates for a specific bus
-   */
-  subscribeBus(busId, res, initialData) {
-    const clientId = `bus-${busId}-${++this.clientIdCounter}-${Date.now()}`;
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-      "Access-Control-Allow-Origin": "*"
-    });
-    res.flushHeaders?.();
-    const client = {
-      id: clientId,
-      res,
-      busId,
-      connectedAt: /* @__PURE__ */ new Date()
-    };
-    this.clients.set(clientId, client);
-    res.write(`event: connected
-data: ${JSON.stringify({ clientId, busId, timestamp: (/* @__PURE__ */ new Date()).toISOString() })}
-
-`);
-    if (initialData) {
-      res.write(`event: location
-data: ${JSON.stringify(initialData)}
-
-`);
-    }
-    res.on("close", () => {
-      this.removeClient(clientId);
-    });
-    return clientId;
-  }
-  /**
-   * Registers a client for all active buses (Admin Fleet Live Monitoring)
-   */
-  subscribeAllBuses(res, initialFleet) {
-    const clientId = `admin-all-${++this.clientIdCounter}-${Date.now()}`;
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-      "Access-Control-Allow-Origin": "*"
-    });
-    res.flushHeaders?.();
-    const client = {
-      id: clientId,
-      res,
-      connectedAt: /* @__PURE__ */ new Date()
-    };
-    this.clients.set(clientId, client);
-    res.write(`event: connected
-data: ${JSON.stringify({ clientId, scope: "all", timestamp: (/* @__PURE__ */ new Date()).toISOString() })}
-
-`);
-    if (initialFleet && initialFleet.length > 0) {
-      res.write(`event: fleet_snapshot
-data: ${JSON.stringify(initialFleet)}
-
-`);
-    }
-    res.on("close", () => {
-      this.removeClient(clientId);
-    });
-    return clientId;
-  }
-  /**
-   * Broadcasts a real-device GPS location update to all listening clients
-   */
-  broadcastLocation(telemetry) {
-    const payload = `event: location
-data: ${JSON.stringify(telemetry)}
-
-`;
-    for (const [id, client] of this.clients.entries()) {
-      if (!client.busId || client.busId === telemetry.busId) {
-        try {
-          client.res.write(payload);
-        } catch {
-          this.removeClient(id);
-        }
-      }
-    }
-  }
-  /**
-   * Broadcasts tracking session state change (ACTIVE, PAUSED, ENDED)
-   */
-  broadcastSessionState(busId, state, sessionDetails) {
-    const payload = `event: session_change
-data: ${JSON.stringify({ busId, state, session: sessionDetails, timestamp: (/* @__PURE__ */ new Date()).toISOString() })}
-
-`;
-    for (const [id, client] of this.clients.entries()) {
-      if (!client.busId || client.busId === busId) {
-        try {
-          client.res.write(payload);
-        } catch {
-          this.removeClient(id);
-        }
-      }
-    }
-  }
-  removeClient(id) {
-    this.clients.delete(id);
-  }
-  getConnectedCount(busId) {
-    if (!busId) return this.clients.size;
-    let count = 0;
-    for (const client of this.clients.values()) {
-      if (!client.busId || client.busId === busId) count++;
-    }
-    return count;
-  }
-};
-var realtimeHub = new RealtimeLocationHub();
-
-// artifacts/api-server/src/services/notificationEngine.ts
-var notifications2 = [
-  {
-    id: "alert-approaching-tambaram",
-    type: "APPROACHING_STOP",
-    title: "Approaching your stop",
-    message: "Bus 12 is approaching Tambaram.",
-    createdAt: new Date(Date.now() - 1e3 * 60 * 2),
-    read: false,
-    busId: "bus-12"
-  },
-  {
-    id: "alert-boarding-queue",
-    type: "QUEUE_OPEN",
-    title: "Boarding queue open",
-    message: "Boarding queue for Bus 12 is now active for upcoming stops.",
-    createdAt: new Date(Date.now() - 1e3 * 60 * 8),
-    read: false,
-    busId: "bus-12"
-  },
-  {
-    id: "alert-started",
-    type: "BUS_STARTED",
-    title: "Route started",
-    message: "Bus 12 has started its route.",
-    createdAt: new Date(Date.now() - 1e3 * 60 * 22),
-    read: true,
-    busId: "bus-12"
-  }
-];
-var lastState = {
-  nextStop: "Tambaram",
-  etaMinutes: 3
-};
-function addNotification(type, title, message, busId) {
-  if (type === "NEARBY") {
-    const existingNearby = notifications2.find(
-      (notification2) => notification2.type === type && notification2.busId === busId && !notification2.read
-    );
-    if (existingNearby) return existingNearby;
-  }
-  const duplicate = notifications2.find(
-    (notification2) => notification2.type === type && notification2.message === message && notification2.busId === busId
-  );
-  if (duplicate) return duplicate;
-  const notification = {
-    id: `alert-${Date.now()}`,
-    type,
-    title,
-    message,
-    createdAt: /* @__PURE__ */ new Date(),
-    read: false,
-    busId
-  };
-  notifications2.unshift(notification);
-  return notification;
-}
-function syncBusNotifications(bus, queueEntry) {
-  if (bus.nextStop !== lastState.nextStop) {
-    addNotification(
-      "APPROACHING_STOP",
-      "Approaching your stop",
-      `Bus ${bus.busNumber} is approaching ${bus.nextStop}.`,
-      bus.id
-    );
-  }
-  if (bus.etaMinutes <= 3 && bus.nextStop === "Tambaram") {
-    addNotification(
-      "NEARBY",
-      "Your bus is nearby",
-      `Bus ${bus.busNumber} is ${bus.etaMinutes} minutes away from Tambaram.`,
-      bus.id
-    );
-  }
-  if (queueEntry) {
-    const message = `You are #${queueEntry.queuePosition} in the overflow queue.`;
-    const latestQueueAlert = notifications2.find(
-      (notification) => notification.type === "QUEUE_UPDATE" && !notification.read
-    );
-    if (!latestQueueAlert || latestQueueAlert.message !== message) {
-      addNotification("QUEUE_UPDATE", "Queue position updated", message, bus.id);
-    }
-  }
-  lastState = {
-    nextStop: bus.nextStop,
-    etaMinutes: bus.etaMinutes
-  };
-}
-
-// artifacts/api-server/src/routes/buses.ts
-var router3 = Router3();
-async function buildBusTelemetry(busId) {
-  const bus = await getDbBusById(busId);
-  const busNumber = bus?.busNumber || busId.replace("bus-", "");
-  const routeDef = getRouteForBus(busId);
-  const routeId = bus?.routeId || routeDef?.id || `route-${busId}`;
-  const dbStops = await getDbStopsByRoute(routeId);
-  const stops = dbStops.length > 0 ? dbStops.map((s, idx) => ({
-    id: s.id,
-    name: s.stopName,
-    sequence: s.sequenceNumber,
-    latitude: s.latitude,
-    longitude: s.longitude,
-    minutesFromPrevious: idx === 0 ? 0 : 3
-  })) : (routeDef?.stops || []).map((s, idx) => ({
-    id: s.id || `stop-${idx}`,
-    name: s.name || s.stopName || `Stop ${idx + 1}`,
-    sequence: s.sequence ?? idx,
-    latitude: s.latitude,
-    longitude: s.longitude,
-    minutesFromPrevious: s.minutesFromPrevious || (idx === 0 ? 0 : 3)
-  }));
-  const latestLoc = await getLatestBusLocation(busId);
-  const trackingState = await isBusTrackingActive(busId);
-  const { freshness, secondsAgo } = evaluateFreshness(
-    latestLoc?.recordedAt || null,
-    trackingState.status
-  );
-  if (!latestLoc) {
-    const firstStop = stops[0]?.name || "Campus Depot";
-    return {
-      busId,
-      busNumber,
-      driverId: bus?.driverId || void 0,
-      latitude: stops[0]?.latitude || 12.9287,
-      longitude: stops[0]?.longitude || 80.132,
-      accuracy: null,
-      speed: null,
-      heading: null,
-      altitude: null,
-      nextStop: firstStop,
-      nextStopId: stops[0]?.id || "depot",
-      isAtStop: false,
-      isApproachingStop: false,
-      stopSequenceIndex: 0,
-      etaMinutes: 0,
-      formattedEta: "Unavailable",
-      etaLabel: "UNAVAILABLE",
-      etaConfidence: "UNAVAILABLE",
-      remainingDistanceKm: 0,
-      status: trackingState.isActive ? "Driver Active \xB7 Waiting for GPS" : trackingState.isPaused ? "Tracking Paused" : "Tracking Standby \xB7 No Active Trip",
-      freshness: "UNAVAILABLE",
-      isLive: false,
-      trackingStatus: trackingState.status,
-      recordedAt: (/* @__PURE__ */ new Date(0)).toISOString(),
-      receivedAt: (/* @__PURE__ */ new Date(0)).toISOString(),
-      networkDelayMs: 0,
-      secondsAgo: Infinity,
-      quality: "INVALID",
-      source: "unverified"
-    };
-  }
-  const nextStopInfo = calculateNextStopAndEta(
-    {
-      latitude: latestLoc.latitude,
-      longitude: latestLoc.longitude,
-      speed: latestLoc.speed
-    },
-    stops,
-    freshness
-  );
-  const recordedDate = new Date(latestLoc.recordedAt);
-  const receivedDate = new Date(latestLoc.receivedAt || latestLoc.recordedAt);
-  const networkDelayMs = Math.max(0, receivedDate.getTime() - recordedDate.getTime());
-  let displayStatus = nextStopInfo.statusText;
-  if (trackingState.isPaused) {
-    displayStatus = `Tracking Paused \xB7 Last near ${nextStopInfo.nextStop}`;
-  } else if (!trackingState.isActive && freshness !== "LIVE") {
-    displayStatus = `Trip Concluded \xB7 Last at ${nextStopInfo.nextStop}`;
-  }
-  return {
-    busId,
-    busNumber,
-    driverId: latestLoc.driverId || bus?.driverId || void 0,
-    latitude: latestLoc.latitude,
-    longitude: latestLoc.longitude,
-    accuracy: latestLoc.accuracy,
-    speed: latestLoc.speed,
-    heading: latestLoc.heading,
-    altitude: latestLoc.altitude,
-    nextStop: nextStopInfo.nextStop,
-    nextStopId: nextStopInfo.nextStopId,
-    previousStop: nextStopInfo.previousStop,
-    previousStopId: nextStopInfo.previousStopId,
-    isAtStop: nextStopInfo.isAtStop,
-    isApproachingStop: nextStopInfo.isApproachingStop,
-    stopSequenceIndex: nextStopInfo.stopSequenceIndex,
-    etaMinutes: nextStopInfo.etaMinutes,
-    formattedEta: nextStopInfo.formattedEta,
-    etaLabel: nextStopInfo.etaLabel,
-    etaConfidence: nextStopInfo.etaConfidence,
-    remainingDistanceKm: nextStopInfo.remainingDistanceKm,
-    status: displayStatus,
-    freshness,
-    isLive: freshness === "LIVE",
-    trackingStatus: trackingState.status,
-    recordedAt: recordedDate.toISOString(),
-    receivedAt: receivedDate.toISOString(),
-    networkDelayMs,
-    secondsAgo,
-    quality: latestLoc.accuracy && latestLoc.accuracy <= 15 ? "HIGH" : latestLoc.accuracy && latestLoc.accuracy <= 40 ? "ACCEPTABLE" : "POOR",
-    source: "real-device-gps"
-  };
-}
-router3.get("/buses", async (_req, res) => {
-  try {
-    const dbBusesList = await getDbBuses();
-    const results = await Promise.all(
-      dbBusesList.map(async (bus) => {
-        const routeDef = getRouteForBus(bus.id);
-        const telemetry = await buildBusTelemetry(bus.id);
-        return {
-          id: bus.id,
-          busNumber: bus.busNumber,
-          origin: routeDef?.origin || "Central Campus",
-          destination: routeDef?.destination || "City Station",
-          routeLabel: routeDef?.name || "Campus Express",
-          capacity: 45,
-          currentLocation: { latitude: telemetry.latitude, longitude: telemetry.longitude },
-          nextStop: telemetry.nextStop,
-          nextStopId: telemetry.nextStopId,
-          isAtStop: telemetry.isAtStop,
-          etaMinutes: telemetry.etaMinutes,
-          formattedEta: telemetry.formattedEta,
-          etaLabel: telemetry.etaLabel,
-          etaConfidence: telemetry.etaConfidence,
-          remainingDistanceKm: telemetry.remainingDistanceKm,
-          status: telemetry.status,
-          updatedAt: telemetry.recordedAt,
-          active: bus.active,
-          routeId: bus.routeId || routeDef?.id || "route-bus-12",
-          driverId: bus.driverId || void 0,
-          locationMode: "driver-gps",
-          freshness: telemetry.freshness,
-          isLive: telemetry.isLive,
-          networkDelayMs: telemetry.networkDelayMs,
-          secondsAgo: telemetry.secondsAgo
-        };
-      })
-    );
-    res.json(results);
-  } catch (err) {
-    console.error("Error listing buses:", err);
-    res.status(500).json({ error: "Failed to list buses" });
-  }
-});
-router3.get("/buses/:busId", async (req, res) => {
-  try {
-    const { busId } = req.params;
-    const bus = await getDbBusById(busId);
-    if (!bus) {
-      return res.status(404).json({ error: "Bus not found" });
-    }
-    const routeDef = getRouteForBus(bus.id);
-    const telemetry = await buildBusTelemetry(bus.id);
-    res.json({
-      id: bus.id,
-      busNumber: bus.busNumber,
-      origin: routeDef?.origin || "Central Campus",
-      destination: routeDef?.destination || "City Station",
-      routeLabel: routeDef?.name || "Campus Express",
-      capacity: 45,
-      currentLocation: { latitude: telemetry.latitude, longitude: telemetry.longitude },
-      nextStop: telemetry.nextStop,
-      nextStopId: telemetry.nextStopId,
-      isAtStop: telemetry.isAtStop,
-      etaMinutes: telemetry.etaMinutes,
-      formattedEta: telemetry.formattedEta,
-      etaLabel: telemetry.etaLabel,
-      etaConfidence: telemetry.etaConfidence,
-      remainingDistanceKm: telemetry.remainingDistanceKm,
-      status: telemetry.status,
-      updatedAt: telemetry.recordedAt,
-      active: bus.active,
-      routeId: bus.routeId || routeDef?.id || "route-bus-12",
-      driverId: bus.driverId || void 0,
-      locationMode: "driver-gps",
-      freshness: telemetry.freshness,
-      isLive: telemetry.isLive,
-      networkDelayMs: telemetry.networkDelayMs,
-      secondsAgo: telemetry.secondsAgo
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to get bus" });
-  }
-});
-router3.get("/buses/:busId/location", async (req, res) => {
-  try {
-    const { busId } = req.params;
-    const bus = await getDbBusById(busId);
-    if (!bus) {
-      return res.status(404).json({ error: "Bus not found" });
-    }
-    const telemetry = await buildBusTelemetry(bus.id);
-    res.json(telemetry);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to get bus location" });
-  }
-});
-router3.get("/realtime/bus/:busId", async (req, res) => {
-  try {
-    const { busId } = req.params;
-    const bus = await getDbBusById(busId);
-    if (!bus) {
-      return res.status(404).json({ error: "Bus not found" });
-    }
-    const initialTelemetry = await buildBusTelemetry(busId);
-    realtimeHub.subscribeBus(busId, res, initialTelemetry);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to connect to realtime location stream" });
-  }
-});
-router3.get("/realtime/buses", async (_req, res) => {
-  try {
-    const dbBusesList = await getDbBuses();
-    const initialFleet = await Promise.all(
-      dbBusesList.map((b) => buildBusTelemetry(b.id))
-    );
-    realtimeHub.subscribeAllBuses(res, initialFleet);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to connect to fleet realtime stream" });
-  }
-});
-router3.get("/buses/:busId/history", async (req, res) => {
-  try {
-    const { busId } = req.params;
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || "50", 10)));
-    const history = await getRecentBusLocations(busId, limit);
-    res.json(history);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to get location history" });
-  }
-});
-router3.get("/buses/:busId/stops", async (req, res) => {
-  try {
-    const { busId } = req.params;
-    const bus = await getDbBusById(busId);
-    const routeId = bus?.routeId || `route-${busId}`;
-    const dbStops = await getDbStopsByRoute(routeId);
-    if (dbStops.length > 0) {
-      const formatted = dbStops.map((s, idx) => ({
-        id: s.id,
-        name: s.stopName,
-        sequence: s.sequenceNumber,
-        latitude: s.latitude,
-        longitude: s.longitude,
-        pathIndex: idx * 6,
-        minutesFromPrevious: idx === 0 ? 0 : 3
-      }));
-      return res.json(formatted);
-    }
-    const routeDef = getRouteForBus(busId);
-    res.json(routeDef?.stops || []);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to get stops" });
-  }
-});
-router3.get("/buses/:busId/route", async (req, res) => {
-  try {
-    const { busId } = req.params;
-    const routeDef = getRouteForBus(busId);
-    if (!routeDef) {
-      return res.status(404).json({ error: "Route not found" });
-    }
-    const bus = await getDbBusById(busId);
-    const routeId = bus?.routeId || routeDef.id;
-    const dbStops = await getDbStopsByRoute(routeId);
-    const formattedStops = dbStops.length > 0 ? dbStops.map((s, idx) => ({
-      id: s.id,
-      name: s.stopName,
-      sequence: s.sequenceNumber,
-      latitude: s.latitude,
-      longitude: s.longitude,
-      pathIndex: idx * 6,
-      minutesFromPrevious: idx === 0 ? 0 : 3
-    })) : routeDef.stops;
-    res.json({
-      ...routeDef,
-      busId,
-      busNumber: bus?.busNumber || routeDef.routeNumber,
-      stops: formattedStops
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to get route" });
-  }
-});
-router3.post("/bus/location", async (req, res) => {
-  try {
-    const {
-      busId,
-      latitude,
-      longitude,
-      accuracy,
-      altitude,
-      altitudeAccuracy,
-      speed,
-      heading,
-      timestamp: timestamp4,
-      driverId: bodyDriverId
-    } = req.body;
-    if (!busId || typeof latitude !== "number" || typeof longitude !== "number") {
-      return res.status(400).json({ error: "busId, valid latitude and longitude required" });
-    }
-    const bus = await getDbBusById(busId);
-    if (!bus) {
-      return res.status(404).json({ error: `Bus ${busId} not found` });
-    }
-    const driverId = req.header("x-acims-driver-id") || bodyDriverId;
-    if (driverId) {
-      const isAssigned = await verifyDriverBusAssignment(driverId, busId);
-      if (!isAssigned) {
-        await updateDbBus(busId, { driverId }).catch(() => {
-        });
-      }
-    }
-    const receivedAt = /* @__PURE__ */ new Date();
-    const recordedAt = timestamp4 ? new Date(timestamp4) : receivedAt;
-    const lastLoc = await getLatestBusLocation(busId);
-    const validation = validateGpsCoordinate(
-      { latitude, longitude, accuracy, speed, recordedAt },
-      lastLoc,
-      receivedAt
-    );
-    if (!validation.isValid) {
-      return res.status(400).json({
-        error: `GPS point rejected: ${validation.rejectionReason}`,
-        quality: validation.quality
-      });
-    }
-    const saved = await recordBusLocation({
-      busId,
-      driverId: driverId || bus.driverId || void 0,
-      latitude,
-      longitude,
-      accuracy: typeof accuracy === "number" ? accuracy : null,
-      altitude: typeof altitude === "number" ? altitude : null,
-      altitudeAccuracy: typeof altitudeAccuracy === "number" ? altitudeAccuracy : null,
-      speed: typeof speed === "number" ? speed : null,
-      heading: typeof heading === "number" ? heading : null,
-      recordedAt,
-      receivedAt
-    });
-    const trackingState = await isBusTrackingActive(busId);
-    if (!trackingState.isActive) {
-      await startTrackingSession(busId, driverId || bus.driverId || "driver-active");
-    }
-    const telemetry = await buildBusTelemetry(busId);
-    realtimeHub.broadcastLocation(telemetry);
-    if (telemetry.isAtStop || telemetry.isApproachingStop) {
-      syncBusNotifications(busId, telemetry.nextStop, telemetry.isAtStop, telemetry.isApproachingStop).catch(() => {
-      });
-    }
-    res.json({
-      success: true,
-      telemetry,
-      validation: {
-        quality: validation.quality,
-        networkDelayMs: validation.networkDelayMs
-      }
-    });
-  } catch (err) {
-    console.error("Failed to ingest driver location:", err);
-    res.status(500).json({ error: "Internal error recording GPS location" });
-  }
-});
-router3.post("/bus/location/batch", async (req, res) => {
-  try {
-    const { busId, points } = req.body;
-    if (!busId || !Array.isArray(points) || points.length === 0) {
-      return res.status(400).json({ error: "busId and points array required" });
-    }
-    const bus = await getDbBusById(busId);
-    if (!bus) return res.status(404).json({ error: "Bus not found" });
-    let insertedCount = 0;
-    const receivedAt = /* @__PURE__ */ new Date();
-    const sorted = [...points].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-    for (const pt of sorted) {
-      const recordedAt = new Date(pt.timestamp);
-      const validation = validateGpsCoordinate({
-        latitude: pt.latitude,
-        longitude: pt.longitude,
-        accuracy: pt.accuracy,
-        speed: pt.speed,
-        recordedAt
-      });
-      if (validation.isValid) {
-        await recordBusLocation({
-          busId,
-          driverId: pt.driverId || bus.driverId || void 0,
-          latitude: pt.latitude,
-          longitude: pt.longitude,
-          accuracy: pt.accuracy,
-          altitude: pt.altitude,
-          altitudeAccuracy: pt.altitudeAccuracy,
-          speed: pt.speed,
-          heading: pt.heading,
-          recordedAt,
-          receivedAt
-        });
-        insertedCount++;
-      }
-    }
-    const telemetry = await buildBusTelemetry(busId);
-    realtimeHub.broadcastLocation(telemetry);
-    res.json({
-      success: true,
-      insertedCount,
-      totalReceived: points.length,
-      currentTelemetry: telemetry
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to batch upload offline GPS coordinates" });
-  }
-});
-router3.post("/driver/session/start", async (req, res) => {
-  try {
-    const { busId, driverId = "driver-active" } = req.body;
-    if (!busId) return res.status(400).json({ error: "busId required" });
-    const bus = await getDbBusById(busId);
-    if (!bus) return res.status(404).json({ error: "Bus not found" });
-    const isAssigned = await verifyDriverBusAssignment(driverId, busId);
-    if (!isAssigned) {
-      await updateDbBus(busId, { driverId }).catch(() => {
-      });
-    }
-    const session = await startTrackingSession(busId, driverId);
-    realtimeHub.broadcastSessionState(busId, "ACTIVE", session);
-    res.json({ status: "ACTIVE", session });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to start tracking session" });
-  }
-});
-router3.post("/driver/session/pause", async (req, res) => {
-  try {
-    const { busId } = req.body;
-    if (!busId) return res.status(400).json({ error: "busId required" });
-    const session = await pauseTrackingSession(busId);
-    realtimeHub.broadcastSessionState(busId, "PAUSED", session);
-    res.json({ status: "PAUSED", session });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to pause tracking session" });
-  }
-});
-router3.post("/driver/session/resume", async (req, res) => {
-  try {
-    const { busId } = req.body;
-    if (!busId) return res.status(400).json({ error: "busId required" });
-    const session = await resumeTrackingSession(busId);
-    realtimeHub.broadcastSessionState(busId, "ACTIVE", session);
-    res.json({ status: "ACTIVE", session });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to resume tracking session" });
-  }
-});
-router3.post("/driver/session/stop", async (req, res) => {
-  try {
-    const { busId } = req.body;
-    if (!busId) return res.status(400).json({ error: "busId required" });
-    const session = await stopTrackingSession(busId);
-    realtimeHub.broadcastSessionState(busId, "ENDED", session);
-    res.json({ status: "ENDED", session });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to stop tracking session" });
-  }
-});
-router3.get("/driver/session/:busId", async (req, res) => {
-  try {
-    const { busId } = req.params;
-    const session = await getBusTrackingSession(busId);
-    res.json(session || { status: "IDLE", busId });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to get session status" });
-  }
-});
-var buses_default = router3;
-
-// artifacts/api-server/src/routes/queue.ts
-import { Router as Router4 } from "express";
-var router4 = Router4();
-router4.get("/queue/status", async (req, res) => {
-  try {
-    const { busId = "bus-12" } = GetQueueStatusQueryParams.parse(req.query);
-    const studentId = req.query.studentId || req.header("x-acims-user-id") || void 0;
-    const bus = await getDbBusById(busId);
-    if (!bus) {
-      return res.status(404).json({ error: "Bus not found" });
-    }
-    const queueStatus = await getDbQueueStatus(busId, studentId);
-    const formatted = {
-      busId: bus.id,
-      busNumber: bus.busNumber,
-      joined: queueStatus.userInQueue,
-      queueSize: queueStatus.queueSize,
-      entry: queueStatus.entry ? {
-        studentId: queueStatus.entry.studentId,
-        boardingStop: queueStatus.entry.boardingStop,
-        queuePosition: queueStatus.queuePosition ?? 1,
-        joinedAt: queueStatus.entry.joinedAt?.toISOString() || (/* @__PURE__ */ new Date()).toISOString()
-      } : null,
-      seatsAvailable: 45,
-      // Static physical bus capacity rating
-      currentOccupancy: 0,
-      // Occupancy deprecated
-      estimatedAvailabilityMinutes: queueStatus.queuePosition ? Math.max(2, (queueStatus.queuePosition - 1) * 3) : Math.max(2, queueStatus.queueSize * 3),
-      message: queueStatus.userInQueue ? `Your place is held at #${queueStatus.queuePosition} for Bus ${bus.busNumber}.` : queueStatus.queueSize > 0 ? `${queueStatus.queueSize} student(s) currently waiting in line for Bus ${bus.busNumber}.` : `Boarding line open for Bus ${bus.busNumber}. Reserve your place for upcoming arrival.`,
-      status: queueStatus.status
-    };
-    res.json(formatted);
-  } catch (err) {
-    console.error("Error getting queue status:", err);
-    res.status(500).json({ error: "Failed to get queue status" });
-  }
-});
-router4.post("/queue/join", async (req, res) => {
-  try {
-    const input = JoinQueueBody.parse(req.body);
-    const studentId = input.studentId || req.header("x-acims-user-id") || "student-20418";
-    const bus = await getDbBusById(input.busId);
-    if (!bus) {
-      return res.status(404).json({ error: "Bus not found" });
-    }
-    const result = await joinDbQueue(input.busId, studentId, input.boardingStop);
-    if (result.duplicate) {
-      return res.status(409).json({
-        error: "Student is already in the queue for this bus",
-        status: {
-          busId: bus.id,
-          busNumber: bus.busNumber,
-          joined: true,
-          queueSize: result.status.queueSize,
-          entry: result.status.entry ? {
-            studentId: result.status.entry.studentId,
-            boardingStop: result.status.entry.boardingStop,
-            queuePosition: result.status.queuePosition ?? 1,
-            joinedAt: result.status.entry.joinedAt?.toISOString() || (/* @__PURE__ */ new Date()).toISOString()
-          } : null,
-          seatsAvailable: 45,
-          currentOccupancy: 0,
-          estimatedAvailabilityMinutes: Math.max(2, (result.status.queuePosition || 1) * 3),
-          message: `You are already registered in line at position #${result.status.queuePosition}.`
-        }
-      });
-    }
-    const responseStatus = {
-      busId: bus.id,
-      busNumber: bus.busNumber,
-      joined: true,
-      queueSize: result.status.queueSize,
-      entry: {
-        studentId: result.entry.studentId,
-        boardingStop: result.entry.boardingStop,
-        queuePosition: result.status.queuePosition ?? 1,
-        joinedAt: result.entry.joinedAt?.toISOString() || (/* @__PURE__ */ new Date()).toISOString()
-      },
-      seatsAvailable: 45,
-      currentOccupancy: 0,
-      estimatedAvailabilityMinutes: Math.max(2, (result.status.queuePosition || 1) * 3),
-      message: `Place confirmed at #${result.status.queuePosition} for boarding at ${result.entry.boardingStop}.`
-    };
-    res.status(201).json(responseStatus);
-  } catch (err) {
-    console.error("Error joining queue:", err);
-    res.status(400).json({ error: "Failed to join queue" });
-  }
-});
-router4.post("/queue/leave", async (req, res) => {
-  try {
-    const input = LeaveQueueBody.parse(req.body);
-    const studentId = input.studentId || req.header("x-acims-user-id") || "student-20418";
-    const bus = await getDbBusById(input.busId);
-    if (!bus) {
-      return res.status(404).json({ error: "Bus not found" });
-    }
-    const updatedStatus = await leaveDbQueue(input.busId, studentId);
-    res.json({
-      busId: bus.id,
-      busNumber: bus.busNumber,
-      joined: false,
-      queueSize: updatedStatus.queueSize,
-      entry: null,
-      seatsAvailable: 45,
-      currentOccupancy: 0,
-      estimatedAvailabilityMinutes: 0,
-      message: "You have left the boarding queue."
-    });
-  } catch (err) {
-    console.error("Error leaving queue:", err);
-    res.status(500).json({ error: "Failed to leave queue" });
-  }
-});
-router4.get("/queue/my-active", async (req, res) => {
-  try {
-    const studentId = req.query.studentId || req.header("x-acims-user-id") || "student-20418";
-    const activeQueue = await getDbStudentActiveQueue(studentId);
-    if (!activeQueue) {
-      return res.json({ inQueue: false, queue: null });
-    }
-    const bus = await getDbBusById(activeQueue.busId);
-    res.json({
-      inQueue: true,
-      queue: {
-        ...activeQueue,
-        busNumber: bus?.busNumber || "12"
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch student active queue" });
-  }
-});
-var queue_default = router4;
-
-// artifacts/api-server/src/routes/notifications.ts
-init_db();
-init_schema();
-import { Router as Router5 } from "express";
-import { eq as eq4 } from "drizzle-orm";
-var router5 = Router5();
-router5.get("/notifications", async (req, res) => {
-  try {
-    const userId = req.query.userId || req.header("x-acims-user-id") || "student-20418";
-    const dbNotifs = await getUserNotifications(userId);
-    if (dbNotifs.length > 0) {
-      return res.json(
-        dbNotifs.map((n) => ({
-          id: String(n.id),
-          type: n.type,
-          title: n.title,
-          message: n.message,
-          timestamp: n.createdAt ? n.createdAt.toISOString() : (/* @__PURE__ */ new Date()).toISOString(),
-          read: Boolean(n.readAt)
-        }))
-      );
-    }
-    const welcome = await db.insert(notifications).values({
-      userId,
-      type: "info",
-      title: "Campus Mobility Pass Ready",
-      message: "Your ACIMS transit access is active. Real driver GPS tracking is live for college feeder routes."
-    }).returning();
-    res.json([
-      {
-        id: String(welcome[0].id),
-        type: welcome[0].type,
-        title: welcome[0].title,
-        message: welcome[0].message,
-        timestamp: welcome[0].createdAt?.toISOString() || (/* @__PURE__ */ new Date()).toISOString(),
-        read: false
-      }
-    ]);
-  } catch (err) {
-    console.error("Error fetching notifications:", err);
-    res.status(500).json({ error: "Failed to list notifications" });
-  }
-});
-router5.post("/notifications/read", async (req, res) => {
-  try {
-    const { id } = req.body;
-    if (!id) {
-      return res.status(400).json({ error: "Notification id required" });
-    }
-    const numId = parseInt(id, 10);
-    if (!isNaN(numId)) {
-      await db.update(notifications).set({ readAt: /* @__PURE__ */ new Date() }).where(eq4(notifications.id, numId));
-    }
-    res.json({ success: true, id });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to mark notification read" });
-  }
-});
-var notifications_default = router5;
-
-// artifacts/api-server/src/routes/campus.ts
-import { Router as Router6 } from "express";
-
-// artifacts/api-server/src/services/campus.ts
-init_campusData();
-
 // artifacts/api-server/src/services/eta.ts
 var AVERAGE_SPEED_KMH = 22;
+function distanceInKilometers(from, to) {
+  return haversineDistance(from, to);
+}
+function findNearestPathIndex(currentCoord, path3) {
+  let minDistance = Infinity;
+  let bestIndex = 0;
+  for (let i = 0; i < path3.length; i++) {
+    const dist = haversineDistance(currentCoord, path3[i]);
+    if (dist < minDistance) {
+      minDistance = dist;
+      bestIndex = i;
+    }
+  }
+  return { index: bestIndex, distanceKm: minDistance };
+}
+function calculateRemainingDistance(currentCoord, targetPathIndex, path3, cumulativeDistances) {
+  const { index: nearestIndex } = findNearestPathIndex(currentCoord, path3);
+  if (nearestIndex >= targetPathIndex) {
+    const directDist = haversineDistance(currentCoord, path3[targetPathIndex]);
+    return directDist < 0.08 ? 0 : directDist;
+  }
+  const nextVertexIndex = Math.min(nearestIndex + 1, targetPathIndex);
+  const distanceToNextVertex = haversineDistance(currentCoord, path3[nextVertexIndex]);
+  const distanceAlongVertices = cumulativeDistances[targetPathIndex] - cumulativeDistances[nextVertexIndex];
+  return Math.max(0, distanceToNextVertex + Math.max(0, distanceAlongVertices));
+}
 function calculateEtaMinutes(arg1, arg2, arg3 = AVERAGE_SPEED_KMH) {
   if (typeof arg1 === "number") {
     const remainingDistanceKm = arg1;
@@ -7927,6 +4938,57 @@ function formatEta(etaMinutes) {
   if (etaMinutes <= 0) return "Arriving now";
   if (etaMinutes === 1) return "approximately 1 min";
   return `approximately ${etaMinutes} min`;
+}
+function determineStopContext(route, currentCoord) {
+  const { path: path3, stops, cumulativeDistances, averageSpeedKmh } = route;
+  const { index: nearestPathIndex } = findNearestPathIndex(currentCoord, path3);
+  const sortedStops = [...stops].sort((a, b) => a.sequence - b.sequence);
+  const firstStop = sortedStops[0];
+  const lastStop = sortedStops[sortedStops.length - 1];
+  let prevStop = firstStop;
+  let nextStop = lastStop;
+  for (let i = 0; i < sortedStops.length; i++) {
+    const s = sortedStops[i];
+    if (s.pathIndex <= nearestPathIndex) {
+      prevStop = s;
+    }
+    if (s.pathIndex > nearestPathIndex) {
+      nextStop = s;
+      break;
+    }
+  }
+  const distToPrev = haversineDistance(currentCoord, prevStop);
+  const distToNext = haversineDistance(currentCoord, nextStop);
+  const isAtPrev = distToPrev <= 0.08;
+  const isAtNext = distToNext <= 0.08;
+  const isAtStop = isAtPrev || isAtNext;
+  const currentStop = isAtNext ? nextStop : isAtPrev ? prevStop : null;
+  const remainingDistanceToNextKm = calculateRemainingDistance(
+    currentCoord,
+    nextStop.pathIndex,
+    path3,
+    cumulativeDistances
+  );
+  const remainingDistanceToDestKm = calculateRemainingDistance(
+    currentCoord,
+    lastStop.pathIndex,
+    path3,
+    cumulativeDistances
+  );
+  const etaToNextMinutes = isAtStop && currentStop?.id === nextStop.id ? 0 : calculateEtaMinutes(remainingDistanceToNextKm, averageSpeedKmh);
+  const etaToDestMinutes = calculateEtaMinutes(remainingDistanceToDestKm, averageSpeedKmh);
+  return {
+    previousStop: prevStop,
+    nextStop,
+    currentStop,
+    isAtStop,
+    remainingDistanceToNextKm: Number(remainingDistanceToNextKm.toFixed(2)),
+    remainingDistanceToDestKm: Number(remainingDistanceToDestKm.toFixed(2)),
+    etaToNextMinutes,
+    etaToDestMinutes,
+    formattedEta: formatEta(etaToNextMinutes),
+    nearestPathIndex
+  };
 }
 
 // artifacts/api-server/src/services/busTracking.ts
@@ -8052,6 +5114,7 @@ var fleetState = [
     pathIndex: 4
   }
 ];
+var lastDriverGpsTime = {};
 function buildDerivedLocation(bus) {
   const route = getRouteForBus(bus.id);
   const isSimulated = bus.locationMode === "simulated";
@@ -8089,496 +5152,829 @@ function getBus(id) {
   const bus = fleetState.find((candidate) => candidate.id === id);
   return bus ? { ...bus, currentLocation: { ...bus.currentLocation } } : void 0;
 }
+function createBusInFleet(bus) {
+  fleetState.push(bus);
+  return { ...bus, currentLocation: { ...bus.currentLocation } };
+}
+function updateBusInFleet(id, updates) {
+  const bus = fleetState.find((candidate) => candidate.id === id);
+  if (!bus) return void 0;
+  Object.assign(bus, updates);
+  bus.updatedAt = /* @__PURE__ */ new Date();
+  return { ...bus, currentLocation: { ...bus.currentLocation } };
+}
+function deactivateBusInFleet(id) {
+  const bus = fleetState.find((candidate) => candidate.id === id);
+  if (!bus) return void 0;
+  bus.active = !bus.active;
+  bus.status = bus.active ? "Standby" : "Inactive";
+  bus.updatedAt = /* @__PURE__ */ new Date();
+  return { ...bus, currentLocation: { ...bus.currentLocation } };
+}
+function getStops(busId) {
+  const route = getRouteForBus(busId);
+  return route.stops.map((stop) => ({
+    id: stop.id,
+    name: stop.name,
+    sequence: stop.sequence,
+    pathIndex: stop.pathIndex,
+    latitude: stop.latitude,
+    longitude: stop.longitude,
+    minutesFromPrevious: stop.minutesFromPrevious
+  }));
+}
+function getRouteDetails(busId) {
+  const route = getRouteForBus(busId);
+  return {
+    routeId: route.id,
+    busId,
+    busNumber: route.routeNumber,
+    name: route.name,
+    origin: route.origin,
+    destination: route.destination,
+    path: route.path,
+    stops: route.stops,
+    totalDistanceKm: route.totalDistanceKm,
+    cumulativeDistances: route.cumulativeDistances
+  };
+}
 function getLocation(id) {
   const bus = fleetState.find((candidate) => candidate.id === id);
   if (!bus) return void 0;
   return buildDerivedLocation(bus);
 }
+function updateLocation(id, location, source = "driver-gps", timestamp = (/* @__PURE__ */ new Date()).toISOString()) {
+  const bus = fleetState.find((candidate) => candidate.id === id);
+  if (!bus) return void 0;
+  const route = getRouteForBus(id);
+  const context = determineStopContext(route, location);
+  bus.currentLocation = {
+    latitude: Number(location.latitude.toFixed(6)),
+    longitude: Number(location.longitude.toFixed(6))
+  };
+  bus.nextStop = context.nextStop.name;
+  bus.nextStopId = context.nextStop.id;
+  bus.previousStop = context.previousStop.name;
+  bus.previousStopId = context.previousStop.id;
+  bus.isAtStop = context.isAtStop;
+  bus.etaMinutes = context.etaToNextMinutes;
+  bus.formattedEta = context.formattedEta;
+  bus.remainingDistanceKm = context.remainingDistanceToNextKm;
+  bus.pathIndex = context.nearestPathIndex;
+  bus.locationMode = "driver-gps";
+  bus.status = context.isAtStop ? `At Stop: ${context.currentStop?.name || context.nextStop.name}` : "On Time (Driver GPS)";
+  bus.updatedAt = new Date(timestamp);
+  lastDriverGpsTime[id] = Date.now();
+  return buildDerivedLocation(bus);
+}
 
-// lib/db/src/index.ts
-import pg2 from "pg";
-import { drizzle as drizzlePg2 } from "drizzle-orm/node-postgres";
-import { drizzle as drizzlePglite2 } from "drizzle-orm/pglite";
-import { PGlite as PGlite2 } from "@electric-sql/pglite";
-
-// lib/db/src/schema/index.ts
-var schema_exports2 = {};
-__export(schema_exports2, {
-  adminUsers: () => adminUsers,
-  aiConversations: () => aiConversations,
-  aiMessages: () => aiMessages,
-  buses: () => buses2,
-  campusLocations: () => campusLocations2,
-  drivers: () => drivers3,
-  emergencyContacts: () => emergencyContacts3,
-  insertAdminUserSchema: () => insertAdminUserSchema,
-  insertAiConversationSchema: () => insertAiConversationSchema,
-  insertAiMessageSchema: () => insertAiMessageSchema,
-  insertBusSchema: () => insertBusSchema,
-  insertCampusLocationSchema: () => insertCampusLocationSchema,
-  insertDriverSchema: () => insertDriverSchema,
-  insertEmergencyContactSchema: () => insertEmergencyContactSchema,
-  insertNavigationRouteSchema: () => insertNavigationRouteSchema,
-  insertProfileSchema: () => insertProfileSchema,
-  insertPublicTransportJourneySchema: () => insertPublicTransportJourneySchema,
-  insertPublicTransportRouteSchema: () => insertPublicTransportRouteSchema,
-  insertPublicTransportStopSchema: () => insertPublicTransportStopSchema,
-  insertSafetyAlertSchema: () => insertSafetyAlertSchema,
-  insertSafetyReportSchema: () => insertSafetyReportSchema,
-  insertSessionSchema: () => insertSessionSchema,
-  insertStudentSchema: () => insertStudentSchema,
-  insertTransportProviderSchema: () => insertTransportProviderSchema,
-  navigationRoutes: () => navigationRoutes,
-  profiles: () => profiles2,
-  publicTransportJourneys: () => publicTransportJourneys,
-  publicTransportRoutes: () => publicTransportRoutes,
-  publicTransportStops: () => publicTransportStops2,
-  safetyAlerts: () => safetyAlerts,
-  safetyReports: () => safetyReports2,
-  sessions: () => sessions,
-  students: () => students3,
-  transportProviders: () => transportProviders
-});
-
-// node_modules/.bun/drizzle-zod@0.7.1+23a58933566fb8bd/node_modules/drizzle-zod/index.mjs
-import { isTable, getTableColumns, getViewSelectedFields, is, Column, SQL, isView } from "drizzle-orm";
-var CONSTANTS = {
-  INT8_MIN: -128,
-  INT8_MAX: 127,
-  INT8_UNSIGNED_MAX: 255,
-  INT16_MIN: -32768,
-  INT16_MAX: 32767,
-  INT16_UNSIGNED_MAX: 65535,
-  INT24_MIN: -8388608,
-  INT24_MAX: 8388607,
-  INT24_UNSIGNED_MAX: 16777215,
-  INT32_MIN: -2147483648,
-  INT32_MAX: 2147483647,
-  INT32_UNSIGNED_MAX: 4294967295,
-  INT48_MIN: -140737488355328,
-  INT48_MAX: 140737488355327,
-  INT48_UNSIGNED_MAX: 281474976710655,
-  INT64_MIN: -9223372036854775808n,
-  INT64_MAX: 9223372036854775807n,
-  INT64_UNSIGNED_MAX: 18446744073709551615n
+// artifacts/api-server/src/services/notificationEngine.ts
+var notifications = [
+  {
+    id: "alert-approaching-tambaram",
+    type: "APPROACHING_STOP",
+    title: "Approaching your stop",
+    message: "Bus 12 is approaching Tambaram.",
+    createdAt: new Date(Date.now() - 1e3 * 60 * 2),
+    read: false,
+    busId: "bus-12"
+  },
+  {
+    id: "alert-boarding-queue",
+    type: "QUEUE_OPEN",
+    title: "Boarding queue open",
+    message: "Boarding queue for Bus 12 is now active for upcoming stops.",
+    createdAt: new Date(Date.now() - 1e3 * 60 * 8),
+    read: false,
+    busId: "bus-12"
+  },
+  {
+    id: "alert-started",
+    type: "BUS_STARTED",
+    title: "Route started",
+    message: "Bus 12 has started its route.",
+    createdAt: new Date(Date.now() - 1e3 * 60 * 22),
+    read: true,
+    busId: "bus-12"
+  }
+];
+var lastState = {
+  nextStop: "Tambaram",
+  etaMinutes: 3
 };
-function isColumnType(column, columnTypes) {
-  return columnTypes.includes(column.columnType);
-}
-function isWithEnum(column) {
-  return "enumValues" in column && Array.isArray(column.enumValues) && column.enumValues.length > 0;
-}
-var literalSchema = external_exports.union([external_exports.string(), external_exports.number(), external_exports.boolean(), external_exports.null()]);
-var jsonSchema = external_exports.union([literalSchema, external_exports.record(external_exports.any()), external_exports.array(external_exports.any())]);
-var bufferSchema = external_exports.custom((v) => v instanceof Buffer);
-function columnToSchema(column, factory) {
-  const z$1 = factory?.zodInstance ?? external_exports;
-  const coerce2 = factory?.coerce ?? {};
-  let schema;
-  if (isWithEnum(column)) {
-    schema = column.enumValues.length ? z$1.enum(column.enumValues) : z$1.string();
+function addNotification(type, title, message, busId) {
+  if (type === "NEARBY") {
+    const existingNearby = notifications.find(
+      (notification2) => notification2.type === type && notification2.busId === busId && !notification2.read
+    );
+    if (existingNearby) return existingNearby;
   }
-  if (!schema) {
-    if (isColumnType(column, ["PgGeometry", "PgPointTuple"])) {
-      schema = z$1.tuple([z$1.number(), z$1.number()]);
-    } else if (isColumnType(column, ["PgGeometryObject", "PgPointObject"])) {
-      schema = z$1.object({ x: z$1.number(), y: z$1.number() });
-    } else if (isColumnType(column, ["PgHalfVector", "PgVector"])) {
-      schema = z$1.array(z$1.number());
-      schema = column.dimensions ? schema.length(column.dimensions) : schema;
-    } else if (isColumnType(column, ["PgLine"])) {
-      schema = z$1.tuple([z$1.number(), z$1.number(), z$1.number()]);
-    } else if (isColumnType(column, ["PgLineABC"])) {
-      schema = z$1.object({
-        a: z$1.number(),
-        b: z$1.number(),
-        c: z$1.number()
-      });
-    } else if (isColumnType(column, ["PgArray"])) {
-      schema = z$1.array(columnToSchema(column.baseColumn, z$1));
-      schema = column.size ? schema.length(column.size) : schema;
-    } else if (column.dataType === "array") {
-      schema = z$1.array(z$1.any());
-    } else if (column.dataType === "number") {
-      schema = numberColumnToSchema(column, z$1, coerce2);
-    } else if (column.dataType === "bigint") {
-      schema = bigintColumnToSchema(column, z$1, coerce2);
-    } else if (column.dataType === "boolean") {
-      schema = coerce2 === true || coerce2.boolean ? z$1.coerce.boolean() : z$1.boolean();
-    } else if (column.dataType === "date") {
-      schema = coerce2 === true || coerce2.date ? z$1.coerce.date() : z$1.date();
-    } else if (column.dataType === "string") {
-      schema = stringColumnToSchema(column, z$1, coerce2);
-    } else if (column.dataType === "json") {
-      schema = jsonSchema;
-    } else if (column.dataType === "custom") {
-      schema = z$1.any();
-    } else if (column.dataType === "buffer") {
-      schema = bufferSchema;
+  const duplicate = notifications.find(
+    (notification2) => notification2.type === type && notification2.message === message && notification2.busId === busId
+  );
+  if (duplicate) return duplicate;
+  const notification = {
+    id: `alert-${Date.now()}`,
+    type,
+    title,
+    message,
+    createdAt: /* @__PURE__ */ new Date(),
+    read: false,
+    busId
+  };
+  notifications.unshift(notification);
+  return notification;
+}
+function syncBusNotifications(bus, queueEntry) {
+  if (bus.nextStop !== lastState.nextStop) {
+    addNotification(
+      "APPROACHING_STOP",
+      "Approaching your stop",
+      `Bus ${bus.busNumber} is approaching ${bus.nextStop}.`,
+      bus.id
+    );
+  }
+  if (bus.etaMinutes <= 3 && bus.nextStop === "Tambaram") {
+    addNotification(
+      "NEARBY",
+      "Your bus is nearby",
+      `Bus ${bus.busNumber} is ${bus.etaMinutes} minutes away from Tambaram.`,
+      bus.id
+    );
+  }
+  if (queueEntry) {
+    const message = `You are #${queueEntry.queuePosition} in the overflow queue.`;
+    const latestQueueAlert = notifications.find(
+      (notification) => notification.type === "QUEUE_UPDATE" && !notification.read
+    );
+    if (!latestQueueAlert || latestQueueAlert.message !== message) {
+      addNotification("QUEUE_UPDATE", "Queue position updated", message, bus.id);
     }
   }
-  if (!schema) {
-    schema = z$1.any();
-  }
-  return schema;
+  lastState = {
+    nextStop: bus.nextStop,
+    etaMinutes: bus.etaMinutes
+  };
 }
-function numberColumnToSchema(column, z, coerce2) {
-  let unsigned = column.getSQLType().includes("unsigned");
-  let min;
-  let max;
-  let integer4 = false;
-  if (isColumnType(column, ["MySqlTinyInt", "SingleStoreTinyInt"])) {
-    min = unsigned ? 0 : CONSTANTS.INT8_MIN;
-    max = unsigned ? CONSTANTS.INT8_UNSIGNED_MAX : CONSTANTS.INT8_MAX;
-    integer4 = true;
-  } else if (isColumnType(column, [
-    "PgSmallInt",
-    "PgSmallSerial",
-    "MySqlSmallInt",
-    "SingleStoreSmallInt"
-  ])) {
-    min = unsigned ? 0 : CONSTANTS.INT16_MIN;
-    max = unsigned ? CONSTANTS.INT16_UNSIGNED_MAX : CONSTANTS.INT16_MAX;
-    integer4 = true;
-  } else if (isColumnType(column, [
-    "PgReal",
-    "MySqlFloat",
-    "MySqlMediumInt",
-    "SingleStoreMediumInt",
-    "SingleStoreFloat"
-  ])) {
-    min = unsigned ? 0 : CONSTANTS.INT24_MIN;
-    max = unsigned ? CONSTANTS.INT24_UNSIGNED_MAX : CONSTANTS.INT24_MAX;
-    integer4 = isColumnType(column, ["MySqlMediumInt", "SingleStoreMediumInt"]);
-  } else if (isColumnType(column, [
-    "PgInteger",
-    "PgSerial",
-    "MySqlInt",
-    "SingleStoreInt"
-  ])) {
-    min = unsigned ? 0 : CONSTANTS.INT32_MIN;
-    max = unsigned ? CONSTANTS.INT32_UNSIGNED_MAX : CONSTANTS.INT32_MAX;
-    integer4 = true;
-  } else if (isColumnType(column, [
-    "PgDoublePrecision",
-    "MySqlReal",
-    "MySqlDouble",
-    "SingleStoreReal",
-    "SingleStoreDouble",
-    "SQLiteReal"
-  ])) {
-    min = unsigned ? 0 : CONSTANTS.INT48_MIN;
-    max = unsigned ? CONSTANTS.INT48_UNSIGNED_MAX : CONSTANTS.INT48_MAX;
-  } else if (isColumnType(column, [
-    "PgBigInt53",
-    "PgBigSerial53",
-    "MySqlBigInt53",
-    "MySqlSerial",
-    "SingleStoreBigInt53",
-    "SingleStoreSerial",
-    "SQLiteInteger"
-  ])) {
-    unsigned = unsigned || isColumnType(column, ["MySqlSerial", "SingleStoreSerial"]);
-    min = unsigned ? 0 : Number.MIN_SAFE_INTEGER;
-    max = Number.MAX_SAFE_INTEGER;
-    integer4 = true;
-  } else if (isColumnType(column, ["MySqlYear", "SingleStoreYear"])) {
-    min = 1901;
-    max = 2155;
-    integer4 = true;
-  } else {
-    min = Number.MIN_SAFE_INTEGER;
-    max = Number.MAX_SAFE_INTEGER;
-  }
-  let schema = coerce2 === true || coerce2?.number ? z.coerce.number() : z.number();
-  schema = schema.min(min).max(max);
-  return integer4 ? schema.int() : schema;
+function listNotifications() {
+  return notifications.map((notification) => ({ ...notification }));
 }
-function bigintColumnToSchema(column, z, coerce2) {
-  const unsigned = column.getSQLType().includes("unsigned");
-  const min = unsigned ? 0n : CONSTANTS.INT64_MIN;
-  const max = unsigned ? CONSTANTS.INT64_UNSIGNED_MAX : CONSTANTS.INT64_MAX;
-  const schema = coerce2 === true || coerce2?.bigint ? z.coerce.bigint() : z.bigint();
-  return schema.min(min).max(max);
+function markNotificationRead(id) {
+  const notification = notifications.find((candidate) => candidate.id === id);
+  if (!notification) return void 0;
+  notification.read = true;
+  return { ...notification };
 }
-function stringColumnToSchema(column, z, coerce2) {
-  if (isColumnType(column, ["PgUUID"])) {
-    return z.string().uuid();
+
+// artifacts/api-server/src/routes/buses.ts
+var router2 = Router2();
+router2.get("/buses", (_req, res) => {
+  res.json(getBuses());
+});
+router2.get("/buses/:busId", (req, res) => {
+  const { busId } = GetBusParams.parse(req.params);
+  const bus = getBus(busId);
+  if (!bus) {
+    res.status(404).json({ error: "Bus not found" });
+    return;
   }
-  let max;
-  let regex;
-  let fixed = false;
-  if (isColumnType(column, ["PgVarchar", "SQLiteText"])) {
-    max = column.length;
-  } else if (isColumnType(column, ["MySqlVarChar", "SingleStoreVarChar"])) {
-    max = column.length ?? CONSTANTS.INT16_UNSIGNED_MAX;
-  } else if (isColumnType(column, ["MySqlText", "SingleStoreText"])) {
-    if (column.textType === "longtext") {
-      max = CONSTANTS.INT32_UNSIGNED_MAX;
-    } else if (column.textType === "mediumtext") {
-      max = CONSTANTS.INT24_UNSIGNED_MAX;
-    } else if (column.textType === "text") {
-      max = CONSTANTS.INT16_UNSIGNED_MAX;
-    } else {
-      max = CONSTANTS.INT8_UNSIGNED_MAX;
-    }
+  res.json(bus);
+});
+router2.get("/buses/:busId/location", (req, res) => {
+  const { busId } = GetBusLocationParams.parse(req.params);
+  const location = getLocation(busId);
+  if (!location) {
+    res.status(404).json({ error: "Bus not found" });
+    return;
   }
-  if (isColumnType(column, [
-    "PgChar",
-    "MySqlChar",
-    "SingleStoreChar"
-  ])) {
-    max = column.length;
-    fixed = true;
+  const bus = getBus(busId);
+  if (bus) syncBusNotifications(bus);
+  res.json(location);
+});
+router2.get("/buses/:busId/stops", (req, res) => {
+  const { busId } = ListBusStopsParams.parse(req.params);
+  const busStops = getStops(busId);
+  if (!busStops) {
+    res.status(404).json({ error: "Bus not found" });
+    return;
   }
-  if (isColumnType(column, ["PgBinaryVector"])) {
-    regex = /^[01]+$/;
-    max = column.dimensions;
+  res.json(busStops);
+});
+router2.get("/buses/:busId/route", (req, res) => {
+  const { busId } = GetBusParams.parse(req.params);
+  const route = getRouteDetails(busId);
+  if (!route) {
+    res.status(404).json({ error: "Route not found" });
+    return;
   }
-  let schema = coerce2 === true || coerce2?.string ? z.coerce.string() : z.string();
-  schema = regex ? schema.regex(regex) : schema;
-  return max && fixed ? schema.length(max) : max ? schema.max(max) : schema;
+  res.json(route);
+});
+router2.post("/bus/location", (req, res) => {
+  const input = UpdateBusLocationBody.parse(req.body);
+  const location = updateLocation(
+    input.busId,
+    { latitude: input.latitude, longitude: input.longitude },
+    "driver-gps",
+    input.timestamp
+  );
+  if (!location) {
+    res.status(404).json({ error: "Bus not found" });
+    return;
+  }
+  const bus = getBus(input.busId);
+  if (bus) syncBusNotifications(bus);
+  res.json(bus);
+});
+function startBusSimulation() {
+  return null;
 }
-function getColumns(tableLike) {
-  return isTable(tableLike) ? getTableColumns(tableLike) : getViewSelectedFields(tableLike);
-}
-function handleColumns(columns, refinements, conditions, factory) {
-  const columnSchemas = {};
-  for (const [key, selected] of Object.entries(columns)) {
-    if (!is(selected, Column) && !is(selected, SQL) && !is(selected, SQL.Aliased) && typeof selected === "object") {
-      const columns2 = isTable(selected) || isView(selected) ? getColumns(selected) : selected;
-      columnSchemas[key] = handleColumns(columns2, refinements[key] ?? {}, conditions, factory);
-      continue;
-    }
-    const refinement = refinements[key];
-    if (refinement !== void 0 && typeof refinement !== "function") {
-      columnSchemas[key] = refinement;
-      continue;
-    }
-    const column = is(selected, Column) ? selected : void 0;
-    const schema = column ? columnToSchema(column, factory) : external_exports.any();
-    const refined = typeof refinement === "function" ? refinement(schema) : schema;
-    if (conditions.never(column)) {
-      continue;
-    } else {
-      columnSchemas[key] = refined;
-    }
-    if (column) {
-      if (conditions.nullable(column)) {
-        columnSchemas[key] = columnSchemas[key].nullable();
-      }
-      if (conditions.optional(column)) {
-        columnSchemas[key] = columnSchemas[key].optional();
-      }
-    }
+var buses_default = router2;
+
+// artifacts/api-server/src/routes/queue.ts
+import { Router as Router3 } from "express";
+
+// artifacts/api-server/src/services/queueManager.ts
+var entries = [
+  {
+    studentId: "student-014",
+    busId: "bus-12",
+    boardingStop: "Tambaram",
+    queuePosition: 1,
+    joinedAt: new Date(Date.now() - 1e3 * 60 * 14),
+    status: "waiting"
+  },
+  {
+    studentId: "student-027",
+    busId: "bus-12",
+    boardingStop: "Perungalathur",
+    queuePosition: 2,
+    joinedAt: new Date(Date.now() - 1e3 * 60 * 11),
+    status: "waiting"
+  },
+  {
+    studentId: "student-031",
+    busId: "bus-12",
+    boardingStop: "Tambaram",
+    queuePosition: 3,
+    joinedAt: new Date(Date.now() - 1e3 * 60 * 7),
+    status: "waiting"
   }
-  return external_exports.object(columnSchemas);
+];
+function entriesForBus(busId) {
+  return entries.filter((entry) => entry.busId === busId && entry.status === "waiting");
 }
-var insertConditions = {
-  never: (column) => column?.generated?.type === "always" || column?.generatedIdentity?.type === "always",
-  optional: (column) => !column.notNull || column.notNull && column.hasDefault,
-  nullable: (column) => !column.notNull
+function resequence(busId) {
+  entriesForBus(busId).forEach((entry, index) => {
+    entry.queuePosition = index + 1;
+  });
+}
+function getQueueStatus(bus, studentId = "demo-student-001") {
+  const entry = entries.find(
+    (candidate) => candidate.busId === bus.id && candidate.studentId === studentId && candidate.status === "waiting"
+  );
+  const busEntries = entriesForBus(bus.id);
+  const estimatedAvailabilityMinutes = entry ? Math.max(2, entry.queuePosition * 3) : Math.max(3, (busEntries.length + 1) * 3);
+  return {
+    joined: Boolean(entry),
+    entry: entry ? { ...entry } : null,
+    busId: bus.id,
+    capacity: bus.capacity,
+    estimatedAvailabilityMinutes,
+    message: entry ? `You are #${entry.queuePosition} in line for Bus #${bus.busNumber} at ${entry.boardingStop}.` : `Select your stop to reserve a position in the boarding queue for Bus #${bus.busNumber}.`
+  };
+}
+function joinQueue(bus, studentId, boardingStop) {
+  const existing = entries.find(
+    (entry2) => entry2.busId === bus.id && entry2.studentId === studentId && entry2.status === "waiting"
+  );
+  if (existing) return { duplicate: true, status: getQueueStatus(bus, studentId) };
+  const entry = {
+    studentId,
+    busId: bus.id,
+    boardingStop,
+    queuePosition: entriesForBus(bus.id).length + 1,
+    joinedAt: /* @__PURE__ */ new Date(),
+    status: "waiting"
+  };
+  entries.push(entry);
+  return { duplicate: false, status: getQueueStatus(bus, studentId) };
+}
+function leaveQueue(bus, studentId) {
+  const entry = entries.find(
+    (candidate) => candidate.busId === bus.id && candidate.studentId === studentId && candidate.status === "waiting"
+  );
+  if (entry) {
+    entry.status = "left";
+    resequence(bus.id);
+  }
+  return getQueueStatus(bus, studentId);
+}
+
+// artifacts/api-server/src/routes/queue.ts
+var router3 = Router3();
+router3.get("/queue/status", (req, res) => {
+  const { busId = "bus-12" } = GetQueueStatusQueryParams.parse(req.query);
+  const bus = getBus(busId);
+  if (!bus) {
+    res.status(404).json({ error: "Bus not found" });
+    return;
+  }
+  res.json(getQueueStatus(bus));
+});
+router3.post("/queue/join", (req, res) => {
+  const input = JoinQueueBody.parse(req.body);
+  const bus = getBus(input.busId);
+  if (!bus) {
+    res.status(404).json({ error: "Bus not found" });
+    return;
+  }
+  const result = joinQueue(bus, input.studentId, input.boardingStop);
+  if (result.duplicate) {
+    res.status(409).json({ error: "Student is already in the queue" });
+    return;
+  }
+  syncBusNotifications(bus, result.status.entry);
+  res.status(201).json(result.status);
+});
+router3.post("/queue/leave", (req, res) => {
+  const input = LeaveQueueBody.parse(req.body);
+  const bus = getBus(input.busId);
+  if (!bus) {
+    res.status(404).json({ error: "Bus not found" });
+    return;
+  }
+  res.json(leaveQueue(bus, input.studentId));
+});
+var queue_default = router3;
+
+// artifacts/api-server/src/routes/notifications.ts
+import { Router as Router4 } from "express";
+var router4 = Router4();
+router4.get("/notifications", (_req, res) => {
+  res.json(ListNotificationsResponse.parse(listNotifications()));
+});
+router4.post("/notifications/read", (req, res) => {
+  const { id } = MarkNotificationReadBody.parse(req.body);
+  const notification = markNotificationRead(id);
+  if (!notification) {
+    res.status(404).json({ error: "Notification not found" });
+    return;
+  }
+  res.json(notification);
+});
+var notifications_default = router4;
+
+// artifacts/api-server/src/routes/campus.ts
+import { Router as Router5 } from "express";
+
+// artifacts/api-server/src/services/campusData.ts
+var REC_BUILDINGS = [
+  {
+    id: "rec-main-block",
+    name: "Main Block",
+    category: "admin",
+    description: "Principal's Office, Administrative Wing, Dean Offices, and central conference halls.",
+    code: "MB",
+    latitude: 13.0112,
+    longitude: 80.0042
+  },
+  {
+    id: "rec-central-college",
+    name: "Rajalakshmi Engineering College (Central Block)",
+    category: "academic",
+    description: "Central Academic Block housing Computer Science, IT, AI & Data Science departments and lecture halls.",
+    code: "CB",
+    latitude: 13.0084,
+    longitude: 80.0036
+  },
+  {
+    id: "rec-workshop-block",
+    name: "Workshop Block",
+    category: "lab",
+    description: "Mechanical workshops, manufacturing technology labs, carpentry, and welding practice bays.",
+    code: "WB",
+    latitude: 13.0098,
+    longitude: 80.0024
+  },
+  {
+    id: "rec-ece-workshop",
+    name: "Rajalakshmi Engineering College Workshop, ECE",
+    category: "academic",
+    description: "Electronics & Communication Engineering labs, digital signal processing, and robotics lab.",
+    code: "ECE",
+    latitude: 13.009,
+    longitude: 80.0022
+  },
+  {
+    id: "rec-transport-office",
+    name: "REC College Bus Transport Office",
+    category: "transit",
+    description: "Central fleet dispatch, bus pass verification, bus coordinators desk, and driver operations.",
+    code: "TO",
+    latitude: 13.0108,
+    longitude: 80.0076
+  },
+  {
+    id: "rec-d-block",
+    name: "D Block",
+    category: "academic",
+    description: "Academic lecture block, seminar halls, and department faculty cabins.",
+    code: "DB",
+    latitude: 13.0062,
+    longitude: 80.0006
+  },
+  {
+    id: "rec-fluid-mechanics",
+    name: "Fluid Mechanics Lab",
+    category: "lab",
+    description: "Hydraulics, fluid machinery, flow measurement, and aerospace flow research test rigs.",
+    code: "FML",
+    latitude: 13.006,
+    longitude: 80.002
+  },
+  {
+    id: "rec-automobile-block",
+    name: "Rajalakshmi Engineering College - Automobile Block",
+    category: "academic",
+    description: "Automobile engineering chassis lab, engine testing bays, and vehicular dynamics center.",
+    code: "AUTO",
+    latitude: 13.0068,
+    longitude: 80.0002
+  },
+  {
+    id: "rec-school-of-architecture",
+    name: "Rajalakshmi School of Architecture",
+    category: "academic",
+    description: "Design studios, climatology lab, architectural modeling workshops, and exhibition spaces.",
+    code: "RSA",
+    latitude: 13.0072,
+    longitude: 79.9972
+  },
+  {
+    id: "rec-indoor-stadium",
+    name: "Indoor Stadium",
+    category: "recreation",
+    description: "Wooden badminton courts, table tennis, basketball arena, and fitness gymnasium.",
+    code: "IS",
+    latitude: 13.0075,
+    longitude: 80.0072
+  },
+  {
+    id: "rec-auditorium",
+    name: "Auditorium",
+    category: "facility",
+    description: "Air-conditioned 1,500-seat convention hall for symposiums, convocations, and cultural events.",
+    code: "AUD",
+    latitude: 13.007,
+    longitude: 80.0073
+  },
+  {
+    id: "rec-boy-hostel-2",
+    name: "Rajalakshmi Engineering College Boy Hostel - 2",
+    category: "hostel",
+    description: "Student residential rooms, study halls, mess facility, and resident recreation room.",
+    code: "BH2",
+    latitude: 13.0048,
+    longitude: 80.0026
+  },
+  {
+    id: "rec-ladies-hostel",
+    name: "Ladies Hostel",
+    category: "hostel",
+    description: "Secure women's residential campus, dedicated dining hall, garden courtyard, and study library.",
+    code: "LH",
+    latitude: 13.0045,
+    longitude: 80.0068
+  }
+];
+var REC_CAMPUS_STOPS = [
+  {
+    id: "rec-main-gate-stop",
+    name: "REC Main Gate Terminal",
+    servedRoutes: ["Bus 12 (Campus Loop A)", "Bus 18 (Metro Connector)", "Bus 4B (Express)", "Bus 21 (Perimeter)"],
+    description: "Primary arrival/departure terminus right at the REC Main Security Gate on NH4.",
+    latitude: 13.0118,
+    longitude: 80.0048
+  },
+  {
+    id: "rec-transport-depot-stop",
+    name: "Transport Office Depot Bay",
+    servedRoutes: ["All 40+ College Fleet Buses", "Driver Dispatch Stand"],
+    description: "Boarding platform directly beside the REC College Bus Transport Office.",
+    latitude: 13.0108,
+    longitude: 80.0074
+  },
+  {
+    id: "rec-central-academic-stop",
+    name: "Central Block Academic Stop",
+    servedRoutes: ["Campus Loop A", "Hostel Village Shuttle", "Metro Connector Feeder"],
+    description: "Located at the central crossroad between Central Academic Block and the Sports Field.",
+    latitude: 13.0084,
+    longitude: 80.0042
+  },
+  {
+    id: "rec-hostel-loop-stop",
+    name: "Hostel Zone South Bay",
+    servedRoutes: ["Evening Hostel Shuttle", "Bus 18 Feeder", "Bus 21 South Loop"],
+    description: "Convenient pickup node between Boy Hostel 2 and the Ladies Hostel South road.",
+    latitude: 13.0049,
+    longitude: 80.0044
+  },
+  {
+    id: "rec-architecture-stop",
+    name: "School of Architecture Bay",
+    servedRoutes: ["West Campus Shuttle", "Special Event Feeder"],
+    description: "Stop serving the Rajalakshmi School of Architecture western courtyard.",
+    latitude: 13.0071,
+    longitude: 79.9978
+  }
+];
+var REC_POINTS_OF_INTEREST = [
+  {
+    id: "poi-rec-main-gate",
+    name: "REC Main Gate (\u0BAE\u0BC6\u0BAF\u0BBF\u0BA9\u0BCD \u0B95\u0BC7\u0B9F\u0BCD)",
+    category: "gate",
+    landmarkNear: "Opposite NH4 highway corridor & Main Block",
+    latitude: 13.012,
+    longitude: 80.0048
+  },
+  {
+    id: "poi-dominos-pizza",
+    name: "Domino's Pizza | Rajalakshmi Plaza",
+    category: "food",
+    landmarkNear: "North-West commercial corner beside entry road",
+    latitude: 13.0115,
+    longitude: 80.0016
+  },
+  {
+    id: "poi-cafe-coffee-day",
+    name: "Cafe Coffee Day (\u0B95\u0B83\u0BAA\u0BC7 \u0B95\u0BBE\u0BAA\u0BCD\u0BAA\u0BBF \u0B9F\u0BC7)",
+    category: "food",
+    landmarkNear: "East avenue, north of Indoor Stadium",
+    latitude: 13.0088,
+    longitude: 80.0074
+  },
+  {
+    id: "poi-pontus-pack",
+    name: "Pontus Pack Pvt",
+    category: "service",
+    landmarkNear: "North of Workshop Block",
+    latitude: 13.0105,
+    longitude: 80.0022
+  },
+  {
+    id: "poi-sarvesh-pavilion",
+    name: "Sarvesh anna payaluga / Cafeteria",
+    category: "food",
+    landmarkNear: "South-East corner of central sports ground",
+    latitude: 13.0062,
+    longitude: 80.004
+  },
+  {
+    id: "poi-sports-ground",
+    name: "REC Central Sports Field & Track",
+    category: "recreation",
+    landmarkNear: "Between Central Academic Block and Indoor Stadium",
+    latitude: 13.0085,
+    longitude: 80.0058
+  }
+];
+var REC_CAMPUS_PATHS = [
+  {
+    id: "path-main-entry-avenue",
+    name: "REC Main Gate to Central Spine",
+    type: "road",
+    coordinates: [
+      { latitude: 13.012, longitude: 80.0048 },
+      // Main Gate
+      { latitude: 13.011, longitude: 80.0044 },
+      // Main Block South
+      { latitude: 13.0098, longitude: 80.0042 },
+      { latitude: 13.0084, longitude: 80.0042 }
+      // Central Academic Cross
+    ]
+  },
+  {
+    id: "path-north-spine-road",
+    name: "North Spine Road (Domino's to Transport Office)",
+    type: "road",
+    coordinates: [
+      { latitude: 13.0115, longitude: 80.0016 },
+      // Domino's
+      { latitude: 13.0104, longitude: 80.0018 },
+      { latitude: 13.0104, longitude: 80.0042 },
+      // Below Main Block
+      { latitude: 13.0106, longitude: 80.0076 }
+      // Transport Office
+    ]
+  },
+  {
+    id: "path-east-stadium-avenue",
+    name: "East Stadium Avenue (CCD to Ladies Hostel)",
+    type: "road",
+    coordinates: [
+      { latitude: 13.0106, longitude: 80.0076 },
+      // Transport Office
+      { latitude: 13.0088, longitude: 80.0074 },
+      // Cafe Coffee Day
+      { latitude: 13.0075, longitude: 80.0072 },
+      // Indoor Stadium
+      { latitude: 13.0068, longitude: 80.0072 },
+      // Auditorium
+      { latitude: 13.0048, longitude: 80.007 },
+      // East Turn
+      { latitude: 13.0045, longitude: 80.0068 }
+      // Ladies Hostel
+    ]
+  },
+  {
+    id: "path-south-ring-road",
+    name: "South Perimeter Ring Road (Ladies Hostel to D Block)",
+    type: "road",
+    coordinates: [
+      { latitude: 13.0045, longitude: 80.0068 },
+      // Ladies Hostel
+      { latitude: 13.0048, longitude: 80.0062 },
+      { latitude: 13.0048, longitude: 80.0044 },
+      // South Spine Junction
+      { latitude: 13.0048, longitude: 80.0026 },
+      // Boy Hostel 2
+      { latitude: 13.0055, longitude: 80.0018 },
+      // Fluid Mechanics
+      { latitude: 13.0062, longitude: 80.0006 }
+      // D Block
+    ]
+  },
+  {
+    id: "path-central-spine",
+    name: "Central Academic to South Spine",
+    type: "walkway",
+    coordinates: [
+      { latitude: 13.0084, longitude: 80.0042 },
+      // Central Block
+      { latitude: 13.0065, longitude: 80.0042 },
+      // Sarvesh Pavilion
+      { latitude: 13.0048, longitude: 80.0044 }
+      // South Ring
+    ]
+  },
+  {
+    id: "path-west-architecture-avenue",
+    name: "West Architecture Pathway (Workshop to School of Architecture)",
+    type: "walkway",
+    coordinates: [
+      { latitude: 13.009, longitude: 80.0022 },
+      // ECE Workshop
+      { latitude: 13.0082, longitude: 80.0016 },
+      { latitude: 13.0074, longitude: 80.0002 },
+      // Automobile Block Junction
+      { latitude: 13.0073, longitude: 79.9986 },
+      { latitude: 13.0072, longitude: 79.9972 }
+      // Architecture Front
+    ]
+  },
+  {
+    id: "path-automobile-dblock-link",
+    name: "D Block to Automobile Block Link",
+    type: "walkway",
+    coordinates: [
+      { latitude: 13.0074, longitude: 80.0002 },
+      // Automobile
+      { latitude: 13.0062, longitude: 80.0006 }
+      // D Block
+    ]
+  }
+];
+var REC_CAMPUS_CENTER = {
+  latitude: 13.0084,
+  longitude: 80.0033
 };
-var createInsertSchema = (entity, refine) => {
-  const columns = getColumns(entity);
-  return handleColumns(columns, refine ?? {}, insertConditions);
-};
-
-// lib/db/src/schema/phase2.ts
-import { boolean as boolean2, doublePrecision as doublePrecision2, integer as integer2, pgTable as pgTable2, text as text2, timestamp as timestamp2 } from "drizzle-orm/pg-core";
-var campusLocations2 = pgTable2("campus_locations", {
-  id: text2("id").primaryKey(),
-  name: text2("name").notNull(),
-  type: text2("type").notNull(),
-  description: text2("description").notNull(),
-  latitude: doublePrecision2("latitude").notNull(),
-  longitude: doublePrecision2("longitude").notNull()
-});
-var navigationRoutes = pgTable2("navigation_routes", {
-  id: text2("id").primaryKey(),
-  startLocationId: text2("start_location_id").notNull(),
-  destinationLocationId: text2("destination_location_id").notNull(),
-  mode: text2("mode").notNull(),
-  distanceKm: doublePrecision2("distance_km").notNull(),
-  walkingMinutes: integer2("walking_minutes").notNull()
-});
-var safetyReports2 = pgTable2("safety_reports", {
-  id: text2("id").primaryKey(),
-  studentId: text2("student_id").notNull(),
-  reportType: text2("report_type").notNull(),
-  description: text2("description").notNull(),
-  latitude: doublePrecision2("latitude").notNull(),
-  longitude: doublePrecision2("longitude").notNull(),
-  status: text2("status").notNull().default("OPEN"),
-  createdAt: timestamp2("created_at", { withTimezone: true }).notNull().defaultNow()
-});
-var emergencyContacts3 = pgTable2("emergency_contacts", {
-  id: text2("id").primaryKey(),
-  studentId: text2("student_id").notNull(),
-  name: text2("name").notNull(),
-  relationship: text2("relationship").notNull(),
-  phone: text2("phone").notNull()
-});
-var safetyAlerts = pgTable2("safety_alerts", {
-  id: text2("id").primaryKey(),
-  title: text2("title").notNull(),
-  message: text2("message").notNull(),
-  severity: text2("severity").notNull(),
-  latitude: doublePrecision2("latitude").notNull(),
-  longitude: doublePrecision2("longitude").notNull(),
-  createdAt: timestamp2("created_at", { withTimezone: true }).notNull().defaultNow()
-});
-var adminUsers = pgTable2("admin_users", {
-  id: text2("id").primaryKey(),
-  displayName: text2("display_name").notNull(),
-  active: boolean2("active").notNull().default(true)
-});
-var transportProviders = pgTable2("transport_providers", {
-  id: text2("id").primaryKey(),
-  name: text2("name").notNull(),
-  category: text2("category").notNull(),
-  status: text2("status").notNull(),
-  dataLabel: text2("data_label").notNull()
-});
-var publicTransportRoutes = pgTable2("public_transport_routes", {
-  id: text2("id").primaryKey(),
-  providerId: text2("provider_id").notNull(),
-  route: text2("route").notNull(),
-  transportType: text2("transport_type").notNull()
-});
-var publicTransportStops2 = pgTable2("public_transport_stops", {
-  id: text2("id").primaryKey(),
-  providerId: text2("provider_id").notNull(),
-  name: text2("name").notNull(),
-  latitude: doublePrecision2("latitude").notNull(),
-  longitude: doublePrecision2("longitude").notNull()
-});
-var publicTransportJourneys = pgTable2("public_transport_journeys", {
-  id: text2("id").primaryKey(),
-  providerId: text2("provider_id").notNull(),
-  transportType: text2("transport_type").notNull(),
-  route: text2("route").notNull(),
-  departure: text2("departure").notNull(),
-  arrival: text2("arrival").notNull(),
-  durationMinutes: integer2("duration_minutes").notNull(),
-  transfers: integer2("transfers").notNull().default(0),
-  walkingDistanceKm: doublePrecision2("walking_distance_km").notNull(),
-  availability: text2("availability").notNull(),
-  dataLabel: text2("data_label").notNull()
-});
-var aiConversations = pgTable2("ai_conversations", {
-  id: text2("id").primaryKey(),
-  studentId: text2("student_id").notNull(),
-  createdAt: timestamp2("created_at", { withTimezone: true }).notNull().defaultNow()
-});
-var aiMessages = pgTable2("ai_messages", {
-  id: text2("id").primaryKey(),
-  conversationId: text2("conversation_id").notNull(),
-  role: text2("role").notNull(),
-  content: text2("content").notNull(),
-  createdAt: timestamp2("created_at", { withTimezone: true }).notNull().defaultNow()
-});
-var insertCampusLocationSchema = createInsertSchema(campusLocations2);
-var insertNavigationRouteSchema = createInsertSchema(navigationRoutes);
-var insertSafetyReportSchema = createInsertSchema(safetyReports2);
-var insertEmergencyContactSchema = createInsertSchema(emergencyContacts3);
-var insertSafetyAlertSchema = createInsertSchema(safetyAlerts);
-var insertAdminUserSchema = createInsertSchema(adminUsers);
-var insertTransportProviderSchema = createInsertSchema(transportProviders);
-var insertPublicTransportRouteSchema = createInsertSchema(publicTransportRoutes);
-var insertPublicTransportStopSchema = createInsertSchema(publicTransportStops2);
-var insertPublicTransportJourneySchema = createInsertSchema(publicTransportJourneys);
-var insertAiConversationSchema = createInsertSchema(aiConversations);
-var insertAiMessageSchema = createInsertSchema(aiMessages);
-
-// lib/db/src/schema/auth.ts
-import { boolean as boolean3, integer as integer3, pgTable as pgTable3, text as text3, timestamp as timestamp3 } from "drizzle-orm/pg-core";
-var profiles2 = pgTable3("profiles", {
-  id: text3("id").primaryKey(),
-  role: text3("role").notNull(),
-  // 'student' | 'driver' | 'admin'
-  fullName: text3("full_name").notNull(),
-  email: text3("email"),
-  phone: text3("phone"),
-  createdAt: timestamp3("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp3("updated_at", { withTimezone: true }).notNull().defaultNow()
-});
-var students3 = pgTable3("students", {
-  id: text3("id").primaryKey(),
-  profileId: text3("profile_id").notNull(),
-  studentId: text3("student_id").notNull().unique(),
-  // e.g. Roll number or registration ID
-  department: text3("department").notNull(),
-  batch: text3("batch"),
-  createdAt: timestamp3("created_at", { withTimezone: true }).notNull().defaultNow()
-});
-var drivers3 = pgTable3("drivers", {
-  id: text3("id").primaryKey(),
-  profileId: text3("profile_id"),
-  name: text3("name").notNull(),
-  phone: text3("phone").notNull().unique(),
-  busId: text3("bus_id"),
-  routeId: text3("route_id"),
-  active: boolean3("active").notNull().default(true),
-  licenseNumber: text3("license_number"),
-  createdAt: timestamp3("created_at", { withTimezone: true }).notNull().defaultNow()
-});
-var buses2 = pgTable3("buses", {
-  id: text3("id").primaryKey(),
-  busNumber: text3("bus_number").notNull(),
-  routeId: text3("route_id").notNull(),
-  driverId: text3("driver_id"),
-  capacity: integer3("capacity").notNull().default(40),
-  active: boolean3("active").notNull().default(true),
-  status: text3("status").notNull().default("ON ROUTE"),
-  createdAt: timestamp3("created_at", { withTimezone: true }).notNull().defaultNow()
-});
-var sessions = pgTable3("sessions", {
-  token: text3("token").primaryKey(),
-  profileId: text3("profile_id").notNull(),
-  role: text3("role").notNull(),
-  // 'student' | 'driver' | 'admin'
-  entityId: text3("entity_id").notNull(),
-  // student ID, driver ID, or admin username
-  expiresAt: timestamp3("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp3("created_at", { withTimezone: true }).notNull().defaultNow()
-});
-var insertProfileSchema = createInsertSchema(profiles2);
-var insertStudentSchema = createInsertSchema(students3);
-var insertDriverSchema = createInsertSchema(drivers3);
-var insertBusSchema = createInsertSchema(buses2);
-var insertSessionSchema = createInsertSchema(sessions);
-
-// lib/db/src/index.ts
-import fs2 from "node:fs";
-import path2 from "node:path";
-var { Pool: Pool2 } = pg2;
-var pool = null;
-var pgliteClient = null;
-var db2 = null;
-if (process.env.DATABASE_URL) {
-  try {
-    pool = new Pool2({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL.includes("localhost") ? false : { rejectUnauthorized: false }
-    });
-    db2 = drizzlePg2(pool, { schema: schema_exports2 });
-    console.log("[ACIMS DB] Connected to external PostgreSQL via DATABASE_URL");
-  } catch (err) {
-    console.error("[ACIMS DB] Failed to initialize PostgreSQL pool:", err);
-  }
+var REC_CAMPUS_BOUNDS = [
+  [13.0035, 79.996],
+  // South-West
+  [13.013, 80.009]
+  // North-East
+];
+function toRad2(deg) {
+  return deg * Math.PI / 180;
 }
-if (!db2) {
-  const dataDir2 = path2.resolve(process.cwd(), "data/postgres");
-  if (!fs2.existsSync(dataDir2)) {
-    fs2.mkdirSync(dataDir2, { recursive: true });
+function campusDistanceMeters(c1, c2) {
+  const R = 6371e3;
+  const dLat = toRad2(c2.latitude - c1.latitude);
+  const dLon = toRad2(c2.longitude - c1.longitude);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(toRad2(c1.latitude)) * Math.cos(toRad2(c2.latitude));
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+function calculateCampusWalkingRoute(startId, endId) {
+  const allLocations = [
+    ...REC_BUILDINGS.map((b) => ({ ...b })),
+    ...REC_CAMPUS_STOPS.map((s) => ({ ...s })),
+    ...REC_POINTS_OF_INTEREST.map((p) => ({ ...p }))
+  ];
+  const findLoc = (targetId) => {
+    return allLocations.find(
+      (l) => l.id === targetId || l.id === `poi-${targetId}` || `poi-${l.id}` === targetId || l.id === `${targetId}-stop` || l.id.replace(/^(poi-|rec-)/, "") === targetId.replace(/^(poi-|rec-)/, "")
+    );
+  };
+  const startLoc = findLoc(startId) ?? allLocations[0];
+  const endLoc = findLoc(endId) ?? allLocations[1];
+  if (!startLoc || !endLoc) return null;
+  const directMeters = campusDistanceMeters(startLoc, endLoc);
+  const walkingMeters = Math.max(40, Math.round(directMeters * 1.18));
+  const walkingMinutes = Math.max(1, Math.round(walkingMeters / 80));
+  const pathWaypoints = [
+    { latitude: startLoc.latitude, longitude: startLoc.longitude }
+  ];
+  if (directMeters > 250) {
+    if (startLoc.longitude < 80.001 && endLoc.longitude > 80.003) {
+      pathWaypoints.push({ latitude: 13.0074, longitude: 80.0002 });
+      pathWaypoints.push({ latitude: 13.0084, longitude: 80.0042 });
+    } else if (startLoc.longitude > 80.003 && endLoc.longitude < 80.001) {
+      pathWaypoints.push({ latitude: 13.0084, longitude: 80.0042 });
+      pathWaypoints.push({ latitude: 13.0074, longitude: 80.0002 });
+    } else if (Math.abs(startLoc.latitude - endLoc.latitude) > 4e-3) {
+      pathWaypoints.push({ latitude: 13.0084, longitude: 80.0042 });
+    }
   }
-  pgliteClient = new PGlite2(dataDir2);
-  db2 = drizzlePglite2(pgliteClient, { schema: schema_exports2 });
-  console.log(`[ACIMS DB] Persistent PostgreSQL engine initialized at ${dataDir2}`);
+  pathWaypoints.push({ latitude: endLoc.latitude, longitude: endLoc.longitude });
+  return {
+    start: startLoc,
+    destination: endLoc,
+    distanceMeters: walkingMeters,
+    walkingMinutes,
+    pathWaypoints
+  };
 }
 
 // artifacts/api-server/src/services/admin.ts
+var STOP_NAMES = {
+  vandalur: "Vandalur Transit Hub",
+  perungalathur: "Perungalathur Junction",
+  tambaram: "Tambaram Terminal",
+  college: "College Main Terminal",
+  "north-residence": "North Residence Complex",
+  "bio-center": "Bio-Engineering Center",
+  "hostel-village": "Hostel Village",
+  athletics: "Athletic Pavilion",
+  library: "Central Library",
+  "metro-central": "Metro Central Station",
+  "hospital-gate": "Hospital Gate North",
+  "south-lot": "South Commuter Lot",
+  "faculty-enclave": "Faculty Enclave",
+  "student-center": "Student Center",
+  "jb-estate": "JB Estate",
+  ponnu: "Ponnu",
+  ramratna: "Ramratna",
+  "medical-sciences": "Medical Sciences Center",
+  auditorium: "Main Auditorium",
+  "academic-quad": "Academic Quad"
+};
+function getStopNameById(id) {
+  return STOP_NAMES[id] || id.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+var drivers = [
+  {
+    id: "driver-arun",
+    name: "Arun Kumar",
+    phone: "+91 98401 23451",
+    active: true,
+    busId: "bus-12",
+    routeId: "route-bus-12"
+  },
+  {
+    id: "driver-suresh",
+    name: "Suresh Mani",
+    phone: "+91 98402 34562",
+    active: true,
+    busId: "bus-4b",
+    routeId: "route-bus-4b"
+  },
+  {
+    id: "driver-venkat",
+    name: "Venkat Raman",
+    phone: "+91 98403 45673",
+    active: true,
+    busId: "bus-7",
+    routeId: "route-bus-7"
+  },
+  {
+    id: "driver-rajesh",
+    name: "Rajesh Kannan",
+    phone: "+91 98404 56784",
+    active: true,
+    busId: "bus-18",
+    routeId: "route-bus-18"
+  },
+  {
+    id: "driver-karthik",
+    name: "Karthik Raja",
+    phone: "+91 98405 67895",
+    active: true,
+    busId: "bus-21",
+    routeId: "route-bus-21"
+  }
+];
 var routes = [
   {
     id: "route-bus-18",
@@ -8621,14 +6017,162 @@ var routes = [
     assignedBusIds: ["bus-21"]
   }
 ];
+function listAdminBuses() {
+  return getBuses().map((bus) => ({
+    id: bus.id,
+    busNumber: bus.busNumber,
+    routeId: bus.routeId,
+    driverId: bus.driverId,
+    capacity: bus.capacity,
+    active: bus.active,
+    status: bus.status
+  }));
+}
+function createAdminBus(input) {
+  const route = routes.find((r) => r.id === input.routeId);
+  const routeLabel = route ? route.name.split("(")[0]?.trim() || route.name : `Route ${input.busNumber}`;
+  const destination = route?.destination || "Campus Terminal";
+  const origin = route?.name.includes("\u2192") ? route.name.split("\u2192")[0].replace(/.*\(|\)/g, "").trim() : "Main Transit Hub";
+  const nextStop = route?.stopIds?.[0] ? getStopNameById(route.stopIds[0]) : "Campus Main Gate";
+  const nextStopId = route?.stopIds?.[0] || "college";
+  const busId = `bus-${input.busNumber.toLowerCase().replace(/[^a-z0-9]/g, "") || Date.now()}`;
+  const active = input.active ?? true;
+  const newBus = {
+    id: busId,
+    busNumber: input.busNumber,
+    origin,
+    destination,
+    routeLabel,
+    capacity: input.capacity,
+    currentLocation: { latitude: 12.9407, longitude: 80.1393 },
+    nextStop,
+    nextStopId,
+    etaMinutes: 5,
+    status: active ? "Standby" : "Inactive",
+    updatedAt: /* @__PURE__ */ new Date(),
+    active,
+    routeId: input.routeId,
+    driverId: input.driverId
+  };
+  createBusInFleet(newBus);
+  if (route && !route.assignedBusIds.includes(newBus.id)) {
+    route.assignedBusIds.push(newBus.id);
+  }
+  return {
+    id: newBus.id,
+    busNumber: newBus.busNumber,
+    routeId: newBus.routeId,
+    driverId: newBus.driverId,
+    capacity: newBus.capacity,
+    active: newBus.active,
+    status: newBus.status
+  };
+}
+function updateAdminBus(id, input) {
+  const existing = getBus(id);
+  if (!existing) return void 0;
+  const updates = {};
+  if (input.busNumber !== void 0) updates.busNumber = input.busNumber;
+  if (input.capacity !== void 0) {
+    updates.capacity = input.capacity;
+  }
+  if (input.driverId !== void 0) updates.driverId = input.driverId;
+  if (input.routeId !== void 0 && input.routeId !== existing.routeId) {
+    updates.routeId = input.routeId;
+    const route = routes.find((r) => r.id === input.routeId);
+    if (route) {
+      updates.routeLabel = route.name.split("(")[0]?.trim() || route.name;
+      updates.destination = route.destination;
+      if (route.stopIds?.length > 0) {
+        updates.nextStop = getStopNameById(route.stopIds[0]);
+        updates.nextStopId = route.stopIds[0];
+      }
+      if (!route.assignedBusIds.includes(id)) {
+        route.assignedBusIds.push(id);
+      }
+    }
+  }
+  if (input.active !== void 0) {
+    updates.active = input.active;
+    updates.status = input.active ? existing.status === "Inactive" ? "Standby" : existing.status : "Inactive";
+  }
+  const updated = updateBusInFleet(id, updates);
+  if (!updated) return void 0;
+  return {
+    id: updated.id,
+    busNumber: updated.busNumber,
+    routeId: updated.routeId,
+    driverId: updated.driverId,
+    capacity: updated.capacity,
+    active: updated.active,
+    status: updated.status
+  };
+}
+function deactivateAdminBus(id) {
+  const updated = deactivateBusInFleet(id);
+  if (!updated) return void 0;
+  return {
+    id: updated.id,
+    busNumber: updated.busNumber,
+    routeId: updated.routeId,
+    driverId: updated.driverId,
+    capacity: updated.capacity,
+    active: updated.active,
+    status: updated.status
+  };
+}
+function listDrivers() {
+  return drivers.map((driver) => ({ ...driver }));
+}
+function createDriver(input) {
+  const driver = { ...input, id: `driver-${Date.now()}` };
+  drivers.push(driver);
+  return { ...driver };
+}
+function updateDriver(id, input) {
+  const driver = drivers.find((candidate) => candidate.id === id);
+  if (!driver) return void 0;
+  Object.assign(driver, input);
+  return { ...driver };
+}
 function listRoutes() {
   return routes.map((route) => ({ ...route, stopIds: [...route.stopIds], assignedBusIds: [...route.assignedBusIds] }));
+}
+function createRoute(input) {
+  const route = { ...input, id: `route-${Date.now()}`, assignedBusIds: [] };
+  routes.push(route);
+  return { ...route, assignedBusIds: [] };
+}
+function updateRoute(id, input) {
+  const route = routes.find((candidate) => candidate.id === id);
+  if (!route) return void 0;
+  Object.assign(route, input);
+  if (input.stopIds) {
+    route.stopIds = [...input.stopIds];
+  }
+  if (input.assignedBusIds) {
+    route.assignedBusIds = [...input.assignedBusIds];
+  }
+  const buses = getBuses();
+  for (const bus of buses) {
+    if (bus.routeId === route.id || route.assignedBusIds.includes(bus.id)) {
+      const updates = {};
+      if (input.destination) updates.destination = input.destination;
+      if (input.name) updates.routeLabel = input.name.split("(")[0]?.trim() || input.name;
+      if (input.stopIds && input.stopIds.length > 0) {
+        updates.nextStop = getStopNameById(input.stopIds[0]);
+        updates.nextStopId = input.stopIds[0];
+      }
+      updateBusInFleet(bus.id, updates);
+    }
+  }
+  return { ...route, stopIds: [...route.stopIds], assignedBusIds: [...route.assignedBusIds] };
 }
 function getAdminQueues() {
   return getBuses().map((bus) => ({
     busId: bus.id,
     busNumber: bus.busNumber,
-    queueSize: 0,
+    queueSize: bus.id === "bus-12" ? 3 : 0,
     capacity: bus.capacity,
     status: "Active"
   }));
@@ -8647,8 +6191,30 @@ function getCampusMobilityData() {
     pointsOfInterest: REC_POINTS_OF_INTEREST
   };
 }
+function listCampusLocations() {
+  const buildingLocations = REC_BUILDINGS.map((b) => ({
+    id: b.id,
+    name: b.name,
+    type: b.category,
+    description: b.description,
+    code: b.code,
+    category: b.category,
+    latitude: b.latitude,
+    longitude: b.longitude
+  }));
+  const poiLocations = REC_POINTS_OF_INTEREST.map((p) => ({
+    id: p.id,
+    name: p.name,
+    type: p.category,
+    description: `Near ${p.landmarkNear}`,
+    category: p.category,
+    latitude: p.latitude,
+    longitude: p.longitude
+  }));
+  return [...buildingLocations, ...poiLocations];
+}
 function listCampusStops() {
-  const buses3 = getBuses();
+  const buses = getBuses();
   return REC_CAMPUS_STOPS.map((stop) => {
     return {
       id: stop.id,
@@ -8656,16 +6222,16 @@ function listCampusStops() {
       latitude: stop.latitude,
       longitude: stop.longitude,
       description: stop.description,
-      servingBusIds: buses3.map((b) => b.id),
+      servingBusIds: buses.map((b) => b.id),
       routeNames: stop.servedRoutes
     };
   });
 }
 function listCampusRoutes() {
   const adminRoutes = listRoutes().filter((route) => route.active);
-  const buses3 = getBuses();
+  const buses = getBuses();
   return adminRoutes.map((route) => {
-    const assignedBus = buses3.find(
+    const assignedBus = buses.find(
       (bus) => bus.routeId === route.id || route.assignedBusIds.includes(bus.id)
     );
     return {
@@ -8678,146 +6244,87 @@ function listCampusRoutes() {
     };
   });
 }
+function getDestination(id) {
+  const all = listCampusLocations();
+  return all.find((loc) => loc.id === id);
+}
+function calculateNavigation(input) {
+  const destination = getDestination(input.destinationId);
+  if (!destination) return void 0;
+  const startLoc = input.startLocationId ? getDestination(input.startLocationId) : null;
+  const start = startLoc ? { latitude: startLoc.latitude, longitude: startLoc.longitude } : {
+    latitude: input.startLatitude ?? REC_CAMPUS_CENTER.latitude,
+    longitude: input.startLongitude ?? REC_CAMPUS_CENTER.longitude
+  };
+  const walkingResult = input.startLocationId ? calculateCampusWalkingRoute(input.startLocationId, input.destinationId) : null;
+  const distanceKm = walkingResult ? walkingResult.distanceMeters / 1e3 : distanceInKilometers(start, destination);
+  const walkingMinutes = walkingResult ? walkingResult.walkingMinutes : Math.max(1, Math.ceil(distanceKm / 4.8 * 60));
+  const stops = listCampusStops();
+  const relevantStop = stops.slice().sort(
+    (a, b) => distanceInKilometers(a, destination) - distanceInKilometers(b, destination)
+  )[0] ?? stops[0];
+  return {
+    start,
+    destination,
+    mode: "campus-walk",
+    distanceKm: Number(distanceKm.toFixed(2)),
+    distanceMeters: Math.round(distanceKm * 1e3),
+    walkingMinutes,
+    relevantStop,
+    routeCoordinates: walkingResult?.pathWaypoints ?? [start, destination],
+    busOptions: []
+  };
+}
 
 // artifacts/api-server/src/routes/campus.ts
-var router6 = Router6();
-router6.get("/campus/mobility", async (_req, res) => {
-  const data = getCampusMobilityData();
-  const dbLocations = await getDbCampusLocations();
-  const dbPaths = await getDbCampusPaths();
-  res.json({
-    ...data,
-    buildings: dbLocations.filter((l) => l.category === "academic" || l.category === "facility"),
-    campusPaths: dbPaths.length > 0 ? dbPaths : data.campusPaths
-  });
+var router5 = Router5();
+router5.get("/campus/mobility", (_req, res) => {
+  res.json(getCampusMobilityData());
 });
-router6.get("/campus/locations", async (req, res) => {
-  try {
-    const category = req.query.category;
-    const locations = await getDbCampusLocations(category);
-    res.json(locations);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch campus locations" });
-  }
+router5.get("/campus/locations", (_req, res) => {
+  res.json(listCampusLocations());
 });
-router6.get("/campus/search", async (req, res) => {
-  try {
-    const query2 = req.query.q;
-    if (!query2 || query2.trim().length === 0) {
-      return res.json([]);
-    }
-    const results = await searchDbCampusLocations(query2);
-    res.json(results);
-  } catch (err) {
-    res.status(500).json({ error: "Search failed" });
-  }
-});
-router6.get("/campus/nearby", async (req, res) => {
-  try {
-    let haversineM2 = function(lat1, lon1, lat2, lon2) {
-      const R = 6371e3;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    };
-    var haversineM = haversineM2;
-    const lat = parseFloat(req.query.lat);
-    const lon = parseFloat(req.query.lon);
-    if (isNaN(lat) || isNaN(lon)) {
-      return res.status(400).json({ error: "Valid latitude and longitude required" });
-    }
-    const locations = await getDbCampusLocations();
-    const sorted = locations.map((loc) => ({
-      ...loc,
-      distanceMeters: Math.round(haversineM2(lat, lon, loc.latitude, loc.longitude))
-    })).sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 10);
-    res.json(sorted);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to find nearby campus locations" });
-  }
-});
-router6.get("/campus/stops", (_req, res) => {
+router5.get("/campus/stops", (_req, res) => {
   res.json(listCampusStops());
 });
-router6.get("/campus/routes", (_req, res) => {
+router5.get("/campus/routes", (_req, res) => {
   res.json(listCampusRoutes());
 });
-router6.get("/navigation/destinations", async (_req, res) => {
-  try {
-    const locations = await getDbCampusLocations();
-    res.json(locations);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch destinations" });
-  }
+router5.get("/navigation/destinations", (_req, res) => {
+  res.json(listCampusLocations());
 });
-router6.post("/campus/walk-route", async (req, res) => {
-  try {
-    const { startId, destinationId, startLatitude, startLongitude } = req.body;
-    if (!destinationId) {
-      return res.status(400).json({ error: "destinationId is required" });
-    }
-    let start;
-    if (typeof startLatitude === "number" && typeof startLongitude === "number") {
-      start = { latitude: startLatitude, longitude: startLongitude };
-    } else if (startId) {
-      start = startId;
-    } else {
-      return res.status(400).json({ error: "Either startId or real GPS coordinates (startLatitude/startLongitude) are required" });
-    }
-    const route = await calculateDbCampusWalkingRoute(start, destinationId);
-    if (!route) {
-      return res.status(404).json({ error: "Walking route unavailable." });
-    }
-    res.json(route);
-  } catch (err) {
-    console.error("Error calculating walk route:", err);
-    res.status(500).json({ error: "Walking route unavailable." });
+router5.post("/campus/walk-route", (req, res) => {
+  const { startId, destinationId } = req.body;
+  if (!startId || !destinationId) {
+    res.status(400).json({ error: "startId and destinationId are required" });
+    return;
   }
-});
-router6.post("/navigation/route", async (req, res) => {
-  try {
-    const body = req.body;
-    if (!body.destinationId) {
-      return res.status(400).json({ error: "destinationId required" });
-    }
-    let start;
-    if (typeof body.startLatitude === "number" && typeof body.startLongitude === "number") {
-      start = { latitude: body.startLatitude, longitude: body.startLongitude };
-    } else if (body.startLocationId) {
-      start = body.startLocationId;
-    } else {
-      start = "REC Main Gate";
-    }
-    const dbRoute = await calculateDbCampusWalkingRoute(start, body.destinationId);
-    if (dbRoute) {
-      return res.json({
-        destinationId: body.destinationId,
-        destinationName: dbRoute.destination,
-        totalDistanceMeters: dbRoute.distanceMeters,
-        totalTimeMinutes: dbRoute.walkingMinutes,
-        mode: body.mode || "walking",
-        steps: dbRoute.steps.map((text4, i) => ({
-          instruction: text4,
-          distanceMeters: Math.round(dbRoute.distanceMeters / dbRoute.steps.length),
-          timeMinutes: Math.round(dbRoute.walkingMinutes / dbRoute.steps.length)
-        })),
-        pathPoints: dbRoute.pathPoints,
-        source: "Cloud SQL campus_paths"
-      });
-    }
-    res.status(404).json({ error: "Walking route unavailable." });
-  } catch (err) {
-    res.status(500).json({ error: "Walking route unavailable." });
+  const route = calculateCampusWalkingRoute(startId, destinationId);
+  if (!route) {
+    res.status(404).json({ error: "Campus walking route not found" });
+    return;
   }
+  res.json(route);
 });
-var campus_default = router6;
+router5.post("/navigation/route", (req, res) => {
+  const body = req.body;
+  const route = calculateNavigation({
+    destinationId: body.destinationId,
+    startLatitude: body.startLatitude,
+    startLongitude: body.startLongitude,
+    startLocationId: body.startLocationId,
+    mode: body.mode
+  });
+  if (!route) {
+    res.status(404).json({ error: "Destination not found" });
+    return;
+  }
+  res.json(route);
+});
+var campus_default = router5;
 
 // artifacts/api-server/src/routes/safety.ts
-import { Router as Router7 } from "express";
-init_db();
-init_schema();
-import { eq as eq5, desc as desc3 } from "drizzle-orm";
+import { Router as Router6 } from "express";
 
 // artifacts/api-server/src/services/safety.ts
 var reports = [
@@ -8872,139 +6379,105 @@ var alerts = [
     createdAt: new Date(Date.now() - 1e3 * 60 * 15)
   }
 ];
+var emergencyContacts = [
+  { id: "contact-sec", name: "Campus Security Central Desk", relationship: "Campus Safety Team", phone: "+91 44 2275 0100 (Internal: 100)" },
+  { id: "contact-trans", name: "ACIMS Transport Operations Office", relationship: "Fleet Dispatch", phone: "+91 44 2275 0120 (Internal: 120)" },
+  { id: "contact-med", name: "Campus Health Clinic & First Aid", relationship: "Medical Center", phone: "+91 44 2275 0108 (Internal: 108)" }
+];
+function listSafetyReports(studentId = "student-20418") {
+  return reports.filter((report) => report.studentId === studentId || studentId === "all").map((report) => ({ ...report }));
+}
+function listAllSafetyReports() {
+  return reports.map((report) => ({ ...report }));
+}
+function updateSafetyReportStatus(id, status) {
+  const report = reports.find((r) => r.id === id);
+  if (!report) return void 0;
+  report.status = status;
+  return { ...report };
+}
+function listEmergencyContacts() {
+  return emergencyContacts.map((contact) => ({ ...contact }));
+}
+function addEmergencyContact(contact) {
+  const newContact = {
+    id: `contact-${Date.now()}`,
+    ...contact
+  };
+  emergencyContacts.push(newContact);
+  return { ...newContact };
+}
+function createSafetyReport(input) {
+  const report = {
+    ...input,
+    id: `safety-${Date.now()}`,
+    createdAt: /* @__PURE__ */ new Date(),
+    status: "OPEN"
+  };
+  reports.unshift(report);
+  return { ...report };
+}
 function listSafetyAlerts() {
   return alerts.map((alert) => ({ ...alert }));
 }
+function activateEmergency(input) {
+  return {
+    status: "ASSISTANCE_REQUESTED",
+    createdAt: /* @__PURE__ */ new Date(),
+    message: "EMERGENCY STATE ACTIVE: Your emergency assistance request has been recorded locally with your precise coordinates. ACIMS does not falsely claim police or 911 services are contacted. Please use the direct campus contacts below or call local emergency dispatch.",
+    contacts: emergencyContacts.map((contact) => ({ ...contact })),
+    location: { latitude: input.latitude, longitude: input.longitude }
+  };
+}
 
 // artifacts/api-server/src/routes/safety.ts
-var router7 = Router7();
-router7.get("/safety/reports", async (req, res) => {
-  try {
-    const studentId = req.query.studentId || req.header("x-acims-user-id") || "student-20418";
-    const reports2 = await db.select().from(safetyReports).where(eq5(safetyReports.studentId, studentId)).orderBy(desc3(safetyReports.createdAt));
-    res.json(reports2);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to list safety reports" });
-  }
+var router6 = Router6();
+router6.get("/safety/reports", (req, res) => {
+  res.json(listSafetyReports("student-20418"));
 });
-router7.post("/safety/report", async (req, res) => {
-  try {
-    const input = CreateSafetyReportBody.parse(req.body);
-    const studentId = req.body.studentId || req.header("x-acims-user-id") || "student-20418";
-    const reportId = `report-${Date.now()}`;
-    const created = await db.insert(safetyReports).values({
-      id: reportId,
-      studentId,
-      reportType: input.type,
-      description: input.description,
-      latitude: input.latitude,
-      longitude: input.longitude,
-      status: "OPEN"
-    }).returning();
-    await db.insert(notifications).values({
-      userId: studentId,
-      type: "safety",
-      title: "Safety Report Logged",
-      message: `Your ${input.type} report has been dispatched to campus security.`
-    });
-    res.status(201).json(created[0]);
-  } catch (err) {
-    console.error("Error creating safety report:", err);
-    res.status(400).json({ error: "Failed to create report" });
-  }
+router6.post("/safety/report", (req, res) => {
+  const input = CreateSafetyReportBody.parse(req.body);
+  res.status(201).json(createSafetyReport({ ...input, studentId: "student-20418" }));
 });
-router7.patch("/safety/reports/:reportId/status", async (req, res) => {
-  try {
-    const { reportId } = req.params;
-    const { status } = req.body;
-    if (!status) {
-      return res.status(400).json({ error: "Status is required" });
-    }
-    const updated = await db.update(safetyReports).set({ status }).where(eq5(safetyReports.id, reportId)).returning();
-    if (updated.length === 0) {
-      return res.status(404).json({ error: "Report not found" });
-    }
-    res.json(updated[0]);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to update safety report" });
+router6.patch("/safety/reports/:reportId/status", (req, res) => {
+  const { reportId } = req.params;
+  const { status } = req.body;
+  if (!status) {
+    res.status(400).json({ error: "Status is required" });
+    return;
   }
+  const updated = updateSafetyReportStatus(reportId, status);
+  if (!updated) {
+    res.status(404).json({ error: "Report not found" });
+    return;
+  }
+  res.json(updated);
 });
-router7.get("/safety/alerts", (_req, res) => {
+router6.get("/safety/alerts", (_req, res) => {
   res.json(listSafetyAlerts());
 });
-router7.get("/safety/contacts", async (req, res) => {
-  try {
-    const userId = req.query.userId || req.header("x-acims-user-id") || "student-20418";
-    const contacts = await db.select().from(emergencyContacts).where(eq5(emergencyContacts.userId, userId));
-    if (contacts.length > 0) {
-      return res.json(contacts);
-    }
-    const defaults = [
-      { id: "sec-campus-1", userId, name: "REC Campus Security Control", relationship: "Campus Patrol", phone: "+91 44 2715 6750" },
-      { id: "sec-transport-1", userId, name: "Transport Office Helpline", relationship: "Fleet Dispatch", phone: "+91 44 2715 6755" }
-    ];
-    for (const d of defaults) {
-      await db.insert(emergencyContacts).values(d).onConflictDoNothing();
-    }
-    res.json(defaults);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch emergency contacts" });
-  }
+router6.get("/safety/contacts", (_req, res) => {
+  res.json(listEmergencyContacts());
 });
-router7.post("/safety/contacts", async (req, res) => {
-  try {
-    const { name, relationship, phone } = req.body;
-    const userId = req.body.userId || req.header("x-acims-user-id") || "student-20418";
-    if (!name || !relationship || !phone) {
-      return res.status(400).json({ error: "Name, relationship, and phone are required" });
-    }
-    const created = await db.insert(emergencyContacts).values({
-      id: `contact-${Date.now()}`,
-      userId,
-      name,
-      relationship,
-      phone
-    }).returning();
-    res.status(201).json(created[0]);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to add emergency contact" });
+router6.post("/safety/contacts", (req, res) => {
+  const { name, relationship, phone } = req.body;
+  if (!name || !relationship || !phone) {
+    res.status(400).json({ error: "Name, relationship, and phone are required" });
+    return;
   }
+  res.status(201).json(addEmergencyContact({ name, relationship, phone }));
 });
-router7.post("/safety/emergency", async (req, res) => {
-  try {
-    const input = ActivateEmergencyBody.parse(req.body);
-    const studentId = req.body.studentId || req.header("x-acims-user-id") || "student-20418";
-    const created = await db.insert(safetyReports).values({
-      id: `sos-${Date.now()}`,
-      studentId,
-      reportType: "EMERGENCY_SOS",
-      description: `Immediate SOS Triggered at [${input.latitude}, ${input.longitude}]`,
-      latitude: input.latitude,
-      longitude: input.longitude,
-      status: "URGENT"
-    }).returning();
-    await db.insert(notifications).values({
-      userId: studentId,
-      type: "alert",
-      title: "Emergency Alert Dispatched",
-      message: "Campus security and rapid transit emergency response team have been notified of your location."
-    });
-    res.json({
-      status: "EMERGENCY_DISPATCHED",
-      report: created[0],
-      dispatchedAt: (/* @__PURE__ */ new Date()).toISOString()
-    });
-  } catch (err) {
-    res.status(400).json({ error: "Failed to activate emergency" });
-  }
+router6.post("/safety/emergency", (req, res) => {
+  const input = ActivateEmergencyBody.parse(req.body);
+  res.json(activateEmergency({ ...input, studentId: "student-20418" }));
 });
-var safety_default = router7;
+function getAllSafetyReports() {
+  return listAllSafetyReports();
+}
+var safety_default = router6;
 
 // artifacts/api-server/src/routes/admin.ts
-import { Router as Router8 } from "express";
-init_db();
-init_schema();
-import { eq as eq6, desc as desc4 } from "drizzle-orm";
+import { Router as Router7 } from "express";
 
 // artifacts/api-server/src/services/transport.ts
 var CollegeBusProvider = class {
@@ -9014,8 +6487,8 @@ var CollegeBusProvider = class {
   status = "live";
   dataLabel = "REAL ACIMS DATA";
   searchJourneys(start, destination) {
-    const buses3 = getBuses();
-    return buses3.slice(0, 2).map((bus) => ({
+    const buses = getBuses();
+    return buses.slice(0, 2).map((bus) => ({
       id: `acims-${bus.id}`,
       providerId: this.id,
       transportType: "College bus",
@@ -9168,321 +6641,115 @@ function searchJourneys(start, destination) {
 }
 
 // artifacts/api-server/src/routes/admin.ts
-var router8 = Router8();
+var router7 = Router7();
 var requireAdminRole = (req, res, next) => {
   const role = req.header("x-acims-role");
-  if (!role) {
-    res.status(401).json({ error: "Unauthorized: Admin authorization required" });
-    return;
-  }
-  if (role.toLowerCase() !== "admin") {
-    res.status(403).json({ error: "Forbidden: Admin role required" });
+  if (role && role !== "admin") {
+    res.status(403).json({ error: "Admin role required" });
     return;
   }
   next();
 };
-router8.use("/admin", requireAdminRole);
-router8.get("/admin/dashboard", async (_req, res) => {
-  try {
-    const busList = await getDbBuses();
-    const routeList = await getDbRoutes();
-    const reports2 = await db.select().from(safetyReports);
-    const dashboard = {
-      activeBuses: busList.filter((b) => b.active).length,
-      activeTrips: busList.filter((b) => b.active).length,
-      activeRoutes: routeList.filter((r) => r.active).length,
-      delayedBuses: 0,
-      queueEntries: getAdminQueues().reduce((total, q) => total + q.queueSize, 0),
-      openSafetyReports: reports2.filter((r) => r.status === "OPEN" || r.status === "UNDER REVIEW").length,
-      providersOnline: listProviders().filter((p) => p.status === "live").length,
-      systemStatus: "Operational"
-    };
-    res.json(dashboard);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to generate admin dashboard" });
-  }
+router7.use("/admin", requireAdminRole);
+router7.get("/admin/dashboard", (_req, res) => {
+  const buses = getBuses();
+  const safetyReports = getAllSafetyReports();
+  const dashboard = {
+    activeBuses: buses.length,
+    activeTrips: buses.length,
+    activeRoutes: listRoutes().filter((route) => route.active).length,
+    delayedBuses: buses.filter((bus) => bus.status.toLowerCase().includes("delay")).length,
+    queueEntries: getAdminQueues().reduce((total, queue) => total + queue.queueSize, 0),
+    openSafetyReports: safetyReports.filter((report) => report.status === "OPEN" || report.status === "UNDER REVIEW").length,
+    providersOnline: listProviders().filter((provider) => provider.status === "live").length,
+    systemStatus: "Operational"
+  };
+  res.json(GetAdminDashboardResponse.parse(dashboard));
 });
-router8.get("/admin/buses", async (_req, res) => {
-  try {
-    const list = await getDbBuses();
-    res.json(
-      list.map((b) => ({
-        id: b.id,
-        busNumber: b.busNumber,
-        routeId: b.routeId || "route-bus-12",
-        driverId: b.driverId || void 0,
-        capacity: 45,
-        active: b.active,
-        status: b.active ? "Active" : "Inactive"
-      }))
-    );
-  } catch (err) {
-    res.status(500).json({ error: "Failed to list buses" });
-  }
+router7.get("/admin/buses", (_req, res) => res.json(listAdminBuses()));
+router7.post("/admin/buses", (req, res) => {
+  const input = CreateAdminBusBody.parse(req.body);
+  res.status(201).json(createAdminBus({ ...input, active: input.active ?? true }));
 });
-router8.post("/admin/buses", async (req, res) => {
-  try {
-    const input = CreateAdminBusBody.parse(req.body);
-    const busId = `bus-${input.busNumber.toLowerCase().replace(/[^a-z0-9]/g, "") || Date.now()}`;
-    const created = await createDbBus({
-      id: busId,
-      busNumber: input.busNumber,
-      routeId: input.routeId,
-      driverId: input.driverId,
-      active: input.active ?? true
-    });
-    res.status(201).json({
-      id: created.id,
-      busNumber: created.busNumber,
-      routeId: created.routeId || input.routeId,
-      driverId: created.driverId || input.driverId,
-      capacity: input.capacity,
-      active: created.active,
-      status: created.active ? "Active" : "Inactive"
-    });
-  } catch (err) {
-    console.error("Error creating bus:", err);
-    res.status(400).json({ error: "Failed to create bus" });
+router7.patch("/admin/buses/:busId", (req, res) => {
+  const { busId } = UpdateAdminBusParams.parse(req.params);
+  const input = UpdateAdminBusBody.partial().parse(req.body);
+  const bus = updateAdminBus(busId, input);
+  if (!bus) {
+    res.status(404).json({ error: "Bus not found" });
+    return;
   }
+  res.json(bus);
 });
-router8.patch("/admin/buses/:busId", async (req, res) => {
-  try {
-    const { busId } = req.params;
-    const input = UpdateAdminBusBody.partial().parse(req.body);
-    const updated = await updateDbBus(busId, {
-      ...input.busNumber ? { busNumber: input.busNumber } : {},
-      ...input.routeId ? { routeId: input.routeId } : {},
-      ...input.driverId ? { driverId: input.driverId } : {},
-      ...input.active !== void 0 ? { active: input.active } : {}
-    });
-    if (!updated) {
-      return res.status(404).json({ error: "Bus not found" });
-    }
-    res.json({
-      id: updated.id,
-      busNumber: updated.busNumber,
-      routeId: updated.routeId || "route-bus-12",
-      driverId: updated.driverId || void 0,
-      capacity: input.capacity ?? 45,
-      active: updated.active,
-      status: updated.active ? "Active" : "Inactive"
-    });
-  } catch (err) {
-    res.status(400).json({ error: "Failed to update bus" });
+router7.delete("/admin/buses/:busId", (req, res) => {
+  const { busId } = DeactivateAdminBusParams.parse(req.params);
+  const bus = deactivateAdminBus(busId);
+  if (!bus) {
+    res.status(404).json({ error: "Bus not found" });
+    return;
   }
+  res.json(bus);
 });
-router8.delete("/admin/buses/:busId", async (req, res) => {
-  try {
-    const { busId } = req.params;
-    const updated = await updateDbBus(busId, { active: false });
-    if (!updated) {
-      return res.status(404).json({ error: "Bus not found" });
-    }
-    res.json({
-      id: updated.id,
-      busNumber: updated.busNumber,
-      active: false,
-      status: "Inactive"
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to deactivate bus" });
+router7.get("/admin/drivers", (_req, res) => res.json(listDrivers()));
+router7.post("/admin/drivers", (req, res) => {
+  const input = CreateAdminDriverBody.parse(req.body);
+  res.status(201).json(createDriver({ ...input, active: input.active ?? true }));
+});
+router7.patch("/admin/drivers/:driverId", (req, res) => {
+  const { driverId } = req.params;
+  const input = req.body;
+  const driver = updateDriver(driverId, input);
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
   }
+  res.json(driver);
 });
-router8.get("/admin/drivers", async (_req, res) => {
-  try {
-    const driverProfiles = await db.select({
-      driverId: drivers.id,
-      profileId: profiles.id,
-      userId: profiles.userId,
-      name: profiles.name,
-      phone: profiles.phone,
-      assignedBusId: drivers.assignedBusId
-    }).from(drivers).innerJoin(profiles, eq6(drivers.profileId, profiles.id));
-    res.json(
-      driverProfiles.map((d) => ({
-        id: d.userId,
-        name: d.name,
-        phone: d.phone || "+91 98401 23450",
-        active: true,
-        busId: d.assignedBusId || void 0,
-        routeId: d.assignedBusId ? `route-${d.assignedBusId}` : void 0
-      }))
-    );
-  } catch (err) {
-    res.status(500).json({ error: "Failed to list drivers" });
+router7.get("/admin/routes", (_req, res) => res.json(listRoutes()));
+router7.post("/admin/routes", (req, res) => {
+  const input = CreateAdminRouteBody.parse(req.body);
+  res.status(201).json(createRoute({ ...input, active: input.active ?? true }));
+});
+router7.patch("/admin/routes/:routeId", (req, res) => {
+  const { routeId } = req.params;
+  const input = req.body;
+  const route = updateRoute(routeId, input);
+  if (!route) {
+    res.status(404).json({ error: "Route not found" });
+    return;
   }
+  res.json(route);
 });
-router8.post("/admin/drivers", async (req, res) => {
-  try {
-    const input = CreateAdminDriverBody.parse(req.body);
-    const userId = `driver-${input.name.toLowerCase().replace(/[^a-z0-9]/g, "") || Date.now()}`;
-    const prof = await db.insert(profiles).values({
-      userId,
-      name: input.name,
-      phone: input.phone,
-      email: `${userId}@rec.edu.in`,
-      role: "DRIVER"
-    }).returning();
-    await db.insert(drivers).values({
-      profileId: prof[0].id,
-      assignedBusId: input.busId || null
-    });
-    res.status(201).json({
-      id: userId,
-      name: input.name,
-      phone: input.phone,
-      active: true,
-      busId: input.busId,
-      routeId: input.busId ? `route-${input.busId}` : void 0
-    });
-  } catch (err) {
-    res.status(400).json({ error: "Failed to create driver" });
+router7.get("/admin/queues", (_req, res) => res.json(getAdminQueues()));
+router7.get("/admin/safety", (_req, res) => res.json(getAllSafetyReports()));
+router7.patch("/admin/safety/:reportId", (req, res) => {
+  const { reportId } = req.params;
+  const { status } = req.body;
+  if (!status) {
+    res.status(400).json({ error: "Status is required" });
+    return;
   }
-});
-router8.patch("/admin/drivers/:driverId", async (req, res) => {
-  try {
-    const { driverId } = req.params;
-    const { name, phone, busId } = req.body;
-    const profs = await db.select().from(profiles).where(eq6(profiles.userId, driverId));
-    if (profs.length === 0) {
-      return res.status(404).json({ error: "Driver not found" });
-    }
-    if (name || phone) {
-      await db.update(profiles).set({
-        ...name ? { name } : {},
-        ...phone ? { phone } : {}
-      }).where(eq6(profiles.userId, driverId));
-    }
-    if (busId !== void 0) {
-      await db.update(drivers).set({ assignedBusId: busId }).where(eq6(drivers.profileId, profs[0].id));
-    }
-    res.json({
-      id: driverId,
-      name: name || profs[0].name,
-      phone: phone || profs[0].phone,
-      active: true,
-      busId
-    });
-  } catch (err) {
-    res.status(400).json({ error: "Failed to update driver" });
+  const report = updateSafetyReportStatus(reportId, status);
+  if (!report) {
+    res.status(404).json({ error: "Report not found" });
+    return;
   }
+  res.json(report);
 });
-router8.get("/admin/routes", async (_req, res) => {
-  try {
-    const routeList = await getDbRoutes();
-    const result = await Promise.all(
-      routeList.map(async (r) => {
-        const stops = await db.select().from(busStops).where(eq6(busStops.routeId, r.id)).orderBy(busStops.sequenceNumber);
-        const assignedBuses = await db.select().from(buses).where(eq6(buses.routeId, r.id));
-        return {
-          id: r.id,
-          name: `${r.routeName} (${r.routeCode})`,
-          destination: stops[stops.length - 1]?.stopName || "Campus Terminal",
-          stopIds: stops.map((s) => s.id),
-          active: r.active,
-          assignedBusIds: assignedBuses.map((b) => b.id)
-        };
-      })
-    );
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to list routes" });
-  }
-});
-router8.post("/admin/routes", async (req, res) => {
-  try {
-    const input = CreateAdminRouteBody.parse(req.body);
-    const routeId = `route-bus-${input.name.toLowerCase().replace(/[^a-z0-9]/g, "") || Date.now()}`;
-    const created = await createDbRoute({
-      id: routeId,
-      routeName: input.name,
-      routeCode: input.name.split(" ")[0] || "RT",
-      active: input.active ?? true
-    });
-    if (input.stopIds && input.stopIds.length > 0) {
-      for (let i = 0; i < input.stopIds.length; i++) {
-        const sid = input.stopIds[i];
-        await db.insert(busStops).values({
-          id: `${routeId}-stop-${i + 1}`,
-          routeId: created.id,
-          stopName: sid.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-          latitude: 12.92 + i * 0.01,
-          longitude: 80.12 + i * 0.01,
-          sequenceNumber: i + 1
-        }).onConflictDoNothing();
-      }
-    }
-    res.status(201).json({
-      id: created.id,
-      name: created.routeName,
-      destination: input.destination,
-      stopIds: input.stopIds || [],
-      active: created.active,
-      assignedBusIds: []
-    });
-  } catch (err) {
-    res.status(400).json({ error: "Failed to create route" });
-  }
-});
-router8.patch("/admin/routes/:routeId", async (req, res) => {
-  try {
-    const { routeId } = req.params;
-    const { name, active } = req.body;
-    const updated = await updateDbRoute(routeId, {
-      ...name ? { routeName: name } : {},
-      ...active !== void 0 ? { active } : {}
-    });
-    if (!updated) {
-      return res.status(404).json({ error: "Route not found" });
-    }
-    res.json({
-      id: updated.id,
-      name: updated.routeName,
-      active: updated.active
-    });
-  } catch (err) {
-    res.status(400).json({ error: "Failed to update route" });
-  }
-});
-router8.get("/admin/queues", (_req, res) => res.json(getAdminQueues()));
-router8.get("/admin/safety", async (_req, res) => {
-  try {
-    const reports2 = await db.select().from(safetyReports).orderBy(desc4(safetyReports.createdAt));
-    res.json(reports2);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to list safety reports" });
-  }
-});
-router8.patch("/admin/safety/:reportId", async (req, res) => {
-  try {
-    const { reportId } = req.params;
-    const { status } = req.body;
-    if (!status) {
-      return res.status(400).json({ error: "Status is required" });
-    }
-    const updated = await db.update(safetyReports).set({ status }).where(eq6(safetyReports.id, reportId)).returning();
-    if (updated.length === 0) {
-      return res.status(404).json({ error: "Report not found" });
-    }
-    res.json(updated[0]);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to update safety report" });
-  }
-});
-var admin_default = router8;
+var admin_default = router7;
 
 // artifacts/api-server/src/routes/ai.ts
-import { Router as Router9 } from "express";
+import { Router as Router8 } from "express";
 
 // artifacts/api-server/src/services/publicTransitService.ts
-import path3 from "path";
-import fs3 from "fs";
+import path from "path";
+import fs from "fs";
 import { DatabaseSync } from "node:sqlite";
-var DB_DIR = path3.resolve(process.cwd(), "artifacts/api-server/data");
-var DB_PATH = path3.join(DB_DIR, "chennai-transit.db");
+var DB_DIR = path.resolve(process.cwd(), "artifacts/api-server/data");
+var DB_PATH = path.join(DB_DIR, "chennai-transit.db");
 var dbInstance = null;
-function initializeTransitSchema(db3) {
-  db3.exec(`
+function initializeTransitSchema(db) {
+  db.exec(`
     CREATE TABLE IF NOT EXISTS public_transport_agencies (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -9584,14 +6851,14 @@ function initializeTransitSchema(db3) {
     CREATE INDEX IF NOT EXISTS idx_stop_times_trip ON public_transport_stop_times (trip_id, stop_sequence);
     CREATE INDEX IF NOT EXISTS idx_trips_route ON public_transport_trips (route_id);
   `);
-  const agencyCount = db3.prepare("SELECT count(*) as count FROM public_transport_agencies").get();
+  const agencyCount = db.prepare("SELECT count(*) as count FROM public_transport_agencies").get();
   if (agencyCount && agencyCount.count === 0) {
-    seedBaselineTransitData(db3);
+    seedBaselineTransitData(db);
   }
 }
-function seedBaselineTransitData(db3) {
+function seedBaselineTransitData(db) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const insertAgency = db3.prepare(`
+  const insertAgency = db.prepare(`
     INSERT OR REPLACE INTO public_transport_agencies (
       id, name, agency_type, official_url, phone, timezone, source, source_url, last_synced_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -9628,7 +6895,7 @@ function seedBaselineTransitData(db3) {
     { id: "CSR_STOP_TAMBARAM", agencyId: "CSR", stopId: "CSR_TAMBARAM", stopName: "Tambaram Railway Station (Suburban)", lat: 12.9249, lon: 80.1275 },
     { id: "CSR_STOP_BEACH", agencyId: "CSR", stopId: "CSR_BEACH", stopName: "Chennai Beach Railway Station", lat: 13.0924, lon: 80.2926 }
   ];
-  const insertStop = db3.prepare(`
+  const insertStop = db.prepare(`
     INSERT OR REPLACE INTO public_transport_stops (
       id, agency_id, stop_id, stop_code, stop_name, latitude, longitude, location_type, parent_station_id, source
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -9755,7 +7022,7 @@ function seedBaselineTransitData(db3) {
       minuteOffsets: [0, 55]
     }
   ];
-  const insertRoute = db3.prepare(`
+  const insertRoute = db.prepare(`
     INSERT OR REPLACE INTO public_transport_routes (
       id, agency_id, route_id, route_short_name, route_long_name, route_type, route_color, origin, destination, source
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -9763,19 +7030,19 @@ function seedBaselineTransitData(db3) {
   for (const r of routes2) {
     insertRoute.run(r.id, r.agencyId, r.routeId, r.shortName, r.longName, r.type, r.color, r.origin, r.destination, "Official GTFS");
   }
-  const insertTrip = db3.prepare(`
+  const insertTrip = db.prepare(`
     INSERT OR REPLACE INTO public_transport_trips (
       id, route_id, service_id, trip_id, trip_headsign, direction_id, shape_id, source
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  const insertStopTime = db3.prepare(`
+  const insertStopTime = db.prepare(`
     INSERT OR REPLACE INTO public_transport_stop_times (
       id, trip_id, stop_id, stop_sequence, arrival_time, departure_time, pickup_type, drop_off_type, source
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   let tripCount = 0;
   let stopTimeCount = 0;
-  db3.exec("BEGIN TRANSACTION;");
+  db.exec("BEGIN TRANSACTION;");
   for (const r of routes2) {
     let tripIndex = 0;
     for (let hour = 5; hour <= 22; hour++) {
@@ -9808,8 +7075,8 @@ function seedBaselineTransitData(db3) {
       }
     }
   }
-  db3.exec("COMMIT;");
-  db3.prepare(`
+  db.exec("COMMIT;");
+  db.prepare(`
     INSERT OR REPLACE INTO public_transport_sync_logs (
       id, source, source_url, dataset_name, dataset_version, downloaded_at,
       routes_count, stops_count, trips_count, stop_times_count, status
@@ -9830,8 +7097,8 @@ function seedBaselineTransitData(db3) {
 }
 function getDatabase() {
   if (!dbInstance) {
-    if (!fs3.existsSync(DB_DIR)) {
-      fs3.mkdirSync(DB_DIR, { recursive: true });
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true });
     }
     dbInstance = new DatabaseSync(DB_PATH);
     dbInstance.exec("PRAGMA journal_mode = WAL;");
@@ -9840,27 +7107,27 @@ function getDatabase() {
   }
   return dbInstance;
 }
-function toRad2(deg) {
+function toRad3(deg) {
   return deg * Math.PI / 180;
 }
 function haversineMeters(lat1, lon1, lat2, lon2) {
   const R = 6371e3;
-  const dLat = toRad2(lat2 - lat1);
-  const dLon = toRad2(lon2 - lon1);
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(toRad2(lat1)) * Math.cos(toRad2(lat2));
+  const dLat = toRad3(lat2 - lat1);
+  const dLon = toRad3(lon2 - lon1);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(toRad3(lat1)) * Math.cos(toRad3(lat2));
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Math.round(R * c);
 }
 function getAgencies() {
-  const db3 = getDatabase();
-  return db3.prepare("SELECT * FROM public_transport_agencies ORDER BY name ASC").all();
+  const db = getDatabase();
+  return db.prepare("SELECT * FROM public_transport_agencies ORDER BY name ASC").all();
 }
 function getSyncLogs() {
-  const db3 = getDatabase();
-  return db3.prepare("SELECT * FROM public_transport_sync_logs ORDER BY downloaded_at DESC LIMIT 5").all();
+  const db = getDatabase();
+  return db.prepare("SELECT * FROM public_transport_sync_logs ORDER BY downloaded_at DESC LIMIT 5").all();
 }
 function searchRoutes(options) {
-  const db3 = getDatabase();
+  const db = getDatabase();
   const limit = Math.min(100, Math.max(1, options.limit || 30));
   const offset = Math.max(0, options.offset || 0);
   let sql = `
@@ -9881,23 +7148,23 @@ function searchRoutes(options) {
   }
   sql += ` ORDER BY r.agency_id ASC, length(r.route_short_name) ASC, r.route_short_name ASC LIMIT ? OFFSET ?`;
   params.push(limit, offset);
-  return db3.prepare(sql).all(...params);
+  return db.prepare(sql).all(...params);
 }
-function getRouteDetails(routeId) {
-  const db3 = getDatabase();
-  const route = db3.prepare(
+function getRouteDetails2(routeId) {
+  const db = getDatabase();
+  const route = db.prepare(
     `SELECT r.*, a.name as agency_name, a.agency_type, a.official_url
        FROM public_transport_routes r
        JOIN public_transport_agencies a ON r.agency_id = a.id
        WHERE r.id = ? OR r.route_id = ?`
   ).get(routeId, routeId);
   if (!route) return null;
-  const trip = db3.prepare(
+  const trip = db.prepare(
     `SELECT * FROM public_transport_trips WHERE route_id = ? OR route_id = ? LIMIT 1`
   ).get(route.id, route.route_id);
   let stops = [];
   if (trip) {
-    stops = db3.prepare(
+    stops = db.prepare(
       `SELECT st.stop_sequence, st.arrival_time, st.departure_time, s.id, s.stop_id, s.stop_name, s.latitude, s.longitude
          FROM public_transport_stop_times st
          JOIN public_transport_stops s ON st.stop_id = s.id
@@ -9914,7 +7181,7 @@ function getRouteDetails(routeId) {
   };
 }
 function searchStops(options) {
-  const db3 = getDatabase();
+  const db = getDatabase();
   const limit = Math.min(100, Math.max(1, options.limit || 30));
   let sql = `
     SELECT s.*, a.name as agency_name
@@ -9933,14 +7200,14 @@ function searchStops(options) {
   }
   sql += ` ORDER BY s.stop_name ASC LIMIT ?`;
   params.push(limit);
-  return db3.prepare(sql).all(...params);
+  return db.prepare(sql).all(...params);
 }
 function getNearbyStops(options) {
-  const db3 = getDatabase();
+  const db = getDatabase();
   const radiusMeters = (options.radiusKm || 5) * 1e3;
   const limit = options.limit || 25;
   const latDelta = radiusMeters / 111e3;
-  const lonDelta = radiusMeters / (111e3 * Math.cos(toRad2(options.latitude)));
+  const lonDelta = radiusMeters / (111e3 * Math.cos(toRad3(options.latitude)));
   let sql = `
     SELECT s.*, a.name as agency_name, a.agency_type
     FROM public_transport_stops s
@@ -9958,7 +7225,7 @@ function getNearbyStops(options) {
     sql += ` AND s.agency_id = ?`;
     params.push(options.agencyId);
   }
-  const candidates = db3.prepare(sql).all(...params);
+  const candidates = db.prepare(sql).all(...params);
   const results = [];
   for (const c of candidates) {
     const dist = haversineMeters(options.latitude, options.longitude, c.latitude, c.longitude);
@@ -9973,7 +7240,7 @@ function getNearbyStops(options) {
   return results.slice(0, limit);
 }
 function searchJourneyOptions(input) {
-  const db3 = getDatabase();
+  const db = getDatabase();
   const fromPattern = `%${input.fromText.trim()}%`;
   const toPattern = `%${input.toText.trim()}%`;
   let sql = `
@@ -10003,16 +7270,16 @@ function searchJourneyOptions(input) {
     params.push(input.agencyId);
   }
   sql += ` LIMIT 30`;
-  const matchingRoutes = db3.prepare(sql).all(...params);
+  const matchingRoutes = db.prepare(sql).all(...params);
   const options = [];
   for (const r of matchingRoutes) {
-    const trip = db3.prepare(`SELECT * FROM public_transport_trips WHERE route_id = ? LIMIT 1`).get(r.id);
+    const trip = db.prepare(`SELECT * FROM public_transport_trips WHERE route_id = ? LIMIT 1`).get(r.id);
     let departureTime = input.time || "07:30:00";
     let arrivalTime = "08:15:00";
     let durationMinutes = 45;
     let stopsCount = 18;
     if (trip) {
-      const times = db3.prepare(
+      const times = db.prepare(
         `SELECT departure_time, arrival_time FROM public_transport_stop_times WHERE trip_id = ? ORDER BY stop_sequence ASC`
       ).all(trip.id);
       if (times.length > 1) {
@@ -10058,8 +7325,8 @@ function getMissedBusAlternatives(input) {
     const isMetro = stop.agency_id === "CMRL";
     const isRail = stop.agency_id === "CSR";
     const category = isMetro ? "Chennai Metro" : isRail ? "Suburban Rail" : "MTC Bus";
-    const db3 = getDatabase();
-    const servedRoutes = db3.prepare(
+    const db = getDatabase();
+    const servedRoutes = db.prepare(
       `SELECT DISTINCT r.route_short_name, r.route_long_name
          FROM public_transport_stop_times st
          JOIN public_transport_trips t ON st.trip_id = t.id
@@ -10086,54 +7353,8 @@ function getMissedBusAlternatives(input) {
   }
   return alternatives;
 }
-function getRoutesForStop(stopId) {
-  const db3 = getDatabase();
-  return db3.prepare(
-    `SELECT DISTINCT r.id, r.route_id, r.route_short_name, r.route_long_name, r.origin, r.destination, a.name as agency_name, a.id as agency_id
-       FROM public_transport_stop_times st
-       JOIN public_transport_trips t ON st.trip_id = t.id
-       JOIN public_transport_routes r ON t.route_id = r.id
-       JOIN public_transport_agencies a ON r.agency_id = a.id
-       WHERE st.stop_id = ? OR st.stop_id LIKE ?
-       ORDER BY length(r.route_short_name) ASC, r.route_short_name ASC`
-  ).all(stopId, `%${stopId}%`);
-}
-function getStopDepartures(stopId, limit = 15) {
-  const db3 = getDatabase();
-  const now = /* @__PURE__ */ new Date();
-  const nowTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:00`;
-  let departures = db3.prepare(
-    `SELECT st.departure_time, st.arrival_time, r.route_short_name, r.route_long_name, r.destination, r.origin, a.name as agency_name, t.trip_headsign
-       FROM public_transport_stop_times st
-       JOIN public_transport_trips t ON st.trip_id = t.id
-       JOIN public_transport_routes r ON t.route_id = r.id
-       JOIN public_transport_agencies a ON r.agency_id = a.id
-       WHERE (st.stop_id = ? OR st.stop_id LIKE ?) AND st.departure_time >= ?
-       ORDER BY st.departure_time ASC
-       LIMIT ?`
-  ).all(stopId, `%${stopId}%`, nowTime, limit);
-  if (departures.length === 0) {
-    departures = db3.prepare(
-      `SELECT st.departure_time, st.arrival_time, r.route_short_name, r.route_long_name, r.destination, r.origin, a.name as agency_name, t.trip_headsign
-         FROM public_transport_stop_times st
-         JOIN public_transport_trips t ON st.trip_id = t.id
-         JOIN public_transport_routes r ON t.route_id = r.id
-         JOIN public_transport_agencies a ON r.agency_id = a.id
-         WHERE st.stop_id = ? OR st.stop_id LIKE ?
-         ORDER BY st.departure_time ASC
-         LIMIT ?`
-    ).all(stopId, `%${stopId}%`, limit);
-  }
-  return departures.map((d) => ({
-    ...d,
-    status: "Scheduled",
-    realtimeLocation: "LIVE MTC BUS LOCATION UNAVAILABLE",
-    source: "Scheduled Timetable (CUMTA / MTC GTFS)"
-  }));
-}
 
 // artifacts/api-server/src/services/studentProfileService.ts
-init_campusData();
 var studentProfiles = {
   "student-20418": {
     studentId: "student-20418",
@@ -10304,7 +7525,6 @@ function updateStudentProfile(studentId, updates) {
 }
 
 // artifacts/api-server/src/services/aiMobilityTools.ts
-init_campusData();
 function formatTime12h(time24) {
   if (!time24) return "";
   const parts = time24.split(":");
@@ -10415,11 +7635,11 @@ function toolGetPickupStop(studentId) {
   };
 }
 function toolFindNearestPublicStops(latitude, longitude, radiusKm = 4, limit = 5) {
-  const db3 = getDatabase();
+  const db = getDatabase();
   const radiusMeters = radiusKm * 1e3;
   const latDelta = radiusMeters / 111e3;
   const lonDelta = radiusMeters / (111e3 * Math.cos(latitude * Math.PI / 180));
-  const candidates = db3.prepare(
+  const candidates = db.prepare(
     `SELECT s.*, a.name as agency_name, a.agency_type
        FROM public_transport_stops s
        JOIN public_transport_agencies a ON s.agency_id = a.id
@@ -10455,11 +7675,11 @@ function toolFindNearestPublicStops(latitude, longitude, radiusKm = 4, limit = 5
   };
 }
 function toolGetStopDepartures(stopId, filterTime, limit = 8) {
-  const db3 = getDatabase();
+  const db = getDatabase();
   const now = getChennaiNow();
   const queryTime = filterTime || now.time24;
   const queryMinutes = timeToMinutes(queryTime);
-  const stop = db3.prepare("SELECT * FROM public_transport_stops WHERE id = ? OR stop_id = ?").get(stopId, stopId);
+  const stop = db.prepare("SELECT * FROM public_transport_stops WHERE id = ? OR stop_id = ?").get(stopId, stopId);
   if (!stop) {
     return {
       stopName: "Unknown Stop",
@@ -10468,7 +7688,7 @@ function toolGetStopDepartures(stopId, filterTime, limit = 8) {
       metadata: { source: "CUMTA / MTC GTFS", sourceType: "scheduled" }
     };
   }
-  const query2 = `
+  const query = `
     SELECT r.id as route_table_id, r.route_id, r.route_short_name, r.route_long_name,
            r.origin, r.destination, r.route_type, t.id as trip_id, t.trip_headsign,
            st.departure_time, st.arrival_time, a.id as agency_id, a.name as agency_name, a.source as agency_source
@@ -10479,7 +7699,7 @@ function toolGetStopDepartures(stopId, filterTime, limit = 8) {
     WHERE st.stop_id = ?
     ORDER BY st.departure_time ASC
   `;
-  const rows = db3.prepare(query2).all(stop.id);
+  const rows = db.prepare(query).all(stop.id);
   const upcoming = [];
   const laterTomorrow = [];
   for (const row of rows) {
@@ -10519,7 +7739,7 @@ function toolGetStopDepartures(stopId, filterTime, limit = 8) {
   };
 }
 function toolSearchJourney(input) {
-  const db3 = getDatabase();
+  const db = getDatabase();
   const now = getChennaiNow();
   const depTime = input.departureTime || now.time24;
   const destLat = input.destinationLat ?? REC_CAMPUS_CENTER.latitude;
@@ -10527,7 +7747,7 @@ function toolSearchJourney(input) {
   const journeyOptions = [];
   const fromPattern = `%${input.originText.trim()}%`;
   const toPattern = `%${input.destinationText.trim()}%`;
-  const routes2 = db3.prepare(
+  const routes2 = db.prepare(
     `SELECT r.*, a.name as agency_name, a.agency_type
        FROM public_transport_routes r
        JOIN public_transport_agencies a ON r.agency_id = a.id
@@ -10540,12 +7760,12 @@ function toolSearchJourney(input) {
   ).all(fromPattern, toPattern, fromPattern, toPattern, fromPattern, toPattern, toPattern);
   let optIdx = 1;
   for (const r of routes2) {
-    const trip = db3.prepare("SELECT id FROM public_transport_trips WHERE route_id = ? LIMIT 1").get(r.id);
+    const trip = db.prepare("SELECT id FROM public_transport_trips WHERE route_id = ? LIMIT 1").get(r.id);
     let tripDep = depTime;
     let tripArr = "08:20:00";
     let duration = 45;
     if (trip) {
-      const times = db3.prepare(
+      const times = db.prepare(
         "SELECT arrival_time, departure_time FROM public_transport_stop_times WHERE trip_id = ? ORDER BY stop_sequence ASC"
       ).all(trip.id);
       if (times.length > 1) {
@@ -10767,63 +7987,63 @@ function getChennaiNow2() {
   return { time24, minutes: timeToMinutes2(time24), dayOfWeek, dateStr };
 }
 function classifyIntent(message, history = []) {
-  const text4 = message.toLowerCase().trim();
+  const text = message.toLowerCase().trim();
   const lastTurn = history.length > 0 ? history[history.length - 1] : null;
-  const isFollowUp = text4.startsWith("what about") || text4.startsWith("and ") || text4.includes("which one is") || text4.includes("where do i get down") || text4.includes("earlier") || text4.includes("later");
+  const isFollowUp = text.startsWith("what about") || text.startsWith("and ") || text.includes("which one is") || text.includes("where do i get down") || text.includes("earlier") || text.includes("later");
   if (isFollowUp) {
-    if (text4.includes("public") || text4.includes("mtc") || text4.includes("metro")) {
+    if (text.includes("public") || text.includes("mtc") || text.includes("metro")) {
       return "PUBLIC_TRANSPORT_ALTERNATIVE";
     }
-    if (text4.includes("earlier") || text4.includes("later") || text4.includes("which one")) {
+    if (text.includes("earlier") || text.includes("later") || text.includes("which one")) {
       return "NEXT_BUS";
     }
-    if (text4.includes("where do i get down") || text4.includes("which stop")) {
+    if (text.includes("where do i get down") || text.includes("which stop")) {
       return "STOP_DETAILS";
     }
-    if (text4.includes("route") || text4.includes("path")) {
+    if (text.includes("route") || text.includes("path")) {
       return "ROUTE_DETAILS";
     }
   }
-  if (text4.includes("where is my") || text4.includes("track my bus") || text4.includes("where's my bus") || text4.includes("bus") && text4.includes("location")) {
+  if (text.includes("where is my") || text.includes("track my bus") || text.includes("where's my bus") || text.includes("bus") && text.includes("location")) {
     return "LIVE_BUS_LOCATION";
   }
-  if (text4.includes("eta") || text4.includes("when will it reach") || text4.includes("how long until") || text4.includes("minutes away")) {
+  if (text.includes("eta") || text.includes("when will it reach") || text.includes("how long until") || text.includes("minutes away")) {
     return "ETA";
   }
-  if (text4.includes("missed") || text4.includes("miss my bus") || text4.includes("lost the bus")) {
+  if (text.includes("missed") || text.includes("miss my bus") || text.includes("lost the bus")) {
     return "MISSED_BUS";
   }
-  if (text4.includes("when should i leave") || text4.includes("what time should i leave") || text4.includes("need to reach") || text4.includes("reach college by") || text4.includes("leave home")) {
+  if (text.includes("when should i leave") || text.includes("what time should i leave") || text.includes("need to reach") || text.includes("reach college by") || text.includes("leave home")) {
     return "DEPARTURE_RECOMMENDATION";
   }
-  if (text4.includes("next bus") || text4.includes("when is my bus") || text4.includes("when does my bus come")) {
+  if (text.includes("next bus") || text.includes("when is my bus") || text.includes("when does my bus come")) {
     return "NEXT_BUS";
   }
-  if (text4.includes("timing") || text4.includes("schedule") || text4.includes("departure time") || text4.includes("what time")) {
+  if (text.includes("timing") || text.includes("schedule") || text.includes("departure time") || text.includes("what time")) {
     return "BUS_TIMING";
   }
-  if (text4.includes("near me") || text4.includes("nearby bus") || text4.includes("around me") || text4.includes("from here")) {
+  if (text.includes("near me") || text.includes("nearby bus") || text.includes("around me") || text.includes("from here")) {
     return "NEARBY_BUS";
   }
-  if (text4.includes("nearest stop") || text4.includes("closest stop") || text4.includes("nearest bus stop") || text4.includes("how far is my bus stop") || text4.includes("how far is the nearest")) {
+  if (text.includes("nearest stop") || text.includes("closest stop") || text.includes("nearest bus stop") || text.includes("how far is my bus stop") || text.includes("how far is the nearest")) {
     return "NEAREST_STOP";
   }
-  if (text4.includes("metro") || text4.includes("cmrl") || text4.includes("blue line") || text4.includes("green line")) {
+  if (text.includes("metro") || text.includes("cmrl") || text.includes("blue line") || text.includes("green line")) {
     return "METRO";
   }
-  if (text4.includes("train") || text4.includes("suburban") || text4.includes("railway") || text4.includes("mrts")) {
+  if (text.includes("train") || text.includes("suburban") || text.includes("railway") || text.includes("mrts")) {
     return "RAIL";
   }
-  if (text4.includes("how do i get") || text4.includes("how to go") || text4.includes("plan my journey") || text4.includes("directions to") || text4.includes("travel to")) {
+  if (text.includes("how do i get") || text.includes("how to go") || text.includes("plan my journey") || text.includes("directions to") || text.includes("travel to")) {
     return "JOURNEY_PLANNING";
   }
-  if (text4.includes("route") || text4.includes("which bus") || text4.includes("what buses")) {
+  if (text.includes("route") || text.includes("which bus") || text.includes("what buses")) {
     return "BUS_ROUTE";
   }
-  if (text4.includes("where do i get down") || text4.includes("alight") || text4.includes("stop details")) {
+  if (text.includes("where do i get down") || text.includes("alight") || text.includes("stop details")) {
     return "STOP_DETAILS";
   }
-  if (text4.includes("running today") || text4.includes("is my bus running") || text4.includes("bus status") || text4.includes("delayed") || text4.includes("on time")) {
+  if (text.includes("running today") || text.includes("is my bus running") || text.includes("bus status") || text.includes("delayed") || text.includes("on time")) {
     return "ACIMS_BUS_STATUS";
   }
   return "GENERAL_TRANSPORT";
@@ -11237,193 +8457,33 @@ Data verified against official transit timetables.`;
 }
 
 // artifacts/api-server/src/services/ai.ts
-async function getAiContext(studentId = "student-20418") {
-  const [buses3, locations, safetyAlerts2, profile, queue] = await Promise.all([
-    getDbBuses(),
-    getDbCampusLocations(),
-    Promise.resolve(listSafetyAlerts()),
-    getProfileWithDetails(studentId),
-    getDbQueueStatus(profile?.assignedBusId || "bus-12", studentId)
-  ]);
+function getAiContext(studentId = "student-20418") {
+  const buses = getBuses();
+  const primaryBus = buses[0] ?? {
+    id: "bus-12",
+    busNumber: "12",
+    origin: "Vandalur Transit Hub",
+    destination: "Academic Quad",
+    routeLabel: "Campus Loop A",
+    capacity: 40,
+    currentLocation: { latitude: 12.9161, longitude: 80.1119 },
+    nextStop: "Tambaram Terminal",
+    nextStopId: "tambaram",
+    etaMinutes: 3,
+    status: "On Time",
+    updatedAt: /* @__PURE__ */ new Date()
+  };
   return {
-    buses: buses3,
-    queue,
-    safetyAlerts: safetyAlerts2,
-    destinations: locations,
+    buses,
+    queue: getQueueStatus(primaryBus),
+    safetyAlerts: listSafetyAlerts(),
+    destinations: listCampusLocations(),
     providers: listProviders(),
-    studentProfile: profile
+    studentProfile: getStudentProfile(studentId)
   };
 }
-async function answerMobilityQuestion(message, destinationId, studentId = "student-20418", deviceCoords, history) {
-  const textLower = message.toLowerCase().trim();
-  if (textLower.includes("random bus") || textLower.includes("doesn't exist") || textLower.includes("does not exist") || textLower.includes("fake bus") || textLower.includes("ghost bus") || textLower.includes("bus 999") || textLower.includes("alien") || textLower.includes("spaceship")) {
-    return {
-      answer: "I don't have verified data for that right now.",
-      sources: ["ACIMS Verified Data Boundary"],
-      intent: "GENERAL_TRANSPORT",
-      sourceBadge: {
-        label: "Data Unavailable",
-        type: "official",
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
-      },
-      ttsText: "I don't have verified data for that right now.",
-      context: null
-    };
-  }
-  if (textLower.includes("queue position") || textLower.includes("my place in line") || textLower.includes("am i in queue") || textLower.includes("queue status")) {
-    const studentQueue = await getDbStudentActiveQueue(studentId);
-    if (studentQueue) {
-      const answer = `You are currently holding position #${studentQueue.queuePosition} in the boarding queue for Bus ${studentQueue.busId.replace("bus-", "")} at stop ${studentQueue.boardingStop}. There are ${studentQueue.totalInQueue} student(s) currently waiting in line.`;
-      return {
-        answer,
-        sources: ["Cloud SQL boarding_queue table"],
-        intent: "QUEUE_STATUS",
-        sourceBadge: {
-          label: `Queue Position #${studentQueue.queuePosition}`,
-          type: "live GPS",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString()
-        },
-        ttsText: `You are at position ${studentQueue.queuePosition} in the boarding queue.`,
-        context: null
-      };
-    } else {
-      const answer = "You are not currently waiting in any boarding queue. The line is open\u2014you can select your boarding stop on the Queue page to hold your place.";
-      return {
-        answer,
-        sources: ["Cloud SQL boarding_queue table"],
-        intent: "QUEUE_STATUS",
-        sourceBadge: {
-          label: "Queue Open",
-          type: "official",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString()
-        },
-        ttsText: "You are not currently in any boarding queue.",
-        context: null
-      };
-    }
-  }
-  if (textLower.includes("notification") || textLower.includes("my alerts") || textLower.includes("what updates")) {
-    const notifs = await getUserNotifications(studentId);
-    if (notifs.length > 0) {
-      const summary = notifs.slice(0, 3).map((n) => `\u2022 [${n.type.toUpperCase()}] ${n.title}: ${n.message}`).join("\n");
-      const answer = `Here are your latest verified notifications:
-
-${summary}`;
-      return {
-        answer,
-        sources: ["Cloud SQL notifications table"],
-        intent: "NOTIFICATIONS",
-        sourceBadge: {
-          label: `${notifs.length} Verified Notifications`,
-          type: "official",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString()
-        },
-        ttsText: `You have ${notifs.length} verified notifications. Latest: ${notifs[0].title}.`,
-        context: null
-      };
-    } else {
-      const answer = "You currently have no unread transit or safety notifications.";
-      return {
-        answer,
-        sources: ["Cloud SQL notifications table"],
-        intent: "NOTIFICATIONS",
-        sourceBadge: {
-          label: "No Alerts",
-          type: "official",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString()
-        },
-        ttsText: "You currently have no unread notifications.",
-        context: null
-      };
-    }
-  }
-  if (textLower.includes("d block") || textLower.includes("main block") || textLower.includes("library") || textLower.includes("auditorium") || textLower.includes("where is") || textLower.includes("how do i reach") || textLower.includes("take me to") || textLower.includes("walk to")) {
-    const locations = await getDbCampusLocations();
-    let matchedLocation = null;
-    if (textLower.includes("d block") || textLower.includes("d-block")) {
-      matchedLocation = locations.find((l) => l.name.toLowerCase().includes("d block") || l.id.includes("d-block"));
-    } else if (textLower.includes("main block") || textLower.includes("academic quad")) {
-      matchedLocation = locations.find((l) => l.name.toLowerCase().includes("main") || l.name.toLowerCase().includes("academic"));
-    } else if (textLower.includes("library")) {
-      matchedLocation = locations.find((l) => l.name.toLowerCase().includes("library"));
-    } else if (textLower.includes("auditorium")) {
-      matchedLocation = locations.find((l) => l.name.toLowerCase().includes("auditorium"));
-    }
-    if (matchedLocation) {
-      const isDirectionsQuery = textLower.includes("how do i reach") || textLower.includes("take me to") || textLower.includes("walk to") || textLower.includes("route to") || textLower.includes("directions");
-      if (isDirectionsQuery) {
-        const startPoint = deviceCoords?.latitude && deviceCoords?.longitude ? { latitude: deviceCoords.latitude, longitude: deviceCoords.longitude } : "REC Main Gate";
-        const route = await calculateDbCampusWalkingRoute(startPoint, matchedLocation.id);
-        if (route) {
-          const stepsText = route.steps.map((s, idx) => `${idx + 1}. ${s}`).join("\n");
-          const answer2 = `Verified walking route to ${matchedLocation.name} (${matchedLocation.category}):
-
-\u2022 Estimated Distance: ~${route.distanceMeters} meters
-\u2022 Walking Time: ~${route.walkingMinutes} minutes
-
-Step-by-step path:
-${stepsText}
-
-Navigation calculated from Cloud SQL verified campus paths.`;
-          return {
-            answer: answer2,
-            sources: ["Cloud SQL campus_locations", "Cloud SQL campus_paths"],
-            intent: "CAMPUS_NAVIGATION",
-            sourceBadge: {
-              label: `Walking Path \xB7 ~${route.walkingMinutes} min`,
-              type: "calculated",
-              timestamp: (/* @__PURE__ */ new Date()).toISOString()
-            },
-            cards: [
-              {
-                type: "route",
-                title: matchedLocation.name,
-                subtitle: `${route.distanceMeters}m \xB7 ~${route.walkingMinutes} min walking`,
-                details: {
-                  category: matchedLocation.category,
-                  description: matchedLocation.description,
-                  distance: `${route.distanceMeters}m`,
-                  time: `${route.walkingMinutes} min`
-                }
-              }
-            ],
-            ttsText: `To reach ${matchedLocation.name}, follow the campus pedestrian walkway. It is approximately ${route.distanceMeters} meters, or about ${route.walkingMinutes} minutes walk.`,
-            context: null
-          };
-        }
-      }
-      const answer = `${matchedLocation.name} is located in the ${matchedLocation.category} zone of Rajalakshmi Engineering College campus.
-
-Description: ${matchedLocation.description || "Campus building facility."}
-Coordinates: [${matchedLocation.latitude}, ${matchedLocation.longitude}]
-
-You can ask "Take me to ${matchedLocation.name}" to view the verified walking route along campus paths.`;
-      return {
-        answer,
-        sources: ["Cloud SQL campus_locations table"],
-        intent: "CAMPUS_LOCATION",
-        sourceBadge: {
-          label: "Verified Campus Location",
-          type: "official",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString()
-        },
-        cards: [
-          {
-            type: "route",
-            title: matchedLocation.name,
-            subtitle: matchedLocation.category.toUpperCase(),
-            details: {
-              description: matchedLocation.description,
-              latitude: matchedLocation.latitude,
-              longitude: matchedLocation.longitude
-            }
-          }
-        ],
-        ttsText: `${matchedLocation.name} is in the ${matchedLocation.category} zone of campus.`,
-        context: null
-      };
-    }
-  }
+function answerMobilityQuestion(message, destinationId, studentId = "student-20418", deviceCoords, history) {
+  const context = getAiContext(studentId);
   const agentResponse = executeMobilityAgent({
     studentId,
     message,
@@ -11439,25 +8499,20 @@ You can ask "Take me to ${matchedLocation.name}" to view the verified walking ro
     cards: agentResponse.cards,
     mapData: agentResponse.mapData,
     ttsText: agentResponse.ttsText,
-    context: null
+    context
   };
 }
 
 // artifacts/api-server/src/routes/ai.ts
-var router9 = Router9();
-router9.get("/ai/context", async (req, res) => {
-  try {
-    const studentId = typeof req.query.studentId === "string" ? req.query.studentId : "student-20418";
-    const context = await getAiContext(studentId);
-    res.json(context);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to load AI context" });
-  }
+var router8 = Router8();
+router8.get("/ai/context", (req, res) => {
+  const studentId = typeof req.query.studentId === "string" ? req.query.studentId : "student-20418";
+  res.json(getAiContext(studentId));
 });
-router9.post("/ai/chat", async (req, res) => {
+router8.post("/ai/chat", (req, res) => {
   try {
     const { studentId = "student-20418", message = "", destinationId, deviceCoords, history } = req.body;
-    const response = await answerMobilityQuestion(
+    const response = answerMobilityQuestion(
       message,
       destinationId,
       studentId,
@@ -11469,33 +8524,32 @@ router9.post("/ai/chat", async (req, res) => {
     res.status(500).json({ error: err.message || "Failed to process mobility query" });
   }
 });
-router9.get("/student/profile", (req, res) => {
+router8.get("/student/profile", (req, res) => {
   const studentId = typeof req.query.studentId === "string" ? req.query.studentId : "student-20418";
   res.json(getStudentProfile(studentId));
 });
-router9.patch("/student/profile", (req, res) => {
+router8.patch("/student/profile", (req, res) => {
   const studentId = typeof req.query.studentId === "string" ? req.query.studentId : "student-20418";
   const updated = updateStudentProfile(studentId, req.body);
   res.json(updated);
 });
-var ai_default = router9;
+var ai_default = router8;
 
 // artifacts/api-server/src/routes/transport.ts
-import { Router as Router10 } from "express";
-var router10 = Router10();
-router10.get("/transport/providers", (_req, res) => res.json(listProviders()));
-router10.get("/transport/routes", (_req, res) => res.json(listJourneys()));
-router10.post("/transport/search", (req, res) => {
+import { Router as Router9 } from "express";
+var router9 = Router9();
+router9.get("/transport/providers", (_req, res) => res.json(listProviders()));
+router9.get("/transport/routes", (_req, res) => res.json(listJourneys()));
+router9.post("/transport/search", (req, res) => {
   const input = SearchTransportBody.parse(req.body);
   res.json(searchJourneys(input.start, input.destination));
 });
-var transport_default = router10;
+var transport_default = router9;
 
 // artifacts/api-server/src/routes/publicTransport.ts
-import { Router as Router11 } from "express";
+import { Router as Router10 } from "express";
 
 // artifacts/api-server/src/services/personalizedTransitService.ts
-init_campusData();
 function formatTime12h2(time24) {
   if (!time24) return "";
   const parts = time24.split(":");
@@ -11527,7 +8581,7 @@ function getCurrentChennaiTime() {
   };
 }
 function getPersonalizedTransit(input) {
-  const db3 = getDatabase();
+  const db = getDatabase();
   let studentLoc = null;
   if (input.pickupStopId) {
     for (const route of getAllRoutes()) {
@@ -11590,7 +8644,7 @@ function getPersonalizedTransit(input) {
   };
   const latDelta = 0.035;
   const lonDelta = 0.035;
-  const candidateStops = db3.prepare(
+  const candidateStops = db.prepare(
     `SELECT s.*, a.name as agency_name
        FROM public_transport_stops s
        JOIN public_transport_agencies a ON s.agency_id = a.id
@@ -11620,7 +8674,7 @@ function getPersonalizedTransit(input) {
   candidateStops.sort((a, b) => a.distanceMeters - b.distanceMeters);
   const closestStop = candidateStops[0];
   const walkingMinutes = Math.max(1, Math.round(closestStop.distanceMeters / 80));
-  const stopTimes = db3.prepare(
+  const stopTimes = db.prepare(
     `SELECT
          r.id as route_table_id,
          r.route_id,
@@ -11737,15 +8791,15 @@ function getPersonalizedTransit(input) {
   };
 }
 function getRouteStopsWithStudentStop(tripId, studentStopId) {
-  const db3 = getDatabase();
-  const trip = db3.prepare(
+  const db = getDatabase();
+  const trip = db.prepare(
     `SELECT t.*, r.route_short_name, r.route_long_name, r.origin, r.destination
        FROM public_transport_trips t
        JOIN public_transport_routes r ON t.route_id = r.id
        WHERE t.id = ? OR t.trip_id = ?`
   ).get(tripId, tripId);
   if (!trip) return null;
-  const stops = db3.prepare(
+  const stops = db.prepare(
     `SELECT
          st.stop_sequence,
          st.arrival_time,
@@ -11781,59 +8835,8 @@ function getRouteStopsWithStudentStop(tripId, studentStopId) {
 }
 
 // artifacts/api-server/src/routes/publicTransport.ts
-var router11 = Router11();
-router11.get("/public-transport/nearby-stops", (req, res) => {
-  try {
-    const lat = parseFloat(req.query.lat || req.query.latitude);
-    const lon = parseFloat(req.query.lon || req.query.longitude);
-    if (isNaN(lat) || isNaN(lon)) {
-      return res.status(400).json({ error: "Valid latitude and longitude required" });
-    }
-    const radiusKm = req.query.radiusKm ? parseFloat(req.query.radiusKm) : 5;
-    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 20;
-    const stops = getNearbyStops({
-      latitude: lat,
-      longitude: lon,
-      radiusKm,
-      limit
-    });
-    const enriched = stops.map((s) => ({
-      stop_id: s.id,
-      stop_name: s.stop_name,
-      latitude: s.latitude,
-      longitude: s.longitude,
-      distance_meters: s.distanceMeters || 0,
-      walking_minutes: Math.max(1, Math.round((s.distanceMeters || 100) / 80)),
-      agency_id: s.agency_id,
-      agency_name: s.agency_name,
-      routes_serving_stop: getRoutesForStop(s.id).map((r) => r.route_short_name),
-      source: s.source,
-      schedule_status: "Scheduled",
-      realtime_bus_location: "LIVE MTC BUS LOCATION UNAVAILABLE"
-    }));
-    res.json(enriched);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-router11.get("/public-transport/stops/:stopId/routes", (req, res) => {
-  try {
-    const routes2 = getRoutesForStop(req.params.stopId);
-    res.json(routes2);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-router11.get("/public-transport/stops/:stopId/departures", (req, res) => {
-  try {
-    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 15;
-    const departures = getStopDepartures(req.params.stopId, limit);
-    res.json(departures);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-router11.get(["/public-transport/personalized", "/public-transport/nearby"], (req, res) => {
+var router10 = Router10();
+router10.get(["/public-transport/personalized", "/public-transport/nearby"], (req, res) => {
   try {
     const studentId = typeof req.query.studentId === "string" ? req.query.studentId : void 0;
     const pickupStopId = typeof req.query.pickupStopId === "string" ? req.query.pickupStopId : void 0;
@@ -11854,7 +8857,7 @@ router11.get(["/public-transport/personalized", "/public-transport/nearby"], (re
     res.status(500).json({ error: err.message });
   }
 });
-router11.get("/public-transport/trip-stops", (req, res) => {
+router10.get("/public-transport/trip-stops", (req, res) => {
   try {
     const tripId = req.query.tripId;
     const studentStopId = req.query.studentStopId;
@@ -11872,7 +8875,7 @@ router11.get("/public-transport/trip-stops", (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-router11.get("/transit/agencies", (_req, res) => {
+router10.get("/transit/agencies", (_req, res) => {
   try {
     const agencies = getAgencies();
     res.json(agencies);
@@ -11880,7 +8883,7 @@ router11.get("/transit/agencies", (_req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-router11.get("/transit/sync-status", (_req, res) => {
+router10.get("/transit/sync-status", (_req, res) => {
   try {
     const logs = getSyncLogs();
     res.json({
@@ -11892,21 +8895,21 @@ router11.get("/transit/sync-status", (_req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-router11.get("/transit/routes", (req, res) => {
+router10.get("/transit/routes", (req, res) => {
   try {
-    const query2 = typeof req.query.query === "string" ? req.query.query : void 0;
+    const query = typeof req.query.query === "string" ? req.query.query : void 0;
     const agencyId = typeof req.query.agencyId === "string" ? req.query.agencyId : void 0;
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : 30;
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : 0;
-    const routes2 = searchRoutes({ query: query2, agencyId, limit, offset });
+    const routes2 = searchRoutes({ query, agencyId, limit, offset });
     res.json(routes2);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-router11.get("/transit/routes/:routeId", (req, res) => {
+router10.get("/transit/routes/:routeId", (req, res) => {
   try {
-    const route = getRouteDetails(req.params.routeId);
+    const route = getRouteDetails2(req.params.routeId);
     if (!route) {
       res.status(404).json({ error: "Route not found" });
       return;
@@ -11916,18 +8919,18 @@ router11.get("/transit/routes/:routeId", (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-router11.get("/transit/stops", (req, res) => {
+router10.get("/transit/stops", (req, res) => {
   try {
-    const query2 = typeof req.query.query === "string" ? req.query.query : void 0;
+    const query = typeof req.query.query === "string" ? req.query.query : void 0;
     const agencyId = typeof req.query.agencyId === "string" ? req.query.agencyId : void 0;
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : 30;
-    const stops = searchStops({ query: query2, agencyId, limit });
+    const stops = searchStops({ query, agencyId, limit });
     res.json(stops);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-router11.get("/transit/nearby", (req, res) => {
+router10.get("/transit/nearby", (req, res) => {
   try {
     const lat = parseFloat(req.query.lat);
     const lon = parseFloat(req.query.lon);
@@ -11950,7 +8953,7 @@ router11.get("/transit/nearby", (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-router11.get("/transit/search", (req, res) => {
+router10.get("/transit/search", (req, res) => {
   try {
     const fromText = typeof req.query.from === "string" ? req.query.from : "";
     const toText = typeof req.query.to === "string" ? req.query.to : "";
@@ -11971,7 +8974,7 @@ router11.get("/transit/search", (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-router11.get("/transit/missed-bus-alternatives", (req, res) => {
+router10.get("/transit/missed-bus-alternatives", (req, res) => {
   try {
     const lat = parseFloat(req.query.lat);
     const lon = parseFloat(req.query.lon);
@@ -11990,303 +8993,33 @@ router11.get("/transit/missed-bus-alternatives", (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-var publicTransport_default = router11;
-
-// artifacts/api-server/src/routes/me.ts
-import { Router as Router12 } from "express";
-var router12 = Router12();
-function getRequesterUserId(req) {
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith("Bearer ")) {
-    const token = authHeader.split("Bearer ")[1];
-    if (token.startsWith("campus-token-")) {
-      const parts = token.split("-");
-      if (parts.length >= 3) {
-        return parts[2];
-      }
-    }
-  }
-  return req.header("x-acims-user-id") || req.query.studentId || req.body?.studentId || "student-20418";
-}
-router12.get("/me", async (req, res) => {
-  try {
-    const userId = getRequesterUserId(req);
-    const profile = await getProfileWithDetails(userId);
-    if (!profile) {
-      return res.status(404).json({ error: "Student profile not found", userId });
-    }
-    const assignedBusId = profile.assignedBusId || "bus-12";
-    const assignedRouteId = profile.assignedRouteId || "route-bus-12";
-    const [bus, route, activeQueue, preferences, lastLoc] = await Promise.all([
-      getDbBusById(assignedBusId),
-      getDbRouteById(assignedRouteId),
-      getDbStudentActiveQueue(userId),
-      getDbStudentPreferences(userId),
-      getLatestStudentLocation(userId)
-    ]);
-    res.json({
-      student: {
-        id: profile.id,
-        userId: profile.userId,
-        name: profile.name,
-        email: profile.email,
-        phone: profile.phone,
-        role: profile.role,
-        registerNumber: profile.registerNumber || "REG-20418",
-        pickupStopId: profile.pickupStopId || preferences?.savedPickupStopId || "tambaram",
-        assignedBusId,
-        assignedRouteId
-      },
-      assignedBus: bus ? {
-        id: bus.id,
-        busNumber: bus.busNumber,
-        active: bus.active
-      } : null,
-      assignedRoute: route ? {
-        id: route.id,
-        name: route.routeName,
-        code: route.routeCode,
-        stopsCount: route.stops?.length || 0
-      } : null,
-      queue: activeQueue,
-      preferences: preferences || {
-        userId,
-        savedPickupStopId: profile.pickupStopId || "tambaram",
-        preferredBusId: assignedBusId,
-        savedDestinationName: null,
-        savedDestinationLat: null,
-        savedDestinationLng: null
-      },
-      lastLocation: lastLoc
-    });
-  } catch (err) {
-    console.error("Error in /api/me:", err);
-    res.status(500).json({ error: "Failed to load student context" });
-  }
-});
-router12.get("/me/bus", async (req, res) => {
-  try {
-    const userId = getRequesterUserId(req);
-    const profile = await getProfileWithDetails(userId);
-    const prefs = await getDbStudentPreferences(userId);
-    const busId = prefs?.preferredBusId || profile?.assignedBusId || "bus-12";
-    const bus = await getDbBusById(busId);
-    if (!bus) {
-      return res.status(404).json({
-        status: "NOT_ASSIGNED",
-        message: "My bus is not assigned.",
-        bus: null
-      });
-    }
-    const routeId = bus.routeId || profile?.assignedRouteId || "route-bus-12";
-    const route = await getDbRouteById(routeId);
-    const stops = await getDbStopsByRoute(routeId);
-    const latestLoc = await getLatestBusLocation(bus.id);
-    const isTracking = await isBusTrackingActive(bus.id);
-    if (!latestLoc) {
-      return res.json({
-        status: "NO_GPS",
-        message: "Bus location is currently unavailable.",
-        bus: {
-          id: bus.id,
-          busNumber: bus.busNumber,
-          routeLabel: route?.routeName || "Campus Shuttle",
-          origin: stops[0]?.stopName || "Terminal",
-          destination: stops[stops.length - 1]?.stopName || "Campus",
-          active: bus.active,
-          telemetry: {
-            latitude: stops[0]?.latitude || 12.9287,
-            longitude: stops[0]?.longitude || 80.132,
-            nextStop: stops[0]?.stopName || "Terminal",
-            isLive: false,
-            freshness: "UNAVAILABLE",
-            etaLabel: "UNAVAILABLE",
-            formattedEta: "Unavailable",
-            speed: 0,
-            status: isTracking ? "Driver Active \xB7 Awaiting GPS" : "Tracking Stopped",
-            updatedAt: null
-          }
-        }
-      });
-    }
-    const recordedDate = new Date(latestLoc.recordedAt || Date.now());
-    const diffSec = Math.max(0, Math.floor((Date.now() - recordedDate.getTime()) / 1e3));
-    let freshness = "UNAVAILABLE";
-    if (diffSec <= 45 && isTracking) {
-      freshness = "LIVE";
-    } else if (diffSec <= 180) {
-      freshness = "STALE";
-    } else {
-      freshness = "UNAVAILABLE";
-    }
-    let closestIndex = 0;
-    let minDistance = Infinity;
-    stops.forEach((stop, idx) => {
-      const dist = haversineDistance(
-        { latitude: latestLoc.latitude, longitude: latestLoc.longitude },
-        { latitude: stop.latitude, longitude: stop.longitude }
-      );
-      if (dist < minDistance) {
-        minDistance = dist;
-        closestIndex = idx;
-      }
-    });
-    const isAtStop = minDistance <= 0.08;
-    const nextStopIndex = isAtStop ? Math.min(closestIndex + 1, stops.length - 1) : closestIndex;
-    const nextStopObj = stops[nextStopIndex] || stops[0];
-    const distToNextStop = haversineDistance(
-      { latitude: latestLoc.latitude, longitude: latestLoc.longitude },
-      { latitude: nextStopObj?.latitude || latestLoc.latitude, longitude: nextStopObj?.longitude || latestLoc.longitude }
-    );
-    const speed = latestLoc.speed && latestLoc.speed > 3 ? latestLoc.speed : 22;
-    const etaMinutes = calculateEtaMinutes(
-      { latitude: latestLoc.latitude, longitude: latestLoc.longitude },
-      { latitude: nextStopObj?.latitude || latestLoc.latitude, longitude: nextStopObj?.longitude || latestLoc.longitude },
-      speed
-    );
-    res.json({
-      status: "SUCCESS",
-      bus: {
-        id: bus.id,
-        busNumber: bus.busNumber,
-        routeLabel: route?.routeName || "Campus Shuttle",
-        origin: stops[0]?.stopName || "Terminal",
-        destination: stops[stops.length - 1]?.stopName || "Campus",
-        active: bus.active,
-        telemetry: {
-          latitude: latestLoc.latitude,
-          longitude: latestLoc.longitude,
-          nextStop: nextStopObj?.stopName || "Campus",
-          nextStopId: nextStopObj?.id,
-          isAtStop,
-          isLive: freshness === "LIVE",
-          freshness,
-          etaLabel: freshness === "LIVE" ? "LIVE ETA" : freshness === "STALE" ? "ESTIMATED ETA" : "UNAVAILABLE",
-          etaMinutes: isAtStop ? 0 : etaMinutes,
-          formattedEta: isAtStop ? "Arriving now" : formatEta(etaMinutes),
-          speed: latestLoc.speed || 0,
-          heading: latestLoc.heading || 0,
-          accuracy: latestLoc.accuracy || 10,
-          remainingDistanceKm: Number(distToNextStop.toFixed(2)),
-          status: isAtStop ? `At Stop: ${nextStopObj?.stopName}` : freshness === "LIVE" ? `In Transit to ${nextStopObj?.stopName}` : freshness === "STALE" ? `Signal Delayed \xB7 Last near ${nextStopObj?.stopName}` : `Tracking Inactive`,
-          updatedAt: recordedDate.toISOString()
-        }
-      }
-    });
-  } catch (err) {
-    console.error("Error fetching personalized bus:", err);
-    res.status(500).json({ error: "Failed to fetch student bus" });
-  }
-});
-router12.post("/me/location", async (req, res) => {
-  try {
-    const userId = getRequesterUserId(req);
-    const { latitude, longitude, accuracy } = req.body;
-    if (typeof latitude !== "number" || typeof longitude !== "number") {
-      return res.status(400).json({ error: "Valid latitude and longitude required" });
-    }
-    const recorded = await recordStudentLocation({
-      userId,
-      latitude,
-      longitude,
-      accuracy: typeof accuracy === "number" ? accuracy : void 0
-    });
-    res.json({
-      success: true,
-      location: recorded
-    });
-  } catch (err) {
-    console.error("Error recording student location:", err);
-    res.status(500).json({ error: "Failed to save location" });
-  }
-});
-router12.get("/me/location", async (req, res) => {
-  try {
-    const userId = getRequesterUserId(req);
-    const loc = await getLatestStudentLocation(userId);
-    if (!loc) {
-      return res.status(404).json({ error: "No location recorded yet", location: null });
-    }
-    res.json({ location: loc });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to get student location" });
-  }
-});
-router12.get("/me/preferences", async (req, res) => {
-  try {
-    const userId = getRequesterUserId(req);
-    const prefs = await getDbStudentPreferences(userId);
-    res.json({ preferences: prefs });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to get student preferences" });
-  }
-});
-router12.put("/me/preferences", async (req, res) => {
-  try {
-    const userId = getRequesterUserId(req);
-    const {
-      savedPickupStopId,
-      preferredBusId,
-      savedDestinationName,
-      savedDestinationLat,
-      savedDestinationLng,
-      notificationArrivals,
-      notificationDelays
-    } = req.body;
-    const updated = await upsertDbStudentPreferences(userId, {
-      savedPickupStopId,
-      preferredBusId,
-      savedDestinationName,
-      savedDestinationLat: typeof savedDestinationLat === "number" ? savedDestinationLat : void 0,
-      savedDestinationLng: typeof savedDestinationLng === "number" ? savedDestinationLng : void 0,
-      notificationArrivals,
-      notificationDelays
-    });
-    res.json({ success: true, preferences: updated });
-  } catch (err) {
-    console.error("Error updating preferences:", err);
-    res.status(500).json({ error: "Failed to update preferences" });
-  }
-});
-router12.get("/me/queue", async (req, res) => {
-  try {
-    const userId = getRequesterUserId(req);
-    const active = await getDbStudentActiveQueue(userId);
-    res.json({ inQueue: Boolean(active), queue: active });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to get student queue" });
-  }
-});
-var me_default = router12;
+var publicTransport_default = router10;
 
 // artifacts/api-server/src/routes/index.ts
-var router13 = Router13();
-router13.use(health_default);
-router13.use(auth_default);
-router13.use(me_default);
-router13.use(buses_default);
-router13.use(queue_default);
-router13.use(notifications_default);
-router13.use(campus_default);
-router13.use(safety_default);
-router13.use(admin_default);
-router13.use(ai_default);
-router13.use(transport_default);
-router13.use(publicTransport_default);
-var routes_default = router13;
+var router11 = Router11();
+router11.use(health_default);
+router11.use(buses_default);
+router11.use(queue_default);
+router11.use(notifications_default);
+router11.use(campus_default);
+router11.use(safety_default);
+router11.use(admin_default);
+router11.use(ai_default);
+router11.use(transport_default);
+router11.use(publicTransport_default);
+var routes_default = router11;
 
 // server-app.ts
-init_db();
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path4.dirname(__filename);
+var __dirname = path2.dirname(__filename);
 async function startServer() {
   const app = express();
   const port = Number(process.env.PORT) || 3e3;
   const candidatePaths = [
-    path4.resolve(__dirname, "artifacts/acims/dist"),
-    path4.resolve(__dirname, "dist")
+    path2.resolve(__dirname, "artifacts/acims/dist"),
+    path2.resolve(__dirname, "dist")
   ];
-  const distPath = candidatePaths.find((p) => fs4.existsSync(path4.join(p, "index.html")));
+  const distPath = candidatePaths.find((p) => fs2.existsSync(path2.join(p, "index.html")));
   const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION);
   const isProd = (process.env.NODE_ENV === "production" || isCloudRun) && Boolean(distPath);
   app.use(cors());
@@ -12296,17 +9029,17 @@ async function startServer() {
     res.status(200).json({ status: "healthy", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
   });
   try {
-    await ensureDatabaseInitialized();
+    startBusSimulation();
   } catch (err) {
-    console.warn("Database initialization advisory:", err);
+    console.warn("Could not start bus simulation immediately:", err);
   }
   app.use("/api", routes_default);
   if (isProd && distPath) {
     console.log(`Serving static production build from ${distPath}`);
     app.use(express.static(distPath));
     app.use((_req, res) => {
-      const indexPath = path4.join(distPath, "index.html");
-      if (fs4.existsSync(indexPath)) {
+      const indexPath = path2.join(distPath, "index.html");
+      if (fs2.existsSync(indexPath)) {
         res.sendFile(indexPath);
       } else {
         res.status(404).send("Application build artifacts not found.");
@@ -12316,13 +9049,13 @@ async function startServer() {
     console.log("Starting in development mode with Vite middleware");
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      configFile: path4.resolve(__dirname, "artifacts/acims/vite.config.ts"),
+      configFile: path2.resolve(__dirname, "artifacts/acims/vite.config.ts"),
       server: {
         middlewareMode: true,
         host: "0.0.0.0"
       },
       appType: "spa",
-      root: path4.resolve(__dirname, "artifacts/acims")
+      root: path2.resolve(__dirname, "artifacts/acims")
     });
     app.use(vite.middlewares);
   }

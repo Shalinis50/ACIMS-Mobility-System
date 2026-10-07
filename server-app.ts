@@ -4,12 +4,40 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import cors from "cors";
 import router from "./artifacts/api-server/src/routes/index";
-import { ensureDatabaseInitialized } from "./src/db/index.ts";
+import {
+  buildBusTelemetry,
+  ingestRealDriverGps,
+} from "./artifacts/api-server/src/routes/buses";
+import { realtimeHub } from "./artifacts/api-server/src/services/realtimeHub";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export async function startServer() {
+  const { bootstrapAppTables, ensureBaselineFleetData } = await import("./src/db/bootstrapAppTables.ts");
+  await bootstrapAppTables();
+  const { bootstrapCoreTables } = await import("./src/db/bootstrapCoreTables.ts");
+  await bootstrapCoreTables();
+  const { migrateMobilitySchemaColumns } = await import("./src/db/bootstrapAppTables.ts");
+  await migrateMobilitySchemaColumns();
+  await ensureBaselineFleetData();
+  const { ensureCanonicalShiftSlots } = await import("./src/db/shiftManagement.ts");
+  await ensureCanonicalShiftSlots();
+  const { ensureOfficialPickupPointsFromRoutes } = await import("./src/db/ensureMobilityPickups.ts");
+  await ensureOfficialPickupPointsFromRoutes();
+  try {
+    const { seedDatabase } = await import("./src/db/seed.ts");
+    await seedDatabase();
+  } catch (err) {
+    console.warn("Baseline seed skipped:", err);
+  }
+
+  const { ensureMtcSchema, purgeLegacyDummyMtcFromTransitDb } = await import(
+    "./artifacts/api-server/src/services/mtc/mtcService.ts"
+  );
+  ensureMtcSchema();
+  purgeLegacyDummyMtcFromTransitDb();
+
   const app = express();
   const port = Number(process.env.PORT) || 3000;
 
@@ -30,13 +58,6 @@ export async function startServer() {
   app.get("/health", (_req, res) => {
     res.status(200).json({ status: "healthy", timestamp: new Date().toISOString() });
   });
-
-  // Initialize database schema and transit seed data
-  try {
-    await ensureDatabaseInitialized();
-  } catch (err) {
-    console.warn("Database initialization advisory:", err);
-  }
 
   // API routes
   app.use("/api", router);
@@ -69,6 +90,21 @@ export async function startServer() {
 
   const server = app.listen(port, "0.0.0.0", () => {
     console.log(`ACIMS Mobility System server listening on http://0.0.0.0:${port}`);
+  });
+
+  // Attach Socket.IO server with bus-specific rooms (`bus:<busId>`) on the same HTTP server
+  realtimeHub.attachSocketServer(server, {
+    onDriverLocationIngest: async (payload) => {
+      const res = await ingestRealDriverGps(payload);
+      return {
+        ok: res.ok,
+        telemetry: res.telemetry,
+        error: res.error,
+      };
+    },
+    resolveBusSnapshot: async (busId) => {
+      return buildBusTelemetry(busId);
+    },
   });
 
   // Graceful shutdown for Cloud Run

@@ -3,6 +3,16 @@ import { getStudentProfile, type StudentProfile } from "./studentProfileService"
 import { getBus, getBuses, getLocation, type Bus, type BusLocation } from "./busTracking";
 import { getAllRoutes, getRouteById, haversineDistance, type RouteDefinition } from "./routesData";
 import { REC_CAMPUS_CENTER } from "./campusData";
+import { getLatestBusLocation } from "../../../../src/db/services.ts";
+import { calculatePickupEta } from "./pickupEtaEngine.ts";
+import { assessTripDelay } from "./delayEngine.ts";
+import {
+  getNearestMtcStops,
+  isMtcDataAvailable,
+  mtcUnavailableMessage,
+  searchMtcRoutes,
+} from "./mtc/mtcService.ts";
+import { MTC_SOURCE_LABEL } from "./mtc/mtcSchema.ts";
 
 export interface ToolResultMetadata {
   source: string;
@@ -272,11 +282,33 @@ export function toolFindNearestPublicStops(
     }
   }
 
+  if (isMtcDataAvailable()) {
+    const mtcNearby = getNearestMtcStops({ latitude, longitude, radiusKm, limit });
+    if (mtcNearby.available && mtcNearby.stops?.length) {
+      for (const s of mtcNearby.stops) {
+        results.push({
+          id: s.stop_id,
+          stopId: s.stop_id,
+          stopName: s.stage_name,
+          latitude: s.latitude,
+          longitude: s.longitude,
+          agencyId: "MTC",
+          agencyName: "Metropolitan Transport Corporation (Chennai)",
+          distanceMeters: s.distance_meters,
+          walkingMinutes: s.walking_minutes,
+        });
+      }
+    }
+  }
+
   results.sort((a, b) => a.distanceMeters - b.distanceMeters);
+  const unique = new Map<string, PublicStopResult>();
+  for (const r of results) unique.set(r.id, r);
+
   return {
-    stops: results.slice(0, limit),
+    stops: Array.from(unique.values()).slice(0, limit),
     metadata: {
-      source: "CUMTA / MTC & CMRL Official GTFS Registry",
+      source: isMtcDataAvailable() ? MTC_SOURCE_LABEL : "CMRL / Suburban transit registry",
       sourceType: "official",
       lastUpdated: new Date().toISOString(),
     },
@@ -578,7 +610,56 @@ export function toolSearchJourney(input: {
 
   const journeyOptions: JourneyPlanOption[] = [];
 
-  // Search direct routes matching origin & destination
+  if (!isMtcDataAvailable() && (input.originText.toLowerCase().includes("mtc") || input.destinationText.toLowerCase().includes("rec"))) {
+    return {
+      journeyOptions: [],
+      metadata: {
+        source: mtcUnavailableMessage(),
+        sourceType: "official",
+        lastUpdated: new Date().toISOString(),
+      },
+    };
+  }
+
+  if (isMtcDataAvailable()) {
+    const q = `${input.originText} ${input.destinationText}`.trim();
+    const mtcRoutes = searchMtcRoutes({ query: q, limit: 8 });
+    if (mtcRoutes.available) {
+      let optIdx = 1;
+      for (const r of mtcRoutes.routes) {
+        journeyOptions.push({
+          optionNumber: optIdx++,
+          summary: `MTC Route ${r.route_number} (official register)`,
+          mode: "Direct MTC Bus",
+          departureTime: "—",
+          arrivalTime: "—",
+          totalDurationMinutes: 0,
+          transfers: 0,
+          steps: [
+            {
+              stepType: "walk",
+              instruction: `Walk to nearest official MTC stage toward ${input.originText}`,
+              fromName: input.originText,
+              toName: "Nearest MTC stage",
+              durationMinutes: 0,
+            },
+            {
+              stepType: "bus",
+              instruction: `Use MTC route ${r.route_number}. Confirm stage timings on the official MTC site.`,
+              fromName: input.originText,
+              toName: input.destinationText,
+              serviceNumber: r.route_number,
+              serviceName: r.route_name,
+              durationMinutes: 0,
+            },
+          ],
+          source: `${MTC_SOURCE_LABEL} · updated ${r.last_updated}`,
+        });
+      }
+    }
+  }
+
+  // Search direct routes matching origin & destination (Metro / Suburban registry)
   const fromPattern = `%${input.originText.trim()}%`;
   const toPattern = `%${input.destinationText.trim()}%`;
 
@@ -662,44 +743,16 @@ export function toolSearchJourney(input: {
     });
   }
 
-  // If no direct public routes found, check ACIMS college bus
+  // If no direct public routes found, do not invent an ACIMS timetable.
   if (journeyOptions.length === 0) {
-    const acimsRoutes = getAllRoutes();
-    const match = acimsRoutes.find((r) =>
-      r.name.toLowerCase().includes(input.originText.toLowerCase()) ||
-      r.stops.some((s) => s.name.toLowerCase().includes(input.originText.toLowerCase()))
-    ) || acimsRoutes[0];
-
-    journeyOptions.push({
-      optionNumber: 1,
-      summary: `ACIMS Bus #${match.routeNumber} (${match.name}): Direct College Transport`,
-      mode: "Direct ACIMS Bus",
-      departureTime: "07:20 AM",
-      arrivalTime: "08:15 AM",
-      totalDurationMinutes: 55,
-      transfers: 0,
-      steps: [
-        {
-          stepType: "walk",
-          instruction: `Walk to ${match.stops[0].name}`,
-          fromName: input.originText,
-          toName: match.stops[0].name,
-          durationMinutes: 5,
-        },
-        {
-          stepType: "bus",
-          instruction: `Board ACIMS Bus #${match.routeNumber} direct to REC Campus`,
-          fromName: match.stops[0].name,
-          toName: "Rajalakshmi Engineering College (REC)",
-          serviceNumber: match.routeNumber,
-          serviceName: match.name,
-          departureTime: "07:20 AM",
-          arrivalTime: "08:15 AM",
-          durationMinutes: 50,
-        },
-      ],
-      source: "ACIMS Campus Mobility Network",
-    });
+    return {
+      journeyOptions: [],
+      metadata: {
+        source: "No verified journey options in ACIMS or official MTC/CUMTA data",
+        sourceType: "official",
+        lastUpdated: new Date().toISOString(),
+      },
+    };
   }
 
   return {
@@ -800,16 +853,54 @@ export function toolGetAcimsBusStatus(busId: string) {
 // TOOL 12: calculate_eta
 // Calculates ETA only when real route geometry & coordinates exist
 // ============================================================================
-export function toolCalculateEta(
-  busId: string,
-  stopId: string,
-): {
-  canCalculate: boolean;
-  etaMinutes?: number;
-  formattedEta?: string;
-  reason?: string;
-  metadata: ToolResultMetadata;
-} {
+export async function toolCalculateEta(busId: string, stopId: string) {
+  const loc = await getLatestBusLocation(busId);
+  if (!loc) {
+    const legacy = toolCalculateEtaLegacy(busId, stopId);
+    return legacy;
+  }
+
+  const pickupEta = calculatePickupEta(busId, { latitude: loc.latitude, longitude: loc.longitude }, stopId);
+  if (!pickupEta) {
+    return {
+      canCalculate: false,
+      reason: `Could not compute pickup ETA for stop ${stopId}.`,
+      metadata: { source: "ACIMS Pickup ETA Engine", sourceType: "calculated" },
+    };
+  }
+
+  const { getBusShiftTimingContext } = await import("./shiftTiming.ts");
+  const shiftCtx = await getBusShiftTimingContext(busId);
+  const delay = shiftCtx
+    ? assessTripDelay({
+        busId,
+        shiftStartTime: shiftCtx.shiftStartTime,
+        pickupExpectedOffsetMinutes: shiftCtx.pickupExpectedOffsetMinutes,
+        currentEtaToPickupMinutes: pickupEta.etaMinutes,
+      })
+    : { delayMinutes: 0, status: "ON_TIME" as const, expectedArrivalMinutesFromShiftStart: 0, predictedArrivalMinutesFromShiftStart: 0 };
+
+  return {
+    canCalculate: true,
+    etaMinutes: pickupEta.etaMinutes,
+    formattedEta: pickupEta.formattedEta,
+    pickupStopName: pickupEta.pickupStopName,
+    delayMinutes: delay.delayMinutes,
+    delayStatus: delay.status,
+    metadata: {
+      source: "ACIMS Pickup ETA + Delay Engine (live GPS)",
+      sourceType: "live GPS",
+      lastUpdated:
+        loc.recordedAt instanceof Date
+          ? loc.recordedAt.toISOString()
+          : loc.recordedAt
+            ? String(loc.recordedAt)
+            : new Date().toISOString(),
+    },
+  };
+}
+
+function toolCalculateEtaLegacy(busId: string, stopId: string) {
   const bus = getBus(busId);
   if (!bus) {
     return {
@@ -837,13 +928,10 @@ export function toolCalculateEta(
     };
   }
 
-  // Calculate distance from bus's current location to target stop
   const directDistanceKm = haversineDistance(bus.currentLocation, {
     latitude: targetStop.latitude,
     longitude: targetStop.longitude,
   });
-
-  // Calculate speed: if bus has real speed use it, otherwise use average campus speed 22 km/h
   const avgSpeedKmh = route.averageSpeedKmh || 22;
   const travelMinutes = Math.max(1, Math.round((directDistanceKm / avgSpeedKmh) * 60));
 
@@ -852,7 +940,7 @@ export function toolCalculateEta(
     etaMinutes: travelMinutes,
     formattedEta: travelMinutes <= 1 ? "Arriving in ~1 min" : `approximately ${travelMinutes} min`,
     metadata: {
-      source: "ACIMS Distance & Geometry Calculator",
+      source: "ACIMS Distance & Geometry Calculator (fallback)",
       sourceType: "calculated",
       lastUpdated: new Date().toISOString(),
     },

@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { optionalAuth } from "./middleware/acimsAuth";
 
 const app: Express = express();
 
@@ -29,6 +30,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.use("/api", (req, res, next) => {
+  void optionalAuth(req, res, next);
+});
 app.use("/api", router);
 
 export default app;

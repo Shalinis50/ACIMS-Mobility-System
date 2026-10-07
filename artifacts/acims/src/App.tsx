@@ -7,8 +7,8 @@ import NotFound from '@/pages/not-found';
 import EntryPage from '@/pages/entry';
 import StudentLoginPage from '@/pages/student-login';
 import Dashboard from '@/pages/dashboard';
+import MyBusPage from '@/pages/my-bus';
 import LiveMap from '@/pages/map';
-import QueuePage from '@/pages/queue';
 import AlertsPage from '@/pages/alerts';
 import CampusMapPage from '@/pages/campus-map';
 import NavigationPage from '@/pages/navigation';
@@ -17,6 +17,7 @@ import AdminLoginPage from '@/pages/admin-login';
 import { ProtectedAdminRoute } from '@/components/protected-admin-route';
 import AiAgentPage from '@/pages/ai-agent';
 import PublicTransportPage from '@/pages/public-transport';
+import RecRoutesMapPage from '@/pages/rec-routes-map';
 import OfflinePage from '@/pages/offline';
 import DriverTrackingPage from '@/pages/driver';
 import { AcimsLayout } from '@/components/acims-ui';
@@ -59,14 +60,14 @@ function Router() {
             <Dashboard />
           </AcimsLayout>
         </Route>
+        <Route path="/my-bus">
+          <AcimsLayout>
+            <MyBusPage />
+          </AcimsLayout>
+        </Route>
         <Route path="/map">
           <AcimsLayout>
             <LiveMap />
-          </AcimsLayout>
-        </Route>
-        <Route path="/queue">
-          <AcimsLayout>
-            <QueuePage />
           </AcimsLayout>
         </Route>
         <Route path="/alerts">
@@ -89,6 +90,11 @@ function Router() {
             <SafetyPage />
           </AcimsLayout>
         </Route>
+        <Route path="/mobi">
+          <AcimsLayout>
+            <AiAgentPage />
+          </AcimsLayout>
+        </Route>
         <Route path="/ai-agent">
           <AcimsLayout>
             <AiAgentPage />
@@ -97,6 +103,11 @@ function Router() {
         <Route path="/public-transport">
           <AcimsLayout>
             <PublicTransportPage />
+          </AcimsLayout>
+        </Route>
+        <Route path="/rec-routes">
+          <AcimsLayout>
+            <RecRoutesMapPage />
           </AcimsLayout>
         </Route>
         <Route path="/offline">

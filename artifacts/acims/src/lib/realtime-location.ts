@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { io, type Socket } from "socket.io-client";
 
 export type Coordinate = {
   latitude: number;
@@ -37,7 +38,9 @@ export type EnrichedBusLocation = {
   accuracy?: number | null;
   speed?: number | null;
   heading?: number | null;
+  bearing?: number | null;
   altitude?: number | null;
+  timestamp?: number;
   nextStopId: string;
   nextStop: string;
   previousStopId?: string;
@@ -89,12 +92,24 @@ export function computeFreshness(
       isStale: false,
       isUnavailable: true,
       secondsAgo: Infinity,
-      freshnessLabel: trackingStatus === "ENDED" ? "Trip ended" : "Location unavailable",
+      freshnessLabel: trackingStatus === "ENDED" ? "Trip ended" : "Waiting for driver GPS",
       statusBadge: "UNAVAILABLE",
     };
   }
 
   const date = typeof recordedAtString === "string" ? new Date(recordedAtString) : recordedAtString;
+  if (date.getTime() <= 0 || isNaN(date.getTime())) {
+    return {
+      isLive: false,
+      isRecent: false,
+      isStale: false,
+      isUnavailable: true,
+      secondsAgo: Infinity,
+      freshnessLabel: "Waiting for driver GPS",
+      statusBadge: "UNAVAILABLE",
+    };
+  }
+
   const now = Date.now();
   const diffMs = Math.max(0, now - date.getTime());
   const secondsAgo = Math.floor(diffMs / 1000);
@@ -118,7 +133,7 @@ export function computeFreshness(
       isStale: false,
       isUnavailable: false,
       secondsAgo,
-      freshnessLabel: secondsAgo < 5 ? "Updated just now" : `Last updated ${secondsAgo} sec ago`,
+      freshnessLabel: secondsAgo < 2 ? "Updated just now" : `Updated ${secondsAgo}s ago`,
       statusBadge: "LIVE",
     };
   }
@@ -130,19 +145,20 @@ export function computeFreshness(
       isStale: false,
       isUnavailable: false,
       secondsAgo,
-      freshnessLabel: `Recent GPS · ${secondsAgo} sec ago`,
+      freshnessLabel: `Updated ${secondsAgo}s ago`,
       statusBadge: "RECENT",
     };
   }
 
-  if (secondsAgo <= 300) {
+  if (secondsAgo <= 600) {
+    const mins = Math.max(1, Math.floor(secondsAgo / 60));
     return {
       isLive: false,
       isRecent: false,
       isStale: true,
       isUnavailable: false,
       secondsAgo,
-      freshnessLabel: `Signal delayed · ${secondsAgo} sec ago`,
+      freshnessLabel: secondsAgo < 120 ? `Last seen ${secondsAgo}s ago` : `Last seen ${mins}m ago`,
       statusBadge: "STALE",
     };
   }
@@ -153,15 +169,50 @@ export function computeFreshness(
     isStale: false,
     isUnavailable: true,
     secondsAgo,
-    freshnessLabel: "Location unavailable",
+    freshnessLabel: "Waiting for driver GPS",
     statusBadge: "UNAVAILABLE",
   };
 }
 
+let sharedSocket: Socket | null = null;
+
+export function getAcimsSocket(): Socket | null {
+  if (typeof window === "undefined") return null;
+  if (!sharedSocket) {
+    sharedSocket = io(window.location.origin, {
+      path: "/socket.io",
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: Infinity,
+    });
+  }
+  return sharedSocket;
+}
+
+/**
+ * Emits a real driver GPS location update over Socket.IO to the ACMIS Node.js server
+ * (`driverLocationUpdate`), which validates, persists, and broadcasts to the bus-specific room (`bus:<busId>`).
+ */
+export function emitDriverLocationOverSocket(payload: {
+  driverId: string;
+  busId: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  speed: number | null;
+  bearing: number | null;
+  timestamp: number;
+}): void {
+  const socket = getAcimsSocket();
+  if (!socket) return;
+  socket.emit("driverLocationUpdate", payload);
+}
+
 /**
  * Realtime Bus Location Subscription
- * Uses Server-Sent Events (SSE) for instant zero-polling live updates,
- * with automatic reconnect and background fallback polling.
+ * Joins the bus-specific Socket.IO room (`bus:<busId>`) for instant room-scoped updates,
+ * backed by Server-Sent Events (SSE) and initial snapshot fetch.
  */
 export function subscribeToBusLocation(
   busId: string,
@@ -171,6 +222,29 @@ export function subscribeToBusLocation(
   let active = true;
   let eventSource: EventSource | null = null;
   let fallbackTimer: NodeJS.Timeout | null = null;
+  let socketConnected = false;
+  let sseConnected = false;
+
+  const updateConnectionState = () => {
+    if (!active) return;
+    onConnectionChange?.(socketConnected || sseConnected);
+  };
+
+  const handleIncomingLocation = (raw: any) => {
+    if (!active || !raw) return;
+    if (raw.busId && raw.busId !== busId) return;
+    const data = raw as EnrichedBusLocation;
+    if (data.bearing != null && data.heading == null) {
+      data.heading = data.bearing;
+    } else if (data.heading != null && data.bearing == null) {
+      data.bearing = data.heading;
+    }
+    if (!data.recordedAt && typeof data.timestamp === "number" && data.timestamp > 0) {
+      data.recordedAt = new Date(data.timestamp).toISOString();
+    }
+    data.updatedAt = data.recordedAt || new Date().toISOString();
+    callback(data);
+  };
 
   // Initial immediate fetch
   const fetchSnapshot = async () => {
@@ -181,8 +255,7 @@ export function subscribeToBusLocation(
       });
       if (res.ok && active) {
         const data = (await res.json()) as EnrichedBusLocation;
-        data.updatedAt = data.recordedAt;
-        callback(data);
+        handleIncomingLocation(data);
       }
     } catch {
       // Degraded or offline
@@ -191,7 +264,49 @@ export function subscribeToBusLocation(
 
   void fetchSnapshot();
 
-  // Connect to live SSE channel
+  // 1. Connect to bus-specific Socket.IO room (`bus:<busId>`)
+  const socket = getAcimsSocket();
+  const joinRoom = () => {
+    if (!active || !socket) return;
+    socketConnected = socket.connected;
+    updateConnectionState();
+    socket.emit("joinBusRoom", { busId });
+  };
+
+  const onSocketConnect = () => {
+    socketConnected = true;
+    updateConnectionState();
+    joinRoom();
+  };
+
+  const onSocketDisconnect = () => {
+    socketConnected = false;
+    updateConnectionState();
+  };
+
+  const onSocketBusLocation = (payload: any) => {
+    handleIncomingLocation(payload);
+  };
+
+  const onSocketSessionChange = (payload: any) => {
+    if (!active) return;
+    if (!payload?.busId || payload.busId === busId) {
+      void fetchSnapshot();
+    }
+  };
+
+  if (socket) {
+    socket.on("connect", onSocketConnect);
+    socket.on("disconnect", onSocketDisconnect);
+    socket.on("busLocationUpdate", onSocketBusLocation);
+    socket.on("locationUpdate", onSocketBusLocation);
+    socket.on("session_change", onSocketSessionChange);
+    if (socket.connected) {
+      joinRoom();
+    }
+  }
+
+  // 2. Connect to live SSE channel as dual-transport resilience
   const connectSSE = () => {
     if (!active || typeof EventSource === "undefined") {
       startPolling();
@@ -205,8 +320,7 @@ export function subscribeToBusLocation(
         if (!active) return;
         try {
           const telemetry = JSON.parse(e.data) as EnrichedBusLocation;
-          telemetry.updatedAt = telemetry.recordedAt;
-          callback(telemetry);
+          handleIncomingLocation(telemetry);
         } catch (err) {
           console.error("Error parsing realtime location event:", err);
         }
@@ -218,18 +332,18 @@ export function subscribeToBusLocation(
       });
 
       eventSource.onopen = () => {
-        if (active) onConnectionChange?.(true);
+        sseConnected = true;
+        updateConnectionState();
       };
 
       eventSource.onerror = () => {
-        if (active) onConnectionChange?.(false);
-        // Fallback to polling while SSE reconnects
+        sseConnected = false;
+        updateConnectionState();
         if (eventSource) {
           eventSource.close();
           eventSource = null;
         }
         startPolling();
-        // Retry SSE in 8 seconds
         setTimeout(() => {
           if (active && !eventSource) {
             connectSSE();
@@ -252,6 +366,14 @@ export function subscribeToBusLocation(
 
   return () => {
     active = false;
+    if (socket) {
+      socket.emit("leaveBusRoom", { busId });
+      socket.off("connect", onSocketConnect);
+      socket.off("disconnect", onSocketDisconnect);
+      socket.off("busLocationUpdate", onSocketBusLocation);
+      socket.off("locationUpdate", onSocketBusLocation);
+      socket.off("session_change", onSocketSessionChange);
+    }
     if (eventSource) {
       eventSource.close();
       eventSource = null;
@@ -294,12 +416,41 @@ export async function sendDriverGpsUpdate(
     altitudeAccuracy?: number | null;
     speed?: number | null;
     heading?: number | null;
-    timestamp?: string;
+    bearing?: number | null;
+    timestamp?: string | number;
   },
-  driverId?: string
-): Promise<{ success: boolean; telemetry?: EnrichedBusLocation; error?: string }> {
+  driverId?: string,
+  token?: string | null
+): Promise<{
+  success: boolean;
+  telemetry?: EnrichedBusLocation;
+  validation?: { quality?: "HIGH" | "ACCEPTABLE" | "POOR" | "INVALID"; networkDelayMs?: number };
+  status?: number;
+  error?: string;
+}> {
   try {
+    const effectiveDriverId = driverId || "driver-active";
+    const effectiveBearing = coords.bearing ?? coords.heading ?? null;
+    const epochTimestamp =
+      typeof coords.timestamp === "number"
+        ? coords.timestamp
+        : coords.timestamp
+        ? new Date(coords.timestamp).getTime()
+        : Date.now();
+
+    emitDriverLocationOverSocket({
+      driverId: effectiveDriverId,
+      busId,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      accuracy: coords.accuracy ?? null,
+      speed: coords.speed ?? null,
+      bearing: effectiveBearing,
+      timestamp: epochTimestamp,
+    });
+
     const payload = {
+      driverId: effectiveDriverId,
       busId,
       latitude: coords.latitude,
       longitude: coords.longitude,
@@ -307,9 +458,10 @@ export async function sendDriverGpsUpdate(
       altitude: coords.altitude,
       altitudeAccuracy: coords.altitudeAccuracy,
       speed: coords.speed,
-      heading: coords.heading,
-      timestamp: coords.timestamp || new Date().toISOString(),
-      driverId,
+      bearing: effectiveBearing,
+      heading: effectiveBearing,
+      timestamp: epochTimestamp,
+      recorded_at: new Date(epochTimestamp).toISOString(),
     };
 
     const res = await fetch("/api/bus/location", {
@@ -317,17 +469,25 @@ export async function sendDriverGpsUpdate(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        ...(driverId ? { "x-acims-driver-id": driverId } : {}),
+        "x-acims-driver-id": effectiveDriverId,
+        "x-acims-user-id": effectiveDriverId,
+        "x-acims-role": "DRIVER",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(payload),
     });
 
     if (res.ok) {
       const data = await res.json();
-      return { success: true, telemetry: data.telemetry };
+      return {
+        success: true,
+        telemetry: data.telemetry,
+        validation: data.validation,
+        status: res.status,
+      };
     } else {
       const err = await res.json().catch(() => ({}));
-      return { success: false, error: err.error || `HTTP ${res.status}` };
+      return { success: false, status: res.status, error: err.error || `HTTP ${res.status}` };
     }
   } catch (err: any) {
     return { success: false, error: err.message || "Network transmission failed" };
@@ -357,7 +517,6 @@ export function enqueueOfflineGpsPoint(point: QueuedGpsPoint) {
     const raw = localStorage.getItem(OFFLINE_GPS_KEY);
     const queue: QueuedGpsPoint[] = raw ? JSON.parse(raw) : [];
     queue.push(point);
-    // Keep max 200 points to prevent storage overflow
     if (queue.length > 200) queue.shift();
     localStorage.setItem(OFFLINE_GPS_KEY, JSON.stringify(queue));
   } catch {}
@@ -373,7 +532,11 @@ export function getOfflineGpsQueueCount(): number {
   }
 }
 
-export async function flushOfflineGpsQueue(busId: string): Promise<number> {
+export async function flushOfflineGpsQueue(
+  busId: string,
+  driverId?: string,
+  token?: string | null
+): Promise<number> {
   try {
     const raw = localStorage.getItem(OFFLINE_GPS_KEY);
     if (!raw) return 0;
@@ -383,14 +546,21 @@ export async function flushOfflineGpsQueue(busId: string): Promise<number> {
     const pointsToUpload = queue.filter((p) => p.busId === busId);
     if (pointsToUpload.length === 0) return 0;
 
+    const effectiveDriverId = driverId || pointsToUpload[0]?.driverId || "driver-active";
+
     const res = await fetch("/api/bus/location/batch", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-acims-driver-id": effectiveDriverId,
+        "x-acims-user-id": effectiveDriverId,
+        "x-acims-role": "DRIVER",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ busId, points: pointsToUpload }),
     });
 
     if (res.ok) {
-      // Remove uploaded points
       const remaining = queue.filter((p) => p.busId !== busId);
       localStorage.setItem(OFFLINE_GPS_KEY, JSON.stringify(remaining));
       return pointsToUpload.length;
@@ -430,7 +600,7 @@ export function useBusRealtimeLocation(busId: string, enabled = true) {
     };
   }, [busId, enabled]);
 
-  // Subscribe to realtime location updates
+  // Subscribe to realtime location updates (Socket.IO bus room + SSE)
   useEffect(() => {
     if (!busId || !enabled) return;
     setIsLoading(true);
