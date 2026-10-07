@@ -21,6 +21,8 @@ export async function startServer() {
   const { migrateMobilitySchemaColumns } = await import("./src/db/bootstrapAppTables.ts");
   await migrateMobilitySchemaColumns();
   await ensureBaselineFleetData();
+  const { seedInitialDemoRoutes } = await import("./src/db/initialDemoRoutes.ts");
+  await seedInitialDemoRoutes();
   const { ensureCanonicalShiftSlots } = await import("./src/db/shiftManagement.ts");
   await ensureCanonicalShiftSlots();
   const { ensureOfficialPickupPointsFromRoutes } = await import("./src/db/ensureMobilityPickups.ts");

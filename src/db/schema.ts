@@ -103,7 +103,8 @@ export const shiftAssignments = pgTable("shift_assignments", {
   id: text("id").primaryKey(),
   shiftId: text("shift_id").notNull(),
   busId: text("bus_id").notNull(),
-  driverId: text("driver_id").notNull(),
+  driverId: text("driver_id"),
+  activeStopIds: text("active_stop_ids"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });

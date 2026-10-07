@@ -18,69 +18,44 @@ import {
 import type { ReactNode } from 'react';
 
 export type AdminSectionId =
+  | 'overview'
+  | 'live-buses'
+  | 'schedule'
+  | 'alerts'
+  | 'buses-routes'
+  | 'pickup-points'
+  | 'shift-assignments'
+  | 'drivers'
+  // Legacy aliases for URL compatibility
   | 'dashboard'
   | 'map'
-  | 'college-route'
-  | 'buses'
-  | 'drivers'
-  | 'routes'
   | 'shifts'
+  | 'buses'
+  | 'routes'
   | 'pickups'
-  | 'trips'
-  | 'gps'
-  | 'eta-delays'
-  | 'notifications'
-  | 'students'
-  | 'campus'
-  | 'mtc'
-  | 'rec-transport'
-  | 'navi'
-  | 'analytics'
-  | 'trip-history'
-  | 'audit'
-  | 'queues'
-  | 'safety'
-  | 'settings';
+  | 'safety';
 
 type NavItem = { id: AdminSectionId; label: string; icon: LucideIcon };
 type NavGroup = { title: string; items: NavItem[] };
 
-/** Admin nav focused on routes, pickup/drop stops, fleet GPS, and student assignment */
+/** Simplified, clear Admin Navigation for College Transport Management */
 export const ADMIN_NAV: NavGroup[] = [
   {
-    title: 'Live ops',
+    title: 'TRANSPORT',
     items: [
-      { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'map', label: 'Live map', icon: Map },
-      { id: 'gps', label: 'GPS monitor', icon: Satellite },
-      { id: 'eta-delays', label: 'ETA & delays', icon: Timer },
-      { id: 'notifications', label: 'Notifications', icon: Bell },
+      { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+      { id: 'live-buses', label: 'Live Buses', icon: Map },
+      { id: 'schedule', label: 'Bus Schedule', icon: Timer },
+      { id: 'alerts', label: 'Alerts', icon: Bell },
     ],
   },
   {
-    title: 'Routes & stops',
+    title: 'BUS MANAGEMENT',
     items: [
-      { id: 'college-route', label: 'Active college routes', icon: RouteIcon },
-      { id: 'routes', label: 'Bus routes', icon: RouteIcon },
-      { id: 'pickups', label: 'Pickup / drop stops', icon: MapPin },
-      { id: 'shifts', label: 'Shifts', icon: Timer },
-    ],
-  },
-  {
-    title: 'Fleet & people',
-    items: [
-      { id: 'buses', label: 'Buses', icon: BusFront },
+      { id: 'buses-routes', label: 'Buses', icon: BusFront },
+      { id: 'pickup-points', label: 'Pickup Points', icon: MapPin },
+      { id: 'shift-assignments', label: 'Shift Assignments', icon: RouteIcon },
       { id: 'drivers', label: 'Drivers', icon: UserRound },
-      { id: 'students', label: 'Students', icon: UsersRound },
-      { id: 'trips', label: 'Trips', icon: Activity },
-    ],
-  },
-  {
-    title: 'Data',
-    items: [
-      { id: 'mtc', label: 'Public transit feed', icon: Radio },
-      { id: 'rec-transport', label: 'REC official routes', icon: RouteIcon },
-      { id: 'settings', label: 'Settings', icon: Settings },
     ],
   },
 ];
@@ -166,7 +141,13 @@ export function AdminLayout({ section, onNavigate, onLogout, onRefresh, systemSt
 
 export function parseAdminSection(path: string): AdminSectionId {
   const slug = path.replace(/^\/admin\/?/, '').split('/')[0];
-  const all = ADMIN_NAV.flatMap((g) => g.items.map((i) => i.id));
-  if (!slug) return 'dashboard';
-  return (all.includes(slug as AdminSectionId) ? slug : 'dashboard') as AdminSectionId;
+  if (!slug || slug === 'dashboard' || slug === 'overview') return 'overview';
+  if (slug === 'map' || slug === 'live-buses') return 'live-buses';
+  if (slug === 'schedule' || slug === 'eta-delays') return 'schedule';
+  if (slug === 'alerts' || slug === 'safety' || slug === 'notifications') return 'alerts';
+  if (slug === 'buses-routes' || slug === 'buses' || slug === 'routes') return 'buses-routes';
+  if (slug === 'pickup-points' || slug === 'pickups') return 'pickup-points';
+  if (slug === 'shift-assignments' || slug === 'shifts') return 'shift-assignments';
+  if (slug === 'drivers') return 'drivers';
+  return 'overview';
 }

@@ -40,6 +40,8 @@ import {
   recordAdminAudit,
 } from "../services/adminPortalService.ts";
 import { getCommandCenterSnapshot } from "../services/commandCenterService.ts";
+import { naturalBusSort } from "../../../../src/lib/naturalSort.ts";
+import { INITIAL_DEMO_ROUTES } from "../../../../src/db/initialDemoRoutes.ts";
 import {
   listAdminShifts,
   getShiftById,
@@ -648,6 +650,694 @@ router.patch("/admin/safety/:reportId", async (req, res) => {
     res.json(updated[0]);
   } catch (err: any) {
     res.status(500).json({ error: "Failed to update safety report" });
+  }
+});
+
+// -------------------------------------------------------------
+// UNIFIED BUSES & ROUTES (ACMIS Combined Concept)
+// -------------------------------------------------------------
+const isMtcBusOrRoute = (b: { busNumber?: string; id?: string; source?: string; routeId?: string | null }, r?: { id?: string; source?: string; routeName?: string } | null) => {
+  const num = (b.busNumber || "").toUpperCase();
+  const id = (b.id || "").toLowerCase();
+  const rId = (r?.id || b.routeId || "").toLowerCase();
+  const rName = (r?.routeName || "").toUpperCase();
+  return (
+    num.includes("MTC") ||
+    id.startsWith("mtc") ||
+    b.source === "MTC" ||
+    b.source === "PUBLIC_TRANSIT" ||
+    rId.startsWith("mtc") ||
+    r?.source === "MTC" ||
+    rName.includes("MTC")
+  );
+};
+
+router.get("/admin/buses-and-routes", async (_req, res) => {
+  try {
+    const rawBusList = await getDbBuses();
+    const routeList = await getDbRoutes();
+    // Exclude any MTC or public transit buses from ACMIS campus transport
+    const busList = rawBusList.filter((b) => !isMtcBusOrRoute(b, routeList.find((r) => r.id === b.routeId)));
+
+    const allStops = await db.select().from(busStops).orderBy(busStops.sequenceNumber);
+    const driverProfiles = await db
+      .select({
+        driverId: drivers.id,
+        userId: profiles.userId,
+        name: profiles.name,
+        phone: profiles.phone,
+        assignedBusId: drivers.assignedBusId,
+      })
+      .from(drivers)
+      .innerJoin(profiles, eq(drivers.profileId, profiles.id));
+
+    const { getAllShiftsWithAssignments } = await import("../../../../src/db/shiftManagement.ts");
+    const shiftsWithAssignments = await getAllShiftsWithAssignments();
+    const { buildBusTelemetry } = await import("./buses.ts");
+
+    const items = await Promise.all(
+      busList.map(async (b) => {
+        const route = routeList.find((r) => r.id === b.routeId);
+        const rawRouteName = route ? route.routeName.replace(/^\d+[A-Z]?\s*·?\s*/i, "").trim() : "CAMPUS";
+        const routeName = rawRouteName || "CAMPUS";
+        const displayName = `BUS ${b.busNumber} · ${routeName.toUpperCase()}`;
+
+        const driver = driverProfiles.find((d) => d.userId === b.driverId || d.assignedBusId === b.id);
+        const busRouteStops = allStops.filter((s) => s.routeId === b.routeId);
+
+        // Find shifts assigning this bus
+        const morningShift = shiftsWithAssignments.find((s) => s.direction === "TO_COLLEGE" && s.assignedBusIds.includes(b.id));
+        const eveningShift = shiftsWithAssignments.find((s) => s.direction === "FROM_COLLEGE" && s.assignedBusIds.includes(b.id));
+
+        // Get telemetry
+        let telemetry = null;
+        try {
+          telemetry = await buildBusTelemetry(b.id);
+        } catch {
+          // ignore
+        }
+
+        let gpsStatus: "LIVE" | "GPS UNAVAILABLE" | "NOT STARTED" | "DELAYED" = "GPS UNAVAILABLE";
+        if (telemetry?.isLive) {
+          gpsStatus = (telemetry.delayMinutes && telemetry.delayMinutes > 2) ? "DELAYED" : "LIVE";
+        } else if (telemetry?.trackingStatus === "ACTIVE" || telemetry?.trackingStatus === "PAUSED") {
+          gpsStatus = "NOT STARTED";
+        }
+
+        return {
+          id: b.id,
+          busNumber: b.busNumber,
+          routeId: b.routeId,
+          routeName: routeName.toUpperCase(),
+          displayName,
+          driverId: b.driverId || driver?.userId,
+          driverName: driver?.name ?? null,
+          driverPhone: driver?.phone ?? null,
+          morningShift: morningShift ? morningShift.startTime || "6:30 AM" : null,
+          eveningShift: eveningShift ? eveningShift.startTime || "3:15 PM" : null,
+          stopCount: busRouteStops.length,
+          stops: busRouteStops.map((s) => {
+            const demoRoute = INITIAL_DEMO_ROUTES.find((dr) => dr.routeNumber.toUpperCase() === b.busNumber.toUpperCase());
+            const demoStop = demoRoute?.stops.find((ds) => ds.name.toLowerCase() === s.stopName.toLowerCase());
+            return {
+              id: s.id,
+              name: s.stopName,
+              time: demoStop?.time || "Scheduled",
+              latitude: s.latitude,
+              longitude: s.longitude,
+              sequence: s.sequenceNumber,
+            };
+          }),
+          gpsStatus,
+          latitude: telemetry?.isLive ? telemetry.latitude : null,
+          longitude: telemetry?.isLive ? telemetry.longitude : null,
+          accuracy: telemetry?.isLive ? telemetry.accuracy : null,
+          secondsAgo: telemetry?.secondsAgo ?? null,
+          nextStop: telemetry?.nextStop ?? null,
+          etaMinutes: telemetry?.etaMinutes ?? null,
+          active: b.active,
+        };
+      })
+    );
+
+    // Natural sort by bus number (1, 1B, 1C, 2, 2B, 2C, 3, 3B, 3C, 4, 18...)
+    items.sort((a, b) => naturalBusSort(a.busNumber, b.busNumber));
+
+    res.json(items);
+  } catch (err: any) {
+    console.error("[admin/buses-and-routes]", err);
+    res.status(500).json({ error: "Failed to list buses and routes" });
+  }
+});
+
+router.post("/admin/buses-and-routes", async (req, res) => {
+  try {
+    const { busNumber, routeName, driverId, driverName, driverPhone, morningShift, eveningShift, stops } = req.body as {
+      busNumber: string;
+      routeName: string;
+      driverId?: string;
+      driverName?: string;
+      driverPhone?: string;
+      morningShift?: string;
+      eveningShift?: string;
+      stops?: Array<{ name: string; time?: string; latitude?: number; longitude?: number }>;
+    };
+
+    if (!busNumber?.trim() || !routeName?.trim()) {
+      return res.status(400).json({ error: "Bus number and Route name are required" });
+    }
+
+    const cleanNumber = busNumber.trim().toUpperCase();
+    const cleanRoute = routeName.trim().toUpperCase();
+    const busId = `bus-${cleanNumber.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+    const routeId = `route-${cleanNumber.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+    const fullRouteName = `${cleanNumber} · ${cleanRoute}`;
+
+    // Handle driver creation/linking directly from the bus form
+    let effectiveDriverId = driverId || null;
+    if (driverName?.trim()) {
+      const cleanDName = driverName.trim();
+      const cleanDPhone = driverPhone?.trim() || null;
+      let targetUserId = effectiveDriverId;
+      let profId: number | null = null;
+
+      if (targetUserId) {
+        const existingProf = await db.select().from(profiles).where(eq(profiles.userId, targetUserId)).limit(1);
+        if (existingProf.length) {
+          profId = existingProf[0].id;
+          await db.update(profiles).set({
+            name: cleanDName,
+            ...(cleanDPhone ? { phone: cleanDPhone } : {}),
+          }).where(eq(profiles.userId, targetUserId));
+        }
+      }
+
+      if (!profId) {
+        targetUserId = `driver-${Date.now()}`;
+        const newProf = await db.insert(profiles).values({
+          userId: targetUserId,
+          name: cleanDName,
+          email: `${targetUserId}@acims.local`,
+          phone: cleanDPhone,
+          role: "DRIVER",
+        }).returning();
+        profId = newProf[0].id;
+        await db.insert(drivers).values({
+          profileId: profId,
+          assignedBusId: busId,
+        });
+      }
+
+      if (profId) {
+        await db.update(drivers).set({ assignedBusId: busId }).where(eq(drivers.profileId, profId));
+      }
+      effectiveDriverId = targetUserId;
+    }
+
+    // 1. Create or update route
+    await db.insert(busRoutes).values({
+      id: routeId,
+      routeName: fullRouteName,
+      routeCode: cleanNumber,
+      active: true,
+      source: "ADMIN",
+    }).onConflictDoNothing();
+
+    // 2. Create or update bus
+    await db.insert(buses).values({
+      id: busId,
+      busNumber: cleanNumber,
+      routeId,
+      driverId: effectiveDriverId,
+      active: true,
+      source: "ADMIN",
+    }).onConflictDoNothing();
+
+    // 3. Create initial stops if provided
+    if (Array.isArray(stops) && stops.length > 0) {
+      for (let i = 0; i < stops.length; i++) {
+        const s = stops[i];
+        await db.insert(busStops).values({
+          id: `${routeId}-stop-${i + 1}`,
+          routeId,
+          stopName: s.name,
+          latitude: s.latitude ?? 13.0084,
+          longitude: s.longitude ?? 80.0033,
+          sequenceNumber: i + 1,
+        }).onConflictDoNothing();
+      }
+    } else {
+      // Add default stops: Route Origin & College Campus
+      await db.insert(busStops).values({
+        id: `${routeId}-stop-1`,
+        routeId,
+        stopName: `${cleanRoute} Bus Stand`,
+        latitude: 13.0827,
+        longitude: 80.2707,
+        sequenceNumber: 1,
+      }).onConflictDoNothing();
+      await db.insert(busStops).values({
+        id: `${routeId}-stop-2`,
+        routeId,
+        stopName: "College Campus",
+        latitude: 13.0084,
+        longitude: 80.0033,
+        sequenceNumber: 2,
+      }).onConflictDoNothing();
+    }
+
+    // 4. Update shift assignments if selected
+    const { setShiftAssignedBuses, listShiftAssignmentsForShift } = await import("../../../../src/db/shiftManagement.ts");
+    if (morningShift) {
+      const existingM = await listShiftAssignmentsForShift("shift-morning-630");
+      const ids = Array.from(new Set([...existingM.map((x) => x.busId), busId]));
+      await setShiftAssignedBuses("shift-morning-630", ids);
+    }
+    if (eveningShift) {
+      const existingE = await listShiftAssignmentsForShift("shift-evening-315");
+      const ids = Array.from(new Set([...existingE.map((x) => x.busId), busId]));
+      await setShiftAssignedBuses("shift-evening-315", ids);
+    }
+
+    res.status(201).json({
+      id: busId,
+      busNumber: cleanNumber,
+      routeId,
+      routeName: cleanRoute,
+      displayName: `BUS ${cleanNumber} · ${cleanRoute}`,
+      driverId: effectiveDriverId,
+      active: true,
+    });
+  } catch (err: any) {
+    console.error("[admin/buses-and-routes POST]", err);
+    res.status(400).json({ error: err.message || "Failed to create bus and route" });
+  }
+});
+
+router.patch("/admin/buses-and-routes/:busId", async (req, res) => {
+  try {
+    const { busId } = req.params;
+    const { busNumber, routeName, driverId, driverName, driverPhone, active } = req.body as {
+      busNumber?: string;
+      routeName?: string;
+      driverId?: string;
+      driverName?: string;
+      driverPhone?: string;
+      active?: boolean;
+    };
+
+    const existingBus = await db.select().from(buses).where(eq(buses.id, busId)).limit(1);
+    if (!existingBus.length) {
+      return res.status(404).json({ error: "Bus not found" });
+    }
+
+    const bus = existingBus[0];
+    const newNumber = busNumber ? busNumber.trim().toUpperCase() : bus.busNumber;
+
+    // Handle driver name/phone edits directly on the bus form
+    let assignedDriverId = driverId !== undefined ? (driverId || null) : bus.driverId;
+    if (driverName !== undefined) {
+      if (driverName.trim()) {
+        const cleanDName = driverName.trim();
+        const cleanDPhone = driverPhone?.trim() || null;
+        let profId: number | null = null;
+        let targetUserId = assignedDriverId;
+
+        if (targetUserId) {
+          const existingProf = await db.select().from(profiles).where(eq(profiles.userId, targetUserId)).limit(1);
+          if (existingProf.length) {
+            profId = existingProf[0].id;
+            await db.update(profiles).set({
+              name: cleanDName,
+              ...(cleanDPhone !== null ? { phone: cleanDPhone } : {}),
+            }).where(eq(profiles.userId, targetUserId));
+          }
+        }
+
+        if (!profId) {
+          targetUserId = `driver-${Date.now()}`;
+          const newProf = await db.insert(profiles).values({
+            userId: targetUserId,
+            name: cleanDName,
+            email: `${targetUserId}@acims.local`,
+            phone: cleanDPhone,
+            role: "DRIVER",
+          }).returning();
+          profId = newProf[0].id;
+          await db.insert(drivers).values({
+            profileId: profId,
+            assignedBusId: busId,
+          });
+        }
+
+        if (profId) {
+          await db.update(drivers).set({ assignedBusId: busId }).where(eq(drivers.profileId, profId));
+        }
+        assignedDriverId = targetUserId;
+      } else {
+        // Driver cleared
+        if (assignedDriverId) {
+          const prof = await db.select().from(profiles).where(eq(profiles.userId, assignedDriverId)).limit(1);
+          if (prof.length) {
+            await db.update(drivers).set({ assignedBusId: null }).where(eq(drivers.profileId, prof[0].id));
+          }
+        }
+        assignedDriverId = null;
+      }
+    } else if (driverPhone !== undefined && assignedDriverId) {
+      // Just phone updated
+      await db.update(profiles).set({ phone: driverPhone.trim() || null }).where(eq(profiles.userId, assignedDriverId));
+    }
+
+    await db
+      .update(buses)
+      .set({
+        busNumber: newNumber,
+        driverId: assignedDriverId,
+        active: active !== undefined ? active : bus.active,
+      })
+      .where(eq(buses.id, busId));
+
+    if (bus.routeId && routeName) {
+      const cleanRoute = routeName.trim().toUpperCase();
+      await db
+        .update(busRoutes)
+        .set({
+          routeName: `${newNumber} · ${cleanRoute}`,
+        })
+        .where(eq(busRoutes.id, bus.routeId));
+    }
+
+    res.json({
+      id: busId,
+      busNumber: newNumber,
+      driverId: assignedDriverId,
+      active,
+      message: "Bus & route updated successfully",
+    });
+  } catch (err: any) {
+    console.error("[admin/buses-and-routes PATCH]", err);
+    res.status(400).json({ error: err.message || "Failed to update bus and route" });
+  }
+});
+
+router.put("/admin/buses-and-routes/:busId/stops", async (req, res) => {
+  try {
+    const { busId } = req.params;
+    const { stops } = req.body as {
+      stops: Array<{ id?: string; name: string; time?: string; latitude?: number; longitude?: number }>;
+    };
+
+    const existingBus = await db.select().from(buses).where(eq(buses.id, busId)).limit(1);
+    if (!existingBus.length || !existingBus[0].routeId) {
+      return res.status(404).json({ error: "Bus or associated route not found" });
+    }
+
+    const routeId = existingBus[0].routeId;
+    await db.delete(busStops).where(eq(busStops.routeId, routeId));
+
+    for (let i = 0; i < stops.length; i++) {
+      const s = stops[i];
+      await db.insert(busStops).values({
+        id: s.id || `${routeId}-stop-${i + 1}-${Date.now()}`,
+        routeId,
+        stopName: s.name.trim(),
+        latitude: s.latitude ?? 13.0084,
+        longitude: s.longitude ?? 80.0033,
+        sequenceNumber: i + 1,
+      });
+    }
+
+    res.json({ success: true, count: stops.length, message: "Route stops updated successfully" });
+  } catch (err: any) {
+    console.error("[admin/buses-and-routes/:busId/stops]", err);
+    res.status(400).json({ error: err.message || "Failed to update stops" });
+  }
+});
+
+// -------------------------------------------------------------
+// SHIFT ASSIGNMENTS (Bulk checklist & per-bus stop checklist)
+// -------------------------------------------------------------
+router.get("/admin/shift-assignments", async (_req, res) => {
+  try {
+    const { getAllShiftsWithAssignments } = await import("../../../../src/db/shiftManagement.ts");
+    const shifts = await getAllShiftsWithAssignments();
+    res.json(shifts);
+  } catch (err: any) {
+    console.error("[admin/shift-assignments GET]", err);
+    res.status(500).json({ error: "Failed to list shift assignments" });
+  }
+});
+
+router.put("/admin/shift-assignments/:shiftId", async (req, res) => {
+  try {
+    const { shiftId } = req.params;
+    const { busIds } = req.body as { busIds: string[] };
+
+    if (!Array.isArray(busIds)) {
+      return res.status(400).json({ error: "busIds array is required" });
+    }
+
+    const { setShiftAssignedBuses } = await import("../../../../src/db/shiftManagement.ts");
+    await setShiftAssignedBuses(shiftId, busIds);
+
+    res.json({
+      success: true,
+      shiftId,
+      assignedCount: busIds.length,
+      message: "Shift assignment saved.",
+    });
+  } catch (err: any) {
+    console.error("[admin/shift-assignments PUT]", err);
+    res.status(400).json({ error: err.message || "Failed to update shift assignments" });
+  }
+});
+
+router.put("/admin/shift-assignments/:shiftId/bus/:busId/stops", async (req, res) => {
+  try {
+    const { shiftId, busId } = req.params;
+    const { activeStopIds } = req.body as { activeStopIds: string[] };
+
+    if (!Array.isArray(activeStopIds)) {
+      return res.status(400).json({ error: "activeStopIds array is required" });
+    }
+
+    const { updateShiftBusActiveStops } = await import("../../../../src/db/shiftManagement.ts");
+    await updateShiftBusActiveStops(shiftId, busId, activeStopIds);
+
+    res.json({
+      success: true,
+      shiftId,
+      busId,
+      activeStopCount: activeStopIds.length,
+      message: "Stop checklist for shift saved.",
+    });
+  } catch (err: any) {
+    console.error("[admin/shift-assignments/:shiftId/bus/:busId/stops]", err);
+    res.status(400).json({ error: err.message || "Failed to update stop checklist" });
+  }
+});
+
+// -------------------------------------------------------------
+// LIVE BUSES MONITORING (All registered buses on map with real GPS)
+// -------------------------------------------------------------
+router.get("/admin/live-buses", async (_req, res) => {
+  try {
+    const rawBusList = await getDbBuses();
+    const routeList = await getDbRoutes();
+    const busList = rawBusList.filter((b) => !isMtcBusOrRoute(b, routeList.find((r) => r.id === b.routeId)));
+
+    const allStops = await db.select().from(busStops).orderBy(busStops.sequenceNumber);
+    const driverProfiles = await db
+      .select({
+        driverId: drivers.id,
+        userId: profiles.userId,
+        name: profiles.name,
+        phone: profiles.phone,
+        assignedBusId: drivers.assignedBusId,
+      })
+      .from(drivers)
+      .innerJoin(profiles, eq(drivers.profileId, profiles.id));
+
+    const { buildBusTelemetry } = await import("./buses.ts");
+
+    const busesWithGps = await Promise.all(
+      busList.map(async (b) => {
+        const route = routeList.find((r) => r.id === b.routeId);
+        const routeName = route ? route.routeName.replace(/^\d+[A-Z]?\s*·?\s*/i, "").trim() : "CAMPUS";
+        const displayName = `BUS ${b.busNumber} · ${routeName.toUpperCase()}`;
+        const driver = driverProfiles.find((d) => d.userId === b.driverId || d.assignedBusId === b.id);
+
+        let telemetry = null;
+        try {
+          telemetry = await buildBusTelemetry(b.id);
+        } catch {
+          // ignore
+        }
+
+        let status: "LIVE" | "GPS UNAVAILABLE" | "NOT STARTED" | "DELAYED" = "GPS UNAVAILABLE";
+        if (telemetry?.isLive) {
+          status = (telemetry.delayMinutes && telemetry.delayMinutes > 2) ? "DELAYED" : "LIVE";
+        } else if (telemetry?.trackingStatus === "ACTIVE" || telemetry?.trackingStatus === "PAUSED") {
+          status = "NOT STARTED";
+        }
+
+        return {
+          id: b.id,
+          busNumber: b.busNumber,
+          routeId: b.routeId,
+          routeName: routeName.toUpperCase(),
+          displayName,
+          driverName: driver?.name ?? "Driver not assigned",
+          driverPhone: driver?.phone ?? "Phone not available",
+          status,
+          latitude: telemetry?.isLive ? telemetry.latitude : null,
+          longitude: telemetry?.isLive ? telemetry.longitude : null,
+          accuracy: telemetry?.isLive && telemetry.accuracy ? `±${Math.round(telemetry.accuracy)}m` : "Coordinates unavailable",
+          lastUpdate: telemetry?.isLive && telemetry.secondsAgo != null ? `${telemetry.secondsAgo}s ago` : "No telemetry",
+          routeLabel: `${routeName} → REC Campus`,
+          nextStop: telemetry?.nextStop ?? (telemetry?.isLive ? "En route" : "GPS unavailable"),
+          eta: telemetry?.isLive && telemetry.etaMinutes != null ? `${telemetry.etaMinutes} min` : "ETA unavailable",
+          active: b.active,
+        };
+      })
+    );
+
+    // Natural sort by bus number
+    busesWithGps.sort((a, b) => naturalBusSort(a.busNumber, b.busNumber));
+
+    // Map stop markers (only campus stops with valid coordinates)
+    const campusRouteIds = new Set(busList.map((b) => b.routeId));
+    const stopMarkers = allStops
+      .filter((s) => s.latitude != null && s.longitude != null && campusRouteIds.has(s.routeId))
+      .map((s) => {
+        const route = routeList.find((r) => r.id === s.routeId);
+        const bus = busList.find((b) => b.routeId === s.routeId);
+        return {
+          id: s.id,
+          name: s.stopName,
+          busId: bus?.id,
+          busNumber: bus?.busNumber,
+          busDisplayName: bus ? `BUS ${bus.busNumber} · ${(route?.routeName || '').toUpperCase()}` : undefined,
+          routeName: route?.routeName,
+          sequence: s.sequenceNumber,
+          latitude: s.latitude,
+          longitude: s.longitude,
+          time: "Scheduled",
+        };
+      });
+
+    const counters = {
+      total: busesWithGps.length,
+      live: busesWithGps.filter((b) => b.status === "LIVE").length,
+      gpsUnavailable: busesWithGps.filter((b) => b.status === "GPS UNAVAILABLE").length,
+      delayed: busesWithGps.filter((b) => b.status === "DELAYED").length,
+      notStarted: busesWithGps.filter((b) => b.status === "NOT STARTED").length,
+    };
+
+    res.json({
+      buses: busesWithGps,
+      stops: stopMarkers,
+      counters,
+    });
+  } catch (err: any) {
+    console.error("[admin/live-buses]", err);
+    res.status(500).json({ error: "Failed to load live buses" });
+  }
+});
+
+// -------------------------------------------------------------
+// OFFICIAL PICKUP POINTS MANAGEMENT
+// -------------------------------------------------------------
+router.get("/admin/pickup-points", async (req, res) => {
+  try {
+    const routeIdFilter = typeof req.query.routeId === "string" ? req.query.routeId : undefined;
+    const { officialPickupPoints } = await import("../../../../src/db/schema.ts");
+    const { getDbRoutes } = await import("../../../../src/db/services.ts");
+
+    const query = routeIdFilter
+      ? db.select().from(officialPickupPoints).where(eq(officialPickupPoints.routeId, routeIdFilter)).orderBy(officialPickupPoints.sequenceNumber)
+      : db.select().from(officialPickupPoints).orderBy(officialPickupPoints.sequenceNumber);
+
+    const rows = await query;
+    const routes = await getDbRoutes();
+
+    const filteredRows = rows.filter((p) => {
+      const route = routes.find((r) => r.id === p.routeId);
+      return !isMtcBusOrRoute({ routeId: p.routeId }, route);
+    });
+
+    const result = filteredRows.map((p) => {
+      const route = routes.find((r) => r.id === p.routeId);
+      return {
+        id: p.id,
+        routeId: p.routeId,
+        routeName: route?.routeName || p.routeId,
+        stopName: p.stopName,
+        latitude: p.latitude,
+        longitude: p.longitude,
+        sequenceNumber: p.sequenceNumber,
+        scheduledTimeDisplay: p.scheduledTimeDisplay || "Scheduled",
+        source: p.source,
+        active: p.active,
+      };
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error("[admin/pickup-points GET]", err);
+    res.status(500).json({ error: "Failed to load pickup points" });
+  }
+});
+
+router.post("/admin/pickup-points", async (req, res) => {
+  try {
+    const { routeId, stopName, scheduledTimeDisplay, latitude, longitude, sequenceNumber } = req.body;
+    if (!routeId || !stopName?.trim()) {
+      return res.status(400).json({ error: "routeId and stopName are required" });
+    }
+
+    const { officialPickupPoints } = await import("../../../../src/db/schema.ts");
+    const id = `pickup-${routeId}-${Date.now()}`;
+
+    const inserted = await db
+      .insert(officialPickupPoints)
+      .values({
+        id,
+        routeId,
+        stopName: stopName.trim(),
+        scheduledTimeDisplay: scheduledTimeDisplay || null,
+        latitude: latitude != null ? Number(latitude) : null,
+        longitude: longitude != null ? Number(longitude) : null,
+        sequenceNumber: Number(sequenceNumber) || 1,
+        source: "ADMIN",
+        active: true,
+      })
+      .returning();
+
+    res.status(201).json(inserted[0]);
+  } catch (err: any) {
+    console.error("[admin/pickup-points POST]", err);
+    res.status(400).json({ error: err.message || "Failed to create pickup point" });
+  }
+});
+
+router.patch("/admin/pickup-points/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stopName, scheduledTimeDisplay, latitude, longitude, sequenceNumber, active } = req.body;
+    const { officialPickupPoints } = await import("../../../../src/db/schema.ts");
+
+    const updated = await db
+      .update(officialPickupPoints)
+      .set({
+        ...(stopName ? { stopName: stopName.trim() } : {}),
+        ...(scheduledTimeDisplay !== undefined ? { scheduledTimeDisplay } : {}),
+        ...(latitude !== undefined ? { latitude: latitude != null ? Number(latitude) : null } : {}),
+        ...(longitude !== undefined ? { longitude: longitude != null ? Number(longitude) : null } : {}),
+        ...(sequenceNumber !== undefined ? { sequenceNumber: Number(sequenceNumber) } : {}),
+        ...(active !== undefined ? { active } : {}),
+      })
+      .where(eq(officialPickupPoints.id, id))
+      .returning();
+
+    if (!updated.length) return res.status(404).json({ error: "Pickup point not found" });
+    res.json(updated[0]);
+  } catch (err: any) {
+    console.error("[admin/pickup-points PATCH]", err);
+    res.status(400).json({ error: err.message || "Failed to update pickup point" });
+  }
+});
+
+router.delete("/admin/pickup-points/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { officialPickupPoints } = await import("../../../../src/db/schema.ts");
+    await db.delete(officialPickupPoints).where(eq(officialPickupPoints.id, id));
+    res.json({ success: true, id });
+  } catch (err: any) {
+    console.error("[admin/pickup-points DELETE]", err);
+    res.status(500).json({ error: "Failed to delete pickup point" });
   }
 });
 

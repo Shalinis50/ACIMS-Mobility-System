@@ -3,18 +3,71 @@ import { db } from "./index.ts";
 import { shifts, trips } from "./schema.ts";
 import { getDbBusById, getDbRoutes } from "./services.ts";
 
-export const CANONICAL_SHIFT_TYPES = ["MORNING", "EVENING"] as const;
+export const CANONICAL_SHIFT_TYPES = ["MORNING", "EVENING", "REGULAR", "EXAM_ONLY"] as const;
 export type CanonicalShiftType = (typeof CANONICAL_SHIFT_TYPES)[number];
 
-const SHIFT_IDS: Record<CanonicalShiftType, string> = {
-  MORNING: "shift-morning",
-  EVENING: "shift-evening",
-};
-
-const SHIFT_NAMES: Record<CanonicalShiftType, string> = {
-  MORNING: "Morning Shift",
-  EVENING: "Evening Shift",
-};
+export const PRIMARY_SHIFTS = [
+  {
+    id: "shift-morning-630",
+    name: "6:30 AM Shift",
+    shiftType: "REGULAR",
+    startTime: "06:30",
+    endTime: "08:00",
+    direction: "TO_COLLEGE",
+    operatingDays: "MON,TUE,WED,THU,FRI",
+    active: true,
+  },
+  {
+    id: "shift-morning-830",
+    name: "8:30 AM Shift",
+    shiftType: "REGULAR",
+    startTime: "08:30",
+    endTime: "10:00",
+    direction: "TO_COLLEGE",
+    operatingDays: "MON,TUE,WED,THU,FRI",
+    active: true,
+  },
+  {
+    id: "shift-evening-315",
+    name: "3:15 PM Shift",
+    shiftType: "REGULAR",
+    startTime: "15:15",
+    endTime: "17:00",
+    direction: "FROM_COLLEGE",
+    operatingDays: "MON,TUE,WED,THU,FRI",
+    active: true,
+  },
+  {
+    id: "shift-evening-515",
+    name: "5:15 PM Shift",
+    shiftType: "REGULAR",
+    startTime: "17:15",
+    endTime: "19:00",
+    direction: "FROM_COLLEGE",
+    operatingDays: "MON,TUE,WED,THU,FRI",
+    active: true,
+  },
+  {
+    id: "shift-exam-1145",
+    name: "11:45 AM Exam Service",
+    shiftType: "EXAM_ONLY",
+    startTime: "11:45",
+    endTime: "13:30",
+    direction: "FROM_COLLEGE",
+    operatingDays: "MON,TUE,WED,THU,FRI",
+    active: false,
+  },
+  {
+    id: "shift-exam-1200",
+    name: "12:00 PM Exam Service",
+    shiftType: "EXAM_ONLY",
+    startTime: "12:00",
+    endTime: "13:45",
+    direction: "FROM_COLLEGE",
+    operatingDays: "MON,TUE,WED,THU,FRI",
+    active: false,
+  },
+] as const;
 
 export function parseTimeToMinutes(value: string): number | null {
   const trimmed = value?.trim();
@@ -38,19 +91,44 @@ export function timeRangesOverlap(startA: string, endA: string, startB: string, 
 }
 
 export async function ensureCanonicalShiftSlots() {
-  for (const shiftType of CANONICAL_SHIFT_TYPES) {
-    const id = SHIFT_IDS[shiftType];
-    const existing = await db.select().from(shifts).where(eq(shifts.id, id)).limit(1);
-    if (existing.length) continue;
+  for (const s of PRIMARY_SHIFTS) {
+    const existing = await db.select().from(shifts).where(eq(shifts.id, s.id)).limit(1);
+    if (!existing.length) {
+      await db.insert(shifts).values({
+        id: s.id,
+        name: s.name,
+        shiftType: s.shiftType,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        direction: s.direction,
+        operatingDays: s.operatingDays,
+        active: s.active,
+      });
+    }
+  }
 
-    await db.insert(shifts).values({
-      id,
-      name: SHIFT_NAMES[shiftType],
-      shiftType,
-      direction: shiftType === "MORNING" ? "TO_COLLEGE" : "FROM_COLLEGE",
-      operatingDays: "MON,TUE,WED,THU,FRI",
-      active: false,
-    });
+  // Also seed default assignments for 6:30 AM and 3:15 PM if empty
+  const { shiftAssignments: saTable } = await import("./schema.ts");
+  const existingAssignments = await db.select().from(saTable).limit(1);
+  if (existingAssignments.length === 0) {
+    const defaultMorningBuses = ["bus-1", "bus-1b", "bus-1c", "bus-2", "bus-2b", "bus-18"];
+    for (const bId of defaultMorningBuses) {
+      await db.insert(saTable).values({
+        id: `sa-morning-${bId}`,
+        shiftId: "shift-morning-630",
+        busId: bId,
+        active: true,
+      }).onConflictDoNothing();
+    }
+    const defaultEveningBuses = ["bus-1", "bus-1b", "bus-2", "bus-18"];
+    for (const bId of defaultEveningBuses) {
+      await db.insert(saTable).values({
+        id: `sa-evening-${bId}`,
+        shiftId: "shift-evening-315",
+        busId: bId,
+        active: true,
+      }).onConflictDoNothing();
+    }
   }
 }
 
@@ -305,3 +383,83 @@ export function directionLabel(direction: string): string {
   if (direction === "FROM_COLLEGE") return "College → Home";
   return direction;
 }
+
+export async function listShiftAssignmentsForShift(shiftId: string) {
+  const { shiftAssignments: saTable } = await import("./schema.ts");
+  return db.select().from(saTable).where(and(eq(saTable.shiftId, shiftId), eq(saTable.active, true)));
+}
+
+export async function setShiftAssignedBuses(shiftId: string, busIds: string[]) {
+  const { shiftAssignments: saTable } = await import("./schema.ts");
+  // Deactivate existing for this shift
+  await db.update(saTable).set({ active: false }).where(eq(saTable.shiftId, shiftId));
+
+  for (const busId of busIds) {
+    const existing = await db
+      .select()
+      .from(saTable)
+      .where(and(eq(saTable.shiftId, shiftId), eq(saTable.busId, busId)))
+      .limit(1);
+
+    if (existing.length) {
+      await db.update(saTable).set({ active: true }).where(eq(saTable.id, existing[0].id));
+    } else {
+      await db.insert(saTable).values({
+        id: `sa-${shiftId}-${busId}-${Date.now()}`,
+        shiftId,
+        busId,
+        active: true,
+      });
+    }
+  }
+}
+
+export async function updateShiftBusActiveStops(shiftId: string, busId: string, activeStopIds: string[]) {
+  const { shiftAssignments: saTable } = await import("./schema.ts");
+  const existing = await db
+    .select()
+    .from(saTable)
+    .where(and(eq(saTable.shiftId, shiftId), eq(saTable.busId, busId)))
+    .limit(1);
+
+  const serialized = JSON.stringify(activeStopIds);
+  if (existing.length) {
+    await db.update(saTable).set({ activeStopIds: serialized, active: true }).where(eq(saTable.id, existing[0].id));
+  } else {
+    await db.insert(saTable).values({
+      id: `sa-${shiftId}-${busId}-${Date.now()}`,
+      shiftId,
+      busId,
+      activeStopIds: serialized,
+      active: true,
+    });
+  }
+}
+
+export async function getAllShiftsWithAssignments() {
+  await ensureCanonicalShiftSlots();
+  const allShifts = await db.select().from(shifts).orderBy(shifts.startTime);
+  const { shiftAssignments: saTable } = await import("./schema.ts");
+  const allAssignments = await db.select().from(saTable).where(eq(saTable.active, true));
+
+  return allShifts.map((s) => {
+    const assignments = allAssignments.filter((a) => a.shiftId === s.id);
+    return {
+      ...s,
+      displayTime: formatShiftTimeDisplay(s.startTime),
+      directionLabel: directionLabel(s.direction),
+      assignedBusIds: assignments.map((a) => a.busId),
+      busStopsConfig: assignments.reduce<Record<string, string[]>>((acc, a) => {
+        if (a.activeStopIds) {
+          try {
+            acc[a.busId] = JSON.parse(a.activeStopIds);
+          } catch {
+            acc[a.busId] = a.activeStopIds.split(",").filter(Boolean);
+          }
+        }
+        return acc;
+      }, {}),
+    };
+  });
+}
+

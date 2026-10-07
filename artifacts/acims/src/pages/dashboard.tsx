@@ -35,6 +35,7 @@ import {
   saveLastKnownBusSnapshot,
 } from '@/lib/offline-storage';
 import { PersonalizedPublicTransportCard } from '@/components/PersonalizedPublicTransportCard';
+import { StudentLocationRouteSelector } from '@/components/StudentLocationRouteSelector';
 import { useAuth } from '@/lib/auth-context';
 import { studentMobilityHeaders } from '@/lib/mobilityApi';
 
@@ -447,6 +448,14 @@ export default function Dashboard() {
           )}
         </section>
       )}
+
+      {/* STUDENT LOCATION-BASED ROUTE & PICKUP SELECTOR */}
+      <StudentLocationRouteSelector
+        onBusSelected={() => {
+          void queryClient.invalidateQueries();
+          void refreshProfile();
+        }}
+      />
 
       {/* MAIN SELECTED BUS CARD */}
       <section className="overflow-hidden rounded-[28px] bg-primary p-6 text-primary-foreground soft-shadow sm:p-8">
