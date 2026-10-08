@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle,
+  AlertCircle,
   Bell,
-  CheckCircle2,
-  Filter,
+  RefreshCw,
   Send,
   ShieldAlert,
 } from 'lucide-react';
@@ -36,11 +35,14 @@ export function AdminAlerts() {
     queryKey: ['admin', 'safety'],
     queryFn: async () => {
       const res = await mobilityAdminFetch('/admin/safety');
-      if (!res.ok) throw new Error('Failed to load safety alerts');
+      if (!res.ok) throw new Error('Unable to load this information.');
       return (await res.json()) as SafetyReport[];
     },
     refetchInterval: 10000,
   });
+
+  const isLoading = query.isLoading && !query.data;
+  const isError = query.isError && !query.data;
 
   const reports = query.data ?? [];
   const filteredReports = reports.filter((r) => {
@@ -88,18 +90,58 @@ export function AdminAlerts() {
     }
   };
 
+  // ERROR STATE
+  if (isError) {
+    return (
+      <div className="rounded-[28px] border border-destructive/30 bg-destructive/5 p-8 text-center space-y-4">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+          <AlertCircle size={24} />
+        </div>
+        <div>
+          <h3 className="text-base font-extrabold text-foreground">
+            Unable to load this information.
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Could not retrieve safety alerts from the server.
+          </p>
+        </div>
+        <div>
+          <button
+            type="button"
+            onClick={() => void query.refetch()}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-95"
+          >
+            <RefreshCw size={13} /> Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // LOADING STATE
+  if (isLoading) {
+    return (
+      <div className="rounded-[28px] border border-border bg-card p-12 text-center space-y-3">
+        <div className="inline-flex items-center gap-2 text-xs font-bold text-muted-foreground">
+          <RefreshCw size={16} className="animate-spin text-primary" />
+          Loading alerts...
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in">
       {/* Header */}
       <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
         <div className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          Campus Safety & Notifications
+          Live Operations
         </div>
         <h2 className="mt-1 text-2xl font-extrabold text-foreground">
           Alerts
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Real-time incident reports submitted by students and operational broadcast center.
+          Real-time incident reports submitted by students and operational broadcast transmission.
         </p>
       </div>
 
@@ -120,7 +162,7 @@ export function AdminAlerts() {
         <div className="grid gap-3 sm:grid-cols-2">
           <input
             type="text"
-            placeholder="Alert title (e.g. Weather Delay / Route 18 Diverted)"
+            placeholder="Alert title (e.g. Route 18 Diverted via Poonamallee Bypass)"
             value={broadcastTitle}
             onChange={(e) => setBroadcastTitle(e.target.value)}
             className="admin-input rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
@@ -153,7 +195,7 @@ export function AdminAlerts() {
               Student Incident Reports
             </h3>
             <span className="text-xs text-muted-foreground">
-              {filteredReports.length} reports in current view
+              {filteredReports.length} reports in view
             </span>
           </div>
 
@@ -175,8 +217,8 @@ export function AdminAlerts() {
 
         <div className="space-y-3">
           {filteredReports.length === 0 ? (
-            <div className="py-8 text-center text-xs text-muted-foreground">
-              No reports under this status filter.
+            <div className="py-12 text-center text-xs text-muted-foreground">
+              No safety alerts recorded.
             </div>
           ) : (
             filteredReports.map((report) => (

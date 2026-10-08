@@ -14,31 +14,39 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export async function startServer() {
-  const { bootstrapAppTables, ensureBaselineFleetData } = await import("./src/db/bootstrapAppTables.ts");
-  await bootstrapAppTables();
-  const { bootstrapCoreTables } = await import("./src/db/bootstrapCoreTables.ts");
-  await bootstrapCoreTables();
-  const { migrateMobilitySchemaColumns } = await import("./src/db/bootstrapAppTables.ts");
-  await migrateMobilitySchemaColumns();
-  await ensureBaselineFleetData();
-  const { seedInitialDemoRoutes } = await import("./src/db/initialDemoRoutes.ts");
-  await seedInitialDemoRoutes();
-  const { ensureCanonicalShiftSlots } = await import("./src/db/shiftManagement.ts");
-  await ensureCanonicalShiftSlots();
-  const { ensureOfficialPickupPointsFromRoutes } = await import("./src/db/ensureMobilityPickups.ts");
-  await ensureOfficialPickupPointsFromRoutes();
-  try {
-    const { seedDatabase } = await import("./src/db/seed.ts");
-    await seedDatabase();
-  } catch (err) {
-    console.warn("Baseline seed skipped:", err);
+  if (process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = process.env.DATABASE_URL.replace(/^["']|["']$/g, "").trim();
   }
 
-  const { ensureMtcSchema, purgeLegacyDummyMtcFromTransitDb } = await import(
-    "./artifacts/api-server/src/services/mtc/mtcService.ts"
-  );
-  ensureMtcSchema();
-  purgeLegacyDummyMtcFromTransitDb();
+  try {
+    const { bootstrapAppTables, ensureBaselineFleetData } = await import("./src/db/bootstrapAppTables.ts");
+    await bootstrapAppTables();
+    const { bootstrapCoreTables } = await import("./src/db/bootstrapCoreTables.ts");
+    await bootstrapCoreTables();
+    const { migrateMobilitySchemaColumns } = await import("./src/db/bootstrapAppTables.ts");
+    await migrateMobilitySchemaColumns();
+    await ensureBaselineFleetData();
+    const { seedInitialDemoRoutes } = await import("./src/db/initialDemoRoutes.ts");
+    await seedInitialDemoRoutes();
+    const { ensureCanonicalShiftSlots } = await import("./src/db/shiftManagement.ts");
+    await ensureCanonicalShiftSlots();
+    const { ensureOfficialPickupPointsFromRoutes } = await import("./src/db/ensureMobilityPickups.ts");
+    await ensureOfficialPickupPointsFromRoutes();
+    try {
+      const { seedDatabase } = await import("./src/db/seed.ts");
+      await seedDatabase();
+    } catch (err) {
+      console.warn("Baseline seed skipped:", err);
+    }
+
+    const { ensureMtcSchema, purgeLegacyDummyMtcFromTransitDb } = await import(
+      "./artifacts/api-server/src/services/mtc/mtcService.ts"
+    );
+    ensureMtcSchema();
+    purgeLegacyDummyMtcFromTransitDb();
+  } catch (dbErr) {
+    console.error("[Database Bootstrap Warning]:", dbErr);
+  }
 
   const app = express();
   const port = Number(process.env.PORT) || 3000;
@@ -49,8 +57,7 @@ export async function startServer() {
     path.resolve(__dirname, "dist"),
   ];
   const distPath = candidatePaths.find((p) => fs.existsSync(path.join(p, "index.html")));
-  const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION);
-  const isProd = (process.env.NODE_ENV === "production" || isCloudRun) && Boolean(distPath);
+  const isProd = process.env.NODE_ENV === "production" && Boolean(distPath);
 
   app.use(cors());
   app.use(express.json());

@@ -3,8 +3,8 @@ import { db } from "../../../../../src/db/index.ts";
 import { busRoutes, buses, busStops, drivers, recTransportRoutes, students } from "../../../../../src/db/schema.ts";
 import { recBusId, recRouteId } from "./recTransportParser.ts";
 
-export const DUMMY_ROUTE_IDS = ["route-bus-12", "route-bus-18", "route-bus-4b", "route-bus-7", "route-bus-21"] as const;
-export const DUMMY_BUS_IDS = ["bus-12", "bus-18", "bus-4b", "bus-7", "bus-21"] as const;
+export const DUMMY_ROUTE_IDS = ["route-bus-12", "route-bus-4b", "route-bus-7", "route-bus-21"] as const;
+export const DUMMY_BUS_IDS = ["bus-12", "bus-4b", "bus-7", "bus-21"] as const;
 export const DUMMY_PICKUP_IDS = ["vandalur", "perungalathur", "tambaram", "college", "chromepet", "quad"] as const;
 
 export type CollegeRouteRow = {

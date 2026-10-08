@@ -16,15 +16,24 @@ declare global {
 export let pool: pg.Pool | null = null;
 export let pgliteClient: PGlite | null = null;
 
+function cleanDatabaseUrl(): string | undefined {
+  if (!process.env.DATABASE_URL) return undefined;
+  const cleaned = process.env.DATABASE_URL.replace(/^["']|["']$/g, "").trim();
+  process.env.DATABASE_URL = cleaned;
+  return cleaned;
+}
+
 function useEmbeddedDb(): boolean {
-  return !process.env.DATABASE_URL && !process.env.SQL_HOST;
+  const url = cleanDatabaseUrl();
+  return !url && !process.env.SQL_HOST;
 }
 
 function createPool(): pg.Pool {
-  if (process.env.DATABASE_URL) {
+  const url = cleanDatabaseUrl();
+  if (url) {
     return new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL.includes("localhost") ? false : { rejectUnauthorized: false },
+      connectionString: url,
+      ssl: url.includes("localhost") ? false : { rejectUnauthorized: false },
     });
   }
   return new Pool({

@@ -1,21 +1,27 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
 import {
+  AlertCircle,
   ArrowDown,
   ArrowLeft,
   ArrowUp,
   BusFront,
   Clock,
-  Compass,
   Edit2,
   MapPin,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   X,
 } from 'lucide-react';
 import { mobilityAdminFetch } from '@/lib/mobilityApi';
 import { naturalBusSort } from '@/lib/naturalSort';
+import 'leaflet/dist/leaflet.css';
+
+const CHENNAI_CENTER: [number, number] = [13.0489, 80.12];
 
 export type BusStopItem = {
   id: string;
@@ -24,6 +30,7 @@ export type BusStopItem = {
   latitude?: number | null;
   longitude?: number | null;
   sequence: number;
+  active?: boolean;
 };
 
 export type BusWithStops = {
@@ -36,167 +43,454 @@ export type BusWithStops = {
   driverPhone?: string | null;
   stopCount: number;
   stops: BusStopItem[];
+  active: boolean;
 };
+
+function createNumberedStopIcon(seq: number) {
+  return L.divIcon({
+    className: 'custom-pickup-marker',
+    html: `<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;background:#0284c7;border:2px solid white;border-radius:50%;color:white;font-size:11px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,0.3);">${seq}</div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
+}
+
+function MapViewUpdater({ center, zoom }: { center: [number, number]; zoom: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, zoom, { animate: true });
+  }, [center, zoom, map]);
+  return null;
+}
 
 export function AdminPickupPoints() {
   const queryClient = useQueryClient();
+  const [viewTab, setViewTab] = useState<'BUS_STOPS' | 'COMMON_POINTS'>('BUS_STOPS');
   const [busSearch, setBusSearch] = useState('');
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
-  const [stopSearch, setStopSearch] = useState('');
+  const [showAllStops, setShowAllStops] = useState(false);
 
-  // Modals
-  const [showAddStopModal, setShowAddStopModal] = useState(false);
-  const [editingStop, setEditingStop] = useState<BusStopItem | null>(null);
+  // Common Pickup Points modals
+  const [commonSearch, setCommonSearch] = useState('');
+  const [showAddCommonModal, setShowAddCommonModal] = useState(false);
+  const [newCommonName, setNewCommonName] = useState('');
+  const [newCommonTime, setNewCommonTime] = useState('');
+  const [newCommonSelectedBuses, setNewCommonSelectedBuses] = useState<Set<string>>(new Set());
 
-  // Form fields for Add / Edit Stop
-  const [stopName, setStopName] = useState('');
-  const [stopTime, setStopTime] = useState('');
-  const [stopLat, setStopLat] = useState('');
-  const [stopLng, setStopLng] = useState('');
+  // Edit / Assign Buses for Common Point
+  const [editingCommonPoint, setEditingCommonPoint] = useState<{
+    originalName: string;
+    currentName: string;
+    assignedBusIds: Set<string>;
+    defaultTime: string;
+  } | null>(null);
+
+  // Edit stops modal
+  const [editingBus, setEditingBus] = useState<BusWithStops | null>(null);
+  const [editableStops, setEditableStops] = useState<Array<BusStopItem & { active: boolean }>>([]);
+  const [newStopName, setNewStopName] = useState('');
+  const [newStopTime, setNewStopTime] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  // Load all campus buses with their stops
   const busesQuery = useQuery({
     queryKey: ['admin', 'buses-and-routes'],
     queryFn: async () => {
       const res = await mobilityAdminFetch('/admin/buses-and-routes');
-      if (!res.ok) throw new Error('Failed to load buses');
+      if (!res.ok) throw new Error('Unable to load this information.');
       return (await res.json()) as BusWithStops[];
     },
   });
 
+  const isLoading = busesQuery.isLoading && !busesQuery.data;
+  const isError = busesQuery.isError && !busesQuery.data;
+
   const rawBuses = busesQuery.data ?? [];
 
-  // Exclude MTC and sort naturally by bus number (1, 1B, 1C, 2, 2B, 2C, 3, 3B, 3C, 4, 18...)
+  // Filter out MTC and sort naturally by bus number
   const buses = useMemo(() => {
     return rawBuses
       .filter((b) => !b.busNumber.toUpperCase().includes('MTC') && !b.displayName.toUpperCase().includes('MTC'))
       .sort((a, b) => naturalBusSort(a.busNumber, b.busNumber));
   }, [rawBuses]);
 
-  // Selected bus
   const selectedBus = useMemo(() => {
     if (!selectedBusId) return null;
     return buses.find((b) => b.id === selectedBusId) ?? null;
   }, [buses, selectedBusId]);
 
-  // Filtered bus list
   const filteredBuses = useMemo(() => {
     if (!busSearch.trim()) return buses;
     const q = busSearch.toLowerCase();
     return buses.filter(
       (b) =>
-        b.displayName.toLowerCase().includes(q) ||
         b.busNumber.toLowerCase().includes(q) ||
-        b.routeName.toLowerCase().includes(q)
+        b.routeName.toLowerCase().includes(q) ||
+        b.displayName.toLowerCase().includes(q)
     );
   }, [buses, busSearch]);
 
-  // Filtered stops inside the selected bus
-  const filteredStops = useMemo(() => {
-    if (!selectedBus) return [];
-    if (!stopSearch.trim()) return selectedBus.stops;
-    const q = stopSearch.toLowerCase();
-    return selectedBus.stops.filter((s) => s.name.toLowerCase().includes(q));
-  }, [selectedBus, stopSearch]);
+  // Stops to show on the map:
+  // Under Section 13: By default, ONLY show selected bus's stops. If none selected, show empty or all only if toggled.
+  const mapStops = useMemo(() => {
+    if (showAllStops) {
+      const all: Array<BusStopItem & { busDisplayName?: string }> = [];
+      for (const b of buses) {
+        for (const s of b.stops) {
+          if (s.latitude != null && s.longitude != null) {
+            all.push({ ...s, busDisplayName: b.displayName });
+          }
+        }
+      }
+      return all;
+    }
+    if (selectedBus) {
+      return selectedBus.stops
+        .filter((s) => s.latitude != null && s.longitude != null)
+        .map((s) => ({ ...s, busDisplayName: selectedBus.displayName }));
+    }
+    return [];
+  }, [selectedBus, showAllStops, buses]);
 
-  // Save full stops array to backend for current bus
-  const saveStopsForBus = async (busId: string, updatedStops: BusStopItem[]) => {
+  const { mapCenter, mapZoom } = useMemo(() => {
+    if (selectedBus && selectedBus.stops.length > 0) {
+      const withCoords = selectedBus.stops.find((s) => s.latitude != null && s.longitude != null);
+      if (withCoords && withCoords.latitude != null && withCoords.longitude != null) {
+        return { mapCenter: [withCoords.latitude, withCoords.longitude] as [number, number], mapZoom: 12 };
+      }
+    }
+    return { mapCenter: CHENNAI_CENTER, mapZoom: 11 };
+  }, [selectedBus]);
+
+  // Aggregated Common Campus Pickup Points across all REC buses (Section 9)
+  const commonPickupPoints = useMemo(() => {
+    const pointMap = new Map<
+      string,
+      {
+        displayName: string;
+        servedBuses: Array<{
+          busId: string;
+          busNumber: string;
+          routeName: string;
+          time?: string;
+        }>;
+      }
+    >();
+
+    for (const b of buses) {
+      for (const s of b.stops) {
+        const key = s.name.trim().toUpperCase();
+        if (!key) continue;
+        if (!pointMap.has(key)) {
+          pointMap.set(key, {
+            displayName: s.name.trim(),
+            servedBuses: [],
+          });
+        }
+        const entry = pointMap.get(key)!;
+        if (!entry.servedBuses.some((sb) => sb.busId === b.id)) {
+          entry.servedBuses.push({
+            busId: b.id,
+            busNumber: b.busNumber,
+            routeName: b.routeName,
+            time: s.time,
+          });
+        }
+      }
+    }
+
+    const list = Array.from(pointMap.entries()).map(([key, data]) => ({
+      key,
+      name: data.displayName,
+      servedBuses: data.servedBuses.sort((a, b) => naturalBusSort(a.busNumber, b.busNumber)),
+    }));
+
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [buses]);
+
+  const filteredCommonPoints = useMemo(() => {
+    if (!commonSearch.trim()) return commonPickupPoints;
+    const q = commonSearch.toLowerCase();
+    return commonPickupPoints.filter(
+      (cp) =>
+        cp.name.toLowerCase().includes(q) ||
+        cp.servedBuses.some((sb) => sb.busNumber.toLowerCase().includes(q) || sb.routeName.toLowerCase().includes(q))
+    );
+  }, [commonPickupPoints, commonSearch]);
+
+  // Add common pickup point to selected buses
+  const handleCreateCommonPoint = async () => {
+    if (!newCommonName.trim() || newCommonSelectedBuses.size === 0) return;
     setSaving(true);
     try {
-      const res = await mobilityAdminFetch(`/admin/buses-and-routes/${busId}/stops`, {
+      const cleanName = newCommonName.trim();
+      const timeVal = newCommonTime.trim() || 'Scheduled';
+
+      for (const busId of Array.from(newCommonSelectedBuses)) {
+        const targetBus = buses.find((b) => b.id === busId);
+        if (!targetBus) continue;
+        const exists = targetBus.stops.some((s) => s.name.trim().toUpperCase() === cleanName.toUpperCase());
+        if (exists) continue;
+
+        const nextStops = [
+          ...targetBus.stops,
+          {
+            id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            name: cleanName,
+            time: timeVal,
+            sequence: targetBus.stops.length + 1,
+            active: true,
+          },
+        ];
+
+        await mobilityAdminFetch(`/admin/buses-and-routes/${busId}/stops`, {
+          method: 'PUT',
+          body: JSON.stringify({ stops: nextStops }),
+        });
+      }
+
+      setToast(`Pickup point "${cleanName}" added and assigned to buses.`);
+      setShowAddCommonModal(false);
+      setNewCommonName('');
+      setNewCommonTime('');
+      setNewCommonSelectedBuses(new Set());
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'buses-and-routes'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'live-buses'] });
+    } catch {
+      setToast('Failed to create pickup point.');
+    } finally {
+      setSaving(false);
+      setTimeout(() => setToast(null), 3500);
+    }
+  };
+
+  // Save edit / assign buses for common pickup point
+  const handleSaveEditCommonPoint = async () => {
+    if (!editingCommonPoint) return;
+    setSaving(true);
+    try {
+      const { originalName, currentName, assignedBusIds, defaultTime } = editingCommonPoint;
+      const cleanOrig = originalName.trim().toUpperCase();
+      const cleanNew = currentName.trim();
+
+      for (const b of buses) {
+        const hasOriginal = b.stops.some((s) => s.name.trim().toUpperCase() === cleanOrig);
+        const shouldHave = assignedBusIds.has(b.id);
+
+        if (hasOriginal && !shouldHave) {
+          // Remove stop from bus
+          const updatedStops = b.stops.filter((s) => s.name.trim().toUpperCase() !== cleanOrig);
+          await mobilityAdminFetch(`/admin/buses-and-routes/${b.id}/stops`, {
+            method: 'PUT',
+            body: JSON.stringify({ stops: updatedStops }),
+          });
+        } else if (hasOriginal && shouldHave) {
+          // Rename stop if name changed
+          if (cleanOrig !== cleanNew.toUpperCase()) {
+            const updatedStops = b.stops.map((s) =>
+              s.name.trim().toUpperCase() === cleanOrig ? { ...s, name: cleanNew } : s
+            );
+            await mobilityAdminFetch(`/admin/buses-and-routes/${b.id}/stops`, {
+              method: 'PUT',
+              body: JSON.stringify({ stops: updatedStops }),
+            });
+          }
+        } else if (!hasOriginal && shouldHave) {
+          // Add stop to bus
+          const updatedStops = [
+            ...b.stops,
+            {
+              id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              name: cleanNew,
+              time: defaultTime || 'Scheduled',
+              sequence: b.stops.length + 1,
+            },
+          ];
+          await mobilityAdminFetch(`/admin/buses-and-routes/${b.id}/stops`, {
+            method: 'PUT',
+            body: JSON.stringify({ stops: updatedStops }),
+          });
+        }
+      }
+
+      setToast(`Updated pickup point "${cleanNew}".`);
+      setEditingCommonPoint(null);
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'buses-and-routes'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'live-buses'] });
+    } catch {
+      setToast('Failed to update pickup point.');
+    } finally {
+      setSaving(false);
+      setTimeout(() => setToast(null), 3500);
+    }
+  };
+
+  // Delete common pickup point from all buses
+  const handleDeleteCommonPoint = async (pointName: string) => {
+    if (!confirm(`Are you sure you want to remove pickup point "${pointName}" from all campus buses?`)) return;
+    setSaving(true);
+    try {
+      const cleanTarget = pointName.trim().toUpperCase();
+      for (const b of buses) {
+        if (b.stops.some((s) => s.name.trim().toUpperCase() === cleanTarget)) {
+          const updatedStops = b.stops.filter((s) => s.name.trim().toUpperCase() !== cleanTarget);
+          await mobilityAdminFetch(`/admin/buses-and-routes/${b.id}/stops`, {
+            method: 'PUT',
+            body: JSON.stringify({ stops: updatedStops }),
+          });
+        }
+      }
+      setToast(`Removed pickup point "${pointName}".`);
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'buses-and-routes'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'live-buses'] });
+    } catch {
+      setToast('Failed to delete pickup point.');
+    } finally {
+      setSaving(false);
+      setTimeout(() => setToast(null), 3500);
+    }
+  };
+
+  // Handle Edit Stops Modal
+  const handleOpenEditStops = (bus: BusWithStops) => {
+    setEditingBus(bus);
+    setEditableStops(
+      bus.stops.map((s, idx) => ({
+        id: s.id,
+        name: s.name,
+        time: s.time || 'Scheduled',
+        latitude: s.latitude,
+        longitude: s.longitude,
+        sequence: idx + 1,
+        active: s.active !== false,
+      }))
+    );
+    setNewStopName('');
+    setNewStopTime('');
+  };
+
+  const toggleStopActive = (idx: number) => {
+    setEditableStops((prev) =>
+      prev.map((s, i) => (i === idx ? { ...s, active: !s.active } : s))
+    );
+  };
+
+  const handleMoveStop = (idx: number, dir: 'UP' | 'DOWN') => {
+    const nextList = [...editableStops];
+    const targetIdx = dir === 'UP' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= nextList.length) return;
+    const temp = nextList[idx];
+    nextList[idx] = nextList[targetIdx];
+    nextList[targetIdx] = temp;
+    nextList.forEach((s, i) => (s.sequence = i + 1));
+    setEditableStops(nextList);
+  };
+
+  const handleRemoveStop = (idx: number) => {
+    const nextList = editableStops.filter((_, i) => i !== idx);
+    nextList.forEach((s, i) => (s.sequence = i + 1));
+    setEditableStops(nextList);
+  };
+
+  const handleAddStop = () => {
+    if (!newStopName.trim()) return;
+    setEditableStops((prev) => [
+      ...prev,
+      {
+        id: `stop-${Date.now()}`,
+        name: newStopName.trim(),
+        time: newStopTime.trim() || 'Scheduled',
+        sequence: prev.length + 1,
+        active: true,
+      },
+    ]);
+    setNewStopName('');
+    setNewStopTime('');
+  };
+
+  const handleUpdateStopDetail = (idx: number, field: 'name' | 'time', val: string) => {
+    setEditableStops((prev) =>
+      prev.map((s, i) => (i === idx ? { ...s, [field]: val } : s))
+    );
+  };
+
+  const handleSaveStops = async () => {
+    if (!editingBus) return;
+    setSaving(true);
+    try {
+      const stopsToSave = editableStops
+        .filter((s) => s.active)
+        .map((s, idx) => ({
+          id: s.id,
+          name: s.name.trim(),
+          time: s.time?.trim() || 'Scheduled',
+          latitude: s.latitude,
+          longitude: s.longitude,
+          sequence: idx + 1,
+        }));
+
+      const res = await mobilityAdminFetch(`/admin/buses-and-routes/${editingBus.id}/stops`, {
         method: 'PUT',
-        body: JSON.stringify({
-          stops: updatedStops.map((s, idx) => ({
-            id: s.id,
-            name: s.name,
-            time: s.time || 'Scheduled',
-            latitude: s.latitude,
-            longitude: s.longitude,
-            sequence: idx + 1,
-          })),
-        }),
+        body: JSON.stringify({ stops: stopsToSave }),
       });
+
       if (res.ok) {
-        setToast('Stops updated successfully.');
+        setToast(`Pickup points saved for BUS ${editingBus.busNumber} · ${editingBus.routeName}.`);
+        setEditingBus(null);
         void queryClient.invalidateQueries({ queryKey: ['admin', 'buses-and-routes'] });
         void queryClient.invalidateQueries({ queryKey: ['admin', 'live-buses'] });
       }
     } catch {
-      setToast('Failed to save stops');
+      setToast('Failed to save pickup points.');
     } finally {
       setSaving(false);
-      setTimeout(() => setToast(null), 3000);
+      setTimeout(() => setToast(null), 3500);
     }
   };
 
-  // Reorder Stop Up / Down
-  const handleMoveStop = async (index: number, direction: 'UP' | 'DOWN') => {
-    if (!selectedBus) return;
-    const currentList = [...selectedBus.stops];
-    const targetIdx = direction === 'UP' ? index - 1 : index + 1;
-    if (targetIdx < 0 || targetIdx >= currentList.length) return;
+  // ERROR STATE
+  if (isError) {
+    return (
+      <div className="rounded-[28px] border border-destructive/30 bg-destructive/5 p-8 text-center space-y-4">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+          <AlertCircle size={24} />
+        </div>
+        <div>
+          <h3 className="text-base font-extrabold text-foreground">
+            Unable to load this information.
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Could not retrieve pickup points data from the database.
+          </p>
+        </div>
+        <div>
+          <button
+            type="button"
+            onClick={() => void busesQuery.refetch()}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-95"
+          >
+            <RefreshCw size={13} /> Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-    const temp = currentList[index];
-    currentList[index] = currentList[targetIdx];
-    currentList[targetIdx] = temp;
-
-    currentList.forEach((s, idx) => (s.sequence = idx + 1));
-    await saveStopsForBus(selectedBus.id, currentList);
-  };
-
-  // Remove Stop
-  const handleRemoveStop = async (stopId: string) => {
-    if (!selectedBus) return;
-    if (!confirm('Are you sure you want to remove this stop from the bus?')) return;
-    const currentList = selectedBus.stops.filter((s) => s.id !== stopId);
-    currentList.forEach((s, idx) => (s.sequence = idx + 1));
-    await saveStopsForBus(selectedBus.id, currentList);
-  };
-
-  // Add Stop
-  const handleAddStop = async () => {
-    if (!selectedBus || !stopName.trim()) return;
-    const newStop: BusStopItem = {
-      id: `${selectedBus.routeId}-stop-${Date.now()}`,
-      name: stopName.trim(),
-      time: stopTime.trim() || 'Scheduled',
-      latitude: stopLat ? parseFloat(stopLat) : 13.0084,
-      longitude: stopLng ? parseFloat(stopLng) : 80.0033,
-      sequence: selectedBus.stops.length + 1,
-    };
-    const nextList = [...selectedBus.stops, newStop];
-    await saveStopsForBus(selectedBus.id, nextList);
-    setShowAddStopModal(false);
-    setStopName('');
-    setStopTime('');
-    setStopLat('');
-    setStopLng('');
-  };
-
-  // Edit Stop
-  const handleSaveEditStop = async () => {
-    if (!selectedBus || !editingStop || !stopName.trim()) return;
-    const nextList = selectedBus.stops.map((s) => {
-      if (s.id === editingStop.id) {
-        return {
-          ...s,
-          name: stopName.trim(),
-          time: stopTime.trim() || s.time || 'Scheduled',
-          latitude: stopLat ? parseFloat(stopLat) : s.latitude,
-          longitude: stopLng ? parseFloat(stopLng) : s.longitude,
-        };
-      }
-      return s;
-    });
-    await saveStopsForBus(selectedBus.id, nextList);
-    setEditingStop(null);
-  };
+  // LOADING STATE
+  if (isLoading) {
+    return (
+      <div className="rounded-[28px] border border-border bg-card p-12 text-center space-y-3">
+        <div className="inline-flex items-center gap-2 text-xs font-bold text-muted-foreground">
+          <RefreshCw size={16} className="animate-spin text-primary" />
+          Loading pickup points...
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in">
       {/* Header */}
       <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -205,29 +499,36 @@ export function AdminPickupPoints() {
               Official Boarding Stations
             </div>
             <h2 className="mt-1 text-2xl font-extrabold text-foreground">
-              Pickup Points
+              {selectedBus ? `BUS ${selectedBus.busNumber} · ${selectedBus.routeName} Pickup Points` : 'Pickup Points'}
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Boarding points grouped naturally by campus bus. Click any bus to inspect and manage its scheduled stops.
+              {selectedBus
+                ? 'Showing map pickup points and configured stop list for this bus line.'
+                : 'Pickup points grouped by campus bus. Click any bus to inspect its stops on the map and edit stop configuration.'}
             </p>
           </div>
 
-          {selectedBus && (
+          <div className="flex items-center gap-2">
+            {selectedBus && (
+              <button
+                type="button"
+                onClick={() => setSelectedBusId(null)}
+                className="inline-flex items-center gap-1 rounded-xl border border-border bg-background px-3 py-2 text-xs font-bold hover:bg-muted"
+              >
+                <ArrowLeft size={13} /> All Buses
+              </button>
+            )}
+
             <button
               type="button"
-              onClick={() => {
-                setStopName('');
-                setStopTime('');
-                setStopLat('');
-                setStopLng('');
-                setShowAddStopModal(true);
-              }}
-              data-testid="button-add-stop"
-              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm hover:opacity-95"
+              onClick={() => setShowAllStops(!showAllStops)}
+              className={`rounded-xl border px-3 py-2 text-xs font-bold transition ${
+                showAllStops ? 'border-sky-500 bg-sky-500/10 text-sky-700 dark:text-sky-300' : 'border-border bg-card text-muted-foreground hover:bg-muted'
+              }`}
             >
-              <Plus size={15} /> Add Stop
+              {showAllStops ? '✓ All stops on map' : 'Show all stops'}
             </button>
-          )}
+          </div>
         </div>
       </div>
 
@@ -237,211 +538,488 @@ export function AdminPickupPoints() {
         </div>
       )}
 
-      {/* VIEW 1: BUS LIST (DEFAULT VIEW) */}
-      {!selectedBus ? (
-        <div className="space-y-4">
-          {/* Search Buses */}
+      {/* Segmented Control: Grouped by Bus (Section 12/13) vs Common Pickup Points (Section 9) */}
+      {!selectedBus && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+          <div className="flex rounded-xl border border-border bg-muted/40 p-1 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => setViewTab('BUS_STOPS')}
+              data-testid="tab-grouped-by-bus"
+              className={`rounded-lg px-3.5 py-1.5 transition ${
+                viewTab === 'BUS_STOPS'
+                  ? 'bg-card text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Grouped by Bus
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewTab('COMMON_POINTS')}
+              data-testid="tab-common-pickup-points"
+              className={`rounded-lg px-3.5 py-1.5 transition ${
+                viewTab === 'COMMON_POINTS'
+                  ? 'bg-card text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Common Pickup Points ({commonPickupPoints.length})
+            </button>
+          </div>
+
+          {viewTab === 'COMMON_POINTS' && (
+            <button
+              type="button"
+              onClick={() => {
+                setNewCommonName('');
+                setNewCommonTime('');
+                setNewCommonSelectedBuses(new Set());
+                setShowAddCommonModal(true);
+              }}
+              data-testid="button-add-pickup-point"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-extrabold text-primary-foreground shadow-xs hover:opacity-95"
+            >
+              <Plus size={14} /> Add Pickup Point
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* VIEW: COMMON PICKUP POINTS (Section 9: AVADI, ENNORE, KOYAMBEDU, TAMBARAM, POONAMALLEE, REDHILLS) */}
+      {!selectedBus && viewTab === 'COMMON_POINTS' && (
+        <div className="space-y-4 animate-in fade-in">
           <div className="relative max-w-md">
             <Search size={15} className="absolute left-3.5 top-3 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search bus number or route (e.g. 18 or Avadi)..."
+              placeholder="Search pickup point or bus (e.g. Poonamallee or Avadi)..."
+              value={commonSearch}
+              onChange={(e) => setCommonSearch(e.target.value)}
+              className="admin-input h-10 w-full rounded-xl border border-border bg-background pl-10 pr-4 text-xs font-semibold"
+            />
+          </div>
+
+          {filteredCommonPoints.length === 0 ? (
+            <div className="rounded-2xl border border-border bg-card p-12 text-center text-xs text-muted-foreground">
+              No pickup points found. Click "+ Add Pickup Point" to create one.
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredCommonPoints.map((point) => (
+                <div
+                  key={point.key}
+                  data-testid={`card-common-point-${point.key}`}
+                  className="rounded-[24px] border border-border bg-card p-5 flex flex-col justify-between transition hover:border-primary/40 shadow-xs"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                          <MapPin size={16} />
+                        </span>
+                        <div>
+                          <h3 className="display-font text-base font-extrabold text-foreground">
+                            {point.name}
+                          </h3>
+                          <span className="text-[11px] font-bold text-muted-foreground">
+                            Served by {point.servedBuses.length} {point.servedBuses.length === 1 ? 'bus' : 'buses'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SERVED BY BUSES (Section 9 Example: POONAMALLEE -> BUS 18, BUS 4) */}
+                    <div className="mt-4 rounded-2xl bg-muted/30 p-3 space-y-1.5 text-xs">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">
+                        Served by Buses
+                      </span>
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {point.servedBuses.map((sb) => (
+                          <span
+                            key={sb.busId}
+                            className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-extrabold text-foreground"
+                          >
+                            <BusFront size={11} className="text-primary" />
+                            BUS {sb.busNumber}
+                            {sb.time && <span className="text-[10px] text-muted-foreground">({sb.time})</span>}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions: Assign Buses, Edit, Delete */}
+                  <div className="mt-5 pt-3 border-t border-border/50 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingCommonPoint({
+                          originalName: point.name,
+                          currentName: point.name,
+                          assignedBusIds: new Set(point.servedBuses.map((b) => b.busId)),
+                          defaultTime: point.servedBuses[0]?.time || '7:00 AM',
+                        })
+                      }
+                      data-testid={`button-assign-buses-${point.key}`}
+                      className="rounded-xl border border-border bg-muted/40 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-muted"
+                    >
+                      <Edit2 size={12} className="inline mr-1" /> Edit / Assign
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCommonPoint(point.name)}
+                      data-testid={`button-delete-point-${point.key}`}
+                      className="rounded-xl p-2 text-destructive hover:bg-destructive/10"
+                      title="Delete pickup point"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW 1: BUS LIST (DEFAULT VIEW) - Grouped by Bus (Section 12) */}
+      {!selectedBus && viewTab === 'BUS_STOPS' && (
+        <div className="space-y-4">
+          <div className="relative max-w-md">
+            <Search size={15} className="absolute left-3.5 top-3 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search bus or route (e.g. 18 or Avadi)..."
               value={busSearch}
               onChange={(e) => setBusSearch(e.target.value)}
               className="admin-input h-10 w-full rounded-xl border border-border bg-background pl-10 pr-4 text-xs font-semibold"
             />
           </div>
 
-          {/* BUS LIST sorted naturally by bus number */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredBuses.map((bus) => (
-              <div
-                key={bus.id}
-                data-testid={`card-pickup-bus-${bus.id}`}
-                className="rounded-[24px] border border-border bg-card p-5 flex flex-col justify-between transition hover:border-primary/40 hover:shadow-xs"
-              >
-                <div>
+          {filteredBuses.length === 0 ? (
+            <div className="rounded-2xl border border-border bg-card p-12 text-center text-xs text-muted-foreground">
+              No buses assigned yet.
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredBuses.map((bus) => (
+                <div
+                  key={bus.id}
+                  data-testid={`card-pickup-bus-${bus.id}`}
+                  className="rounded-[24px] border border-border bg-card p-5 flex flex-col justify-between transition hover:border-primary/40 shadow-xs"
+                >
                   <div className="flex items-center gap-3">
                     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-muted font-mono font-extrabold text-sm text-foreground">
                       {bus.busNumber}
                     </span>
                     <div>
-                      <div className="display-font text-base font-extrabold text-foreground">
-                        {bus.displayName}
-                      </div>
+                      <h3 className="display-font text-base font-extrabold text-foreground">
+                        BUS {bus.busNumber} · {bus.routeName}
+                      </h3>
                       <div className="text-xs font-bold text-muted-foreground mt-0.5">
-                        {bus.stopCount} stops
+                        {bus.stops.length} stops
                       </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="mt-5 pt-3 border-t border-border/50 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedBusId(bus.id);
-                      setStopSearch('');
-                    }}
-                    data-testid={`button-view-stops-${bus.id}`}
-                    className="w-full rounded-xl bg-primary/10 py-2.5 text-center text-xs font-extrabold text-primary hover:bg-primary/20 transition"
-                  >
-                    View Stops ({bus.stopCount})
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+                  <div className="mt-5 pt-3 border-t border-border/50 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditStops(bus)}
+                      className="rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs font-bold hover:bg-muted"
+                    >
+                      <Edit2 size={12} className="inline mr-1" /> Edit Stops
+                    </button>
 
-          {filteredBuses.length === 0 && (
-            <div className="rounded-2xl border border-border bg-card p-8 text-center text-xs text-muted-foreground">
-              No campus buses found.
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBusId(bus.id)}
+                      data-testid={`button-view-stops-${bus.id}`}
+                      className="rounded-xl bg-primary/10 px-4 py-2 text-xs font-extrabold text-primary hover:bg-primary/20"
+                    >
+                      View stops
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
-      ) : (
-        /* VIEW 2: SELECTED BUS STOPS VIEW */
-        <div className="space-y-5 animate-in fade-in">
-          {/* Back button and Bus Title */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setSelectedBusId(null)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted"
-              >
-                <ArrowLeft size={14} /> Back to All Buses
-              </button>
-              <div>
-                <h3 className="display-font text-xl font-extrabold text-foreground">
-                  {selectedBus.displayName}
-                </h3>
-                <span className="text-xs text-muted-foreground">
-                  Pickup Points & Stops ({selectedBus.stops.length})
-                </span>
-              </div>
-            </div>
+      )}
 
-            {/* Search this bus's stops */}
-            <div className="relative w-full sm:w-64">
-              <Search size={14} className="absolute left-3 top-2.5 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search this bus's stops..."
-                value={stopSearch}
-                onChange={(e) => setStopSearch(e.target.value)}
-                className="admin-input h-9 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-xs font-semibold"
-              />
+      {/* VIEW 2: SELECTED BUS MAP & STOPS (Section 13) */}
+      {selectedBus && (
+        <div className="grid gap-5 lg:grid-cols-[1.3fr_1fr] animate-in fade-in">
+          {/* Map showing ONLY selected bus's stops */}
+          <div className="rounded-[28px] border border-border bg-card overflow-hidden h-[500px] shadow-sm flex flex-col">
+            <div className="p-3 border-b border-border bg-muted/20 flex items-center justify-between text-xs font-bold">
+              <span className="text-foreground flex items-center gap-1.5">
+                <MapPin size={14} className="text-sky-500" />
+                Map Pickup Points: {selectedBus.displayName} ({mapStops.length} on map)
+              </span>
+              <span className="text-[11px] text-muted-foreground">Numbered in route order</span>
+            </div>
+            <div className="flex-1 w-full relative">
+              <MapContainer center={mapCenter} zoom={mapZoom} className="h-full w-full" scrollWheelZoom>
+                <MapViewUpdater center={mapCenter} zoom={mapZoom} />
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+
+                {mapStops.map((stop) => {
+                  if (stop.latitude == null || stop.longitude == null) return null;
+                  return (
+                    <Marker
+                      key={stop.id}
+                      position={[stop.latitude, stop.longitude]}
+                      icon={createNumberedStopIcon(stop.sequence)}
+                    >
+                      <Popup>
+                        <div className="text-xs space-y-1">
+                          <div className="font-extrabold text-foreground">
+                            {stop.name}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            Stop #{stop.sequence} · Time: {stop.time || 'Scheduled'}
+                          </div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  );
+                })}
+              </MapContainer>
             </div>
           </div>
 
-          {/* Stops List */}
-          <div className="space-y-3">
-            {filteredStops.map((stop, idx) => {
-              const hasCoords = stop.latitude != null && stop.longitude != null && (stop.latitude !== 0 || stop.longitude !== 0);
+          {/* Stops List + Actions */}
+          <div className="rounded-[28px] border border-border bg-card p-6 shadow-sm space-y-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between border-b border-border pb-3">
+                <div>
+                  <div className="mono text-[10px] uppercase font-bold text-muted-foreground">
+                    Stop Checklist
+                  </div>
+                  <h3 className="display-font text-lg font-extrabold text-foreground">
+                    BUS {selectedBus.busNumber} · {selectedBus.routeName}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleOpenEditStops(selectedBus)}
+                  className="rounded-xl bg-primary px-3 py-1.5 text-xs font-extrabold text-primary-foreground hover:opacity-95"
+                >
+                  <Edit2 size={12} className="inline mr-1" /> Edit Stops
+                </button>
+              </div>
 
-              return (
+              {selectedBus.stops.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">
+                  No stops configured for this bus yet. Click Edit Stops to add.
+                </div>
+              ) : (
+                <div className="mt-3 max-h-[360px] overflow-y-auto space-y-1.5 pr-1 divide-y divide-border/40">
+                  {selectedBus.stops.map((stop) => (
+                    <div
+                      key={stop.id}
+                      className="flex items-center justify-between pt-2 text-xs"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="grid h-5 w-5 place-items-center rounded-md bg-muted font-mono text-[10px] font-extrabold text-foreground">
+                          {stop.sequence}
+                        </span>
+                        <div>
+                          <div className="font-extrabold text-foreground">
+                            {stop.name}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            {stop.latitude != null ? '📍 Map point active' : 'Coordinates not configured'}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-semibold text-muted-foreground">
+                        {stop.time || 'Scheduled'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setSelectedBusId(null)}
+                className="w-full rounded-xl border border-border bg-background py-2 text-center text-xs font-bold text-foreground hover:bg-muted"
+              >
+                ← Back to All Buses
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STOP EDITING MODAL (Section 14) */}
+      {editingBus && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-xl rounded-[28px] border border-border bg-card p-6 sm:p-8 shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-border pb-4">
+              <div>
+                <span className="mono text-[10px] uppercase font-bold text-muted-foreground">
+                  Stop Editing
+                </span>
+                <h3 className="display-font text-xl font-extrabold text-foreground">
+                  BUS {editingBus.busNumber} · {editingBus.routeName}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Select/deselect, edit timing, reorder, add, or remove stops.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingBus(null)}
+                className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Editable stops list */}
+            <div className="flex-1 overflow-y-auto space-y-2 my-4 pr-1 divide-y divide-border/40">
+              {editableStops.map((stop, idx) => (
                 <div
                   key={stop.id}
-                  data-testid={`row-stop-${stop.id}`}
-                  className="rounded-[22px] border border-border bg-card p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 transition hover:border-border/80"
+                  className={`flex items-center justify-between py-2.5 px-2 rounded-xl text-xs transition ${
+                    stop.active ? 'bg-background' : 'bg-muted/40 opacity-60'
+                  }`}
                 >
-                  <div className="flex items-center gap-4">
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-muted font-mono font-extrabold text-xs text-foreground">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <input
+                      type="checkbox"
+                      checked={stop.active}
+                      onChange={() => toggleStopActive(idx)}
+                      className="h-4 w-4 rounded text-primary focus:ring-primary shrink-0 cursor-pointer"
+                      title={stop.active ? 'Deselect stop' : 'Select stop'}
+                    />
+
+                    <span className="grid h-6 w-6 place-items-center rounded-md bg-muted font-mono font-bold text-[10px] shrink-0">
                       {idx + 1}
                     </span>
-                    <div>
-                      <div className="display-font text-base font-extrabold text-foreground">
-                        {stop.name}
-                      </div>
 
-                      <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1 font-semibold text-foreground">
-                          <Clock size={12} className="text-muted-foreground" />
-                          {stop.time || 'Scheduled'}
-                        </span>
+                    <input
+                      type="text"
+                      value={stop.name}
+                      onChange={(e) => handleUpdateStopDetail(idx, 'name', e.target.value)}
+                      className="admin-input h-7 flex-1 rounded-lg border border-border bg-background px-2 text-xs font-bold"
+                    />
 
-                        <span>·</span>
-
-                        <span className={`inline-flex items-center gap-1 text-[11px] font-bold ${hasCoords ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                          <MapPin size={12} />
-                          {hasCoords ? 'Coordinates configured' : 'Location not configured'}
-                        </span>
-                      </div>
-                    </div>
+                    <input
+                      type="text"
+                      value={stop.time}
+                      onChange={(e) => handleUpdateStopDetail(idx, 'time', e.target.value)}
+                      placeholder="e.g. 6:40 AM"
+                      className="admin-input h-7 w-24 rounded-lg border border-border bg-background px-2 text-xs font-mono font-semibold"
+                    />
                   </div>
 
-                  {/* Actions: Reorder, Edit, Remove */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 ml-2 shrink-0">
                     <button
                       type="button"
-                      disabled={idx === 0 || saving}
+                      disabled={idx === 0}
                       onClick={() => handleMoveStop(idx, 'UP')}
-                      className="rounded-lg p-1.5 border border-border hover:bg-muted disabled:opacity-30"
+                      className="rounded-md p-1 border border-border hover:bg-muted disabled:opacity-30"
                       title="Move up"
                     >
                       <ArrowUp size={13} />
                     </button>
                     <button
                       type="button"
-                      disabled={idx === filteredStops.length - 1 || saving}
+                      disabled={idx === editableStops.length - 1}
                       onClick={() => handleMoveStop(idx, 'DOWN')}
-                      className="rounded-lg p-1.5 border border-border hover:bg-muted disabled:opacity-30"
+                      className="rounded-md p-1 border border-border hover:bg-muted disabled:opacity-30"
                       title="Move down"
                     >
                       <ArrowDown size={13} />
                     </button>
-
                     <button
                       type="button"
-                      onClick={() => {
-                        setEditingStop(stop);
-                        setStopName(stop.name);
-                        setStopTime(stop.time || '');
-                        setStopLat(stop.latitude != null ? String(stop.latitude) : '');
-                        setStopLng(stop.longitude != null ? String(stop.longitude) : '');
-                      }}
-                      className="rounded-xl border border-border bg-muted/40 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-muted"
-                    >
-                      <Edit2 size={12} className="inline mr-1" /> Edit
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveStop(stop.id)}
-                      className="rounded-xl p-1.5 text-destructive hover:bg-destructive/10"
+                      onClick={() => handleRemoveStop(idx)}
+                      className="rounded-md p-1 text-destructive hover:bg-destructive/10"
                       title="Remove stop"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 </div>
-              );
-            })}
+              ))}
+            </div>
 
-            {filteredStops.length === 0 && (
-              <div className="rounded-2xl border border-border bg-card p-8 text-center text-xs text-muted-foreground">
-                No stops configured for this bus yet. Click <b>+ Add Stop</b> above to add one.
+            {/* Inline Add Stop */}
+            <div className="border-t border-border pt-3">
+              <span className="text-[11px] font-extrabold text-muted-foreground block mb-1.5">
+                + Add Stop to Route
+              </span>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Stop name (e.g. Poonamallee Bypass)"
+                  value={newStopName}
+                  onChange={(e) => setNewStopName(e.target.value)}
+                  className="admin-input flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs"
+                />
+                <input
+                  type="text"
+                  placeholder="Time (e.g. 7:15 AM)"
+                  value={newStopTime}
+                  onChange={(e) => setNewStopTime(e.target.value)}
+                  className="admin-input w-28 rounded-xl border border-border bg-background px-3 py-2 text-xs font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddStop}
+                  className="rounded-xl bg-secondary px-3.5 py-2 text-xs font-extrabold text-secondary-foreground hover:opacity-90"
+                >
+                  Add
+                </button>
               </div>
-            )}
+            </div>
+
+            {/* Footer */}
+            <div className="mt-4 flex justify-end gap-2 border-t border-border pt-4">
+              <button
+                type="button"
+                onClick={() => setEditingBus(null)}
+                className="rounded-xl px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={handleSaveStops}
+                data-testid="button-save-pickup-stops"
+                className="rounded-xl bg-primary px-5 py-2 text-xs font-extrabold text-primary-foreground hover:opacity-95"
+              >
+                {saving ? 'Saving…' : 'Save Stops'}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* ADD STOP MODAL */}
-      {showAddStopModal && selectedBus && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-[28px] border border-border bg-card p-6 sm:p-8 shadow-2xl space-y-4">
+      {/* ADD COMMON PICKUP POINT MODAL (Section 9) */}
+      {showAddCommonModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg rounded-[28px] border border-border bg-card p-6 sm:p-8 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
-              <div>
-                <h3 className="display-font text-xl font-extrabold text-foreground">
-                  + Add Stop
-                </h3>
-                <span className="text-xs text-muted-foreground">{selectedBus.displayName}</span>
-              </div>
+              <h3 className="display-font text-xl font-extrabold text-foreground">
+                + Add Pickup Point
+              </h3>
               <button
                 type="button"
-                onClick={() => setShowAddStopModal(false)}
+                onClick={() => setShowAddCommonModal(false)}
                 className="rounded-xl p-1 text-muted-foreground hover:bg-muted"
               >
                 <X size={18} />
@@ -450,12 +1028,12 @@ export function AdminPickupPoints() {
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="font-bold text-muted-foreground">Stop Name</label>
+                <label className="font-bold text-muted-foreground">Pickup Point Name</label>
                 <input
                   type="text"
-                  placeholder="e.g. Ponnu Supermarket"
-                  value={stopName}
-                  onChange={(e) => setStopName(e.target.value)}
+                  placeholder="e.g. POONAMALLEE or AVADI"
+                  value={newCommonName}
+                  onChange={(e) => setNewCommonName(e.target.value)}
                   className="admin-input mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
                 />
               </div>
@@ -464,74 +1042,83 @@ export function AdminPickupPoints() {
                 <label className="font-bold text-muted-foreground">Approximate Time</label>
                 <input
                   type="text"
-                  placeholder="e.g. 6:42 AM"
-                  value={stopTime}
-                  onChange={(e) => setStopTime(e.target.value)}
-                  className="admin-input mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
+                  placeholder="e.g. 7:15 AM"
+                  value={newCommonTime}
+                  onChange={(e) => setNewCommonTime(e.target.value)}
+                  className="admin-input mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-mono font-semibold"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <div>
-                  <label className="font-bold text-muted-foreground">Latitude (Optional)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="13.0827"
-                    value={stopLat}
-                    onChange={(e) => setStopLat(e.target.value)}
-                    className="admin-input mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="font-bold text-muted-foreground">Longitude (Optional)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="80.2707"
-                    value={stopLng}
-                    onChange={(e) => setStopLng(e.target.value)}
-                    className="admin-input mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
-                  />
+              <div>
+                <label className="font-bold text-muted-foreground block mb-1">
+                  Assign Buses that Serve this Station
+                </label>
+                <div className="max-h-48 overflow-y-auto space-y-1 rounded-xl border border-border bg-background p-2">
+                  {buses.map((b) => {
+                    const isChecked = newCommonSelectedBuses.has(b.id);
+                    return (
+                      <label
+                        key={b.id}
+                        className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {
+                            const next = new Set(newCommonSelectedBuses);
+                            if (isChecked) next.delete(b.id);
+                            else next.add(b.id);
+                            setNewCommonSelectedBuses(next);
+                          }}
+                          className="h-4 w-4 rounded text-primary focus:ring-primary"
+                        />
+                        <span className="font-bold text-xs text-foreground">
+                          BUS {b.busNumber} · {b.routeName}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
               <button
                 type="button"
-                onClick={() => setShowAddStopModal(false)}
-                className="rounded-xl px-4 py-2 text-xs font-bold text-muted-foreground"
+                onClick={() => setShowAddCommonModal(false)}
+                className="rounded-xl px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-muted"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={saving || !stopName.trim()}
-                onClick={handleAddStop}
-                className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground hover:opacity-95 disabled:opacity-50"
+                disabled={saving || !newCommonName.trim() || newCommonSelectedBuses.size === 0}
+                onClick={handleCreateCommonPoint}
+                className="rounded-xl bg-primary px-5 py-2 text-xs font-extrabold text-primary-foreground hover:opacity-95 disabled:opacity-40"
               >
-                {saving ? 'Adding…' : 'Save Stop'}
+                {saving ? 'Adding…' : 'Add Pickup Point'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* EDIT STOP MODAL */}
-      {editingStop && selectedBus && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-[28px] border border-border bg-card p-6 sm:p-8 shadow-2xl space-y-4">
+      {/* EDIT / ASSIGN BUSES FOR COMMON POINT MODAL (Section 9) */}
+      {editingCommonPoint && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg rounded-[28px] border border-border bg-card p-6 sm:p-8 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
+                <span className="mono text-[10px] uppercase font-bold text-muted-foreground">
+                  Official Pickup Point
+                </span>
                 <h3 className="display-font text-xl font-extrabold text-foreground">
-                  Edit Stop
+                  {editingCommonPoint.originalName}
                 </h3>
-                <span className="text-xs text-muted-foreground">{selectedBus.displayName}</span>
               </div>
               <button
                 type="button"
-                onClick={() => setEditingStop(null)}
+                onClick={() => setEditingCommonPoint(null)}
                 className="rounded-xl p-1 text-muted-foreground hover:bg-muted"
               >
                 <X size={18} />
@@ -540,62 +1127,69 @@ export function AdminPickupPoints() {
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="font-bold text-muted-foreground">Stop Name</label>
+                <label className="font-bold text-muted-foreground">Pickup Point Name</label>
                 <input
                   type="text"
-                  value={stopName}
-                  onChange={(e) => setStopName(e.target.value)}
+                  value={editingCommonPoint.currentName}
+                  onChange={(e) =>
+                    setEditingCommonPoint({
+                      ...editingCommonPoint,
+                      currentName: e.target.value,
+                    })
+                  }
                   className="admin-input mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
                 />
               </div>
 
               <div>
-                <label className="font-bold text-muted-foreground">Approximate Time</label>
-                <input
-                  type="text"
-                  value={stopTime}
-                  onChange={(e) => setStopTime(e.target.value)}
-                  className="admin-input mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <div>
-                  <label className="font-bold text-muted-foreground">Latitude</label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={stopLat}
-                    onChange={(e) => setStopLat(e.target.value)}
-                    className="admin-input mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="font-bold text-muted-foreground">Longitude</label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={stopLng}
-                    onChange={(e) => setStopLng(e.target.value)}
-                    className="admin-input mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold"
-                  />
+                <label className="font-bold text-muted-foreground block mb-1">
+                  Assign Buses Serving This Station
+                </label>
+                <div className="max-h-56 overflow-y-auto space-y-1 rounded-xl border border-border bg-background p-2">
+                  {buses.map((b) => {
+                    const isChecked = editingCommonPoint.assignedBusIds.has(b.id);
+                    return (
+                      <label
+                        key={b.id}
+                        className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {
+                            const next = new Set(editingCommonPoint.assignedBusIds);
+                            if (isChecked) next.delete(b.id);
+                            else next.add(b.id);
+                            setEditingCommonPoint({
+                              ...editingCommonPoint,
+                              assignedBusIds: next,
+                            });
+                          }}
+                          className="h-4 w-4 rounded text-primary focus:ring-primary"
+                        />
+                        <span className="font-bold text-xs text-foreground">
+                          BUS {b.busNumber} · {b.routeName}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
               <button
                 type="button"
-                onClick={() => setEditingStop(null)}
-                className="rounded-xl px-4 py-2 text-xs font-bold text-muted-foreground"
+                onClick={() => setEditingCommonPoint(null)}
+                className="rounded-xl px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-muted"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={saving || !stopName.trim()}
-                onClick={handleSaveEditStop}
-                className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground hover:opacity-95"
+                disabled={saving || !editingCommonPoint.currentName.trim()}
+                onClick={handleSaveEditCommonPoint}
+                className="rounded-xl bg-primary px-5 py-2 text-xs font-extrabold text-primary-foreground hover:opacity-95 disabled:opacity-40"
               >
                 {saving ? 'Saving…' : 'Save Changes'}
               </button>

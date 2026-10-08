@@ -209,6 +209,18 @@ export const INITIAL_DEMO_ROUTES: DemoRoute[] = [
  * Ensures all 11 initial demo routes and their stops are populated into PostgreSQL
  */
 export async function seedInitialDemoRoutes() {
+  // Purge any legacy MTC rows from buses and busRoutes so they never mix into REC campus transport
+  try {
+    const allDbBuses = await db.select().from(buses);
+    for (const b of allDbBuses) {
+      if (b.busNumber?.toUpperCase().includes("MTC") || b.id?.toLowerCase().includes("mtc")) {
+        await db.delete(buses).where(eq(buses.id, b.id));
+      }
+    }
+  } catch (err) {
+    console.warn("MTC cleanup skipped:", err);
+  }
+
   for (const r of INITIAL_DEMO_ROUTES) {
     const routeId = `route-${r.routeNumber.toLowerCase()}`;
     const busId = `bus-${r.routeNumber.toLowerCase()}`;

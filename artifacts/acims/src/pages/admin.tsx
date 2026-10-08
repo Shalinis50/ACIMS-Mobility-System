@@ -1,20 +1,16 @@
-import { useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { RefreshCw } from 'lucide-react';
 import { AdminLayout, parseAdminSection, type AdminSectionId } from '@/components/admin/AdminLayout';
 import { adminLogout } from '@/lib/adminAuth';
-import { mobilityAdminFetch } from '@/lib/mobilityApi';
-import { LoadingRows, PageHeading } from '@/components/acims-ui';
-import { naturalBusSort } from '@/lib/naturalSort';
+import { PageHeading } from '@/components/acims-ui';
 import { AdminOverview } from '@/components/admin/AdminOverview';
 import { AdminLiveBuses } from '@/components/admin/AdminLiveBuses';
-import { AdminBusSchedule } from '@/components/admin/AdminBusSchedule';
 import { AdminAlerts } from '@/components/admin/AdminAlerts';
-import { AdminBusesAndRoutes } from '@/components/admin/AdminBusesAndRoutes';
-import { AdminShiftAssignments } from '@/components/admin/AdminShiftAssignments';
-import { AdminDrivers } from '@/components/admin/AdminDrivers';
+import { AdminBusRoutes } from '@/components/admin/AdminBusRoutes';
 import { AdminPickupPoints } from '@/components/admin/AdminPickupPoints';
+import { AdminShiftManagement } from '@/components/admin/AdminShiftManagement';
+import { AdminBusesAndDrivers } from '@/components/admin/AdminBusesAndDrivers';
 
 export default function AdminPage() {
   const [location, setLocation] = useLocation();
@@ -22,66 +18,16 @@ export default function AdminPage() {
   const activeSection = parseAdminSection(location);
 
   const goSection = (id: AdminSectionId) => {
-    if (id === 'overview' || id === 'dashboard') {
+    if (id === 'dashboard' || id === 'overview') {
       setLocation('/admin');
     } else {
       setLocation(`/admin/${id}`);
     }
   };
 
-  // Shared queries for buses, routes, and drivers
-  const busesAndRoutesQuery = useQuery({
-    queryKey: ['admin', 'buses-and-routes'],
-    queryFn: async () => {
-      const res = await mobilityAdminFetch('/admin/buses-and-routes');
-      if (!res.ok) throw new Error('Failed to load buses');
-      return (await res.json()) as any[];
-    },
-  });
-
-  const driversQuery = useQuery({
-    queryKey: ['admin', 'drivers'],
-    queryFn: async () => {
-      const res = await mobilityAdminFetch('/admin/drivers');
-      if (!res.ok) throw new Error('Failed to load drivers');
-      return (await res.json()) as any[];
-    },
-  });
-
-  const buses = busesAndRoutesQuery.data ?? [];
-  const drivers = driversQuery.data ?? [];
-
-  const routesForSelect = useMemo(() => {
-    const seen = new Set<string>();
-    return buses
-      .filter((b) => {
-        if (!b.routeId || seen.has(b.routeId)) return false;
-        seen.add(b.routeId);
-        return true;
-      })
-      .map((b) => ({
-        id: b.routeId,
-        displayName: b.displayName,
-      }));
-  }, [buses]);
-
-  const busesForAssignment = useMemo(() => {
-    return buses
-      .map((b) => ({
-        id: b.id,
-        busNumber: b.busNumber,
-        routeName: b.routeName,
-        displayName: b.displayName,
-        stops: b.stops || [],
-      }))
-      .sort((a, b) => naturalBusSort(a.busNumber, b.busNumber));
-  }, [buses]);
-
   const refreshAll = () => {
     void queryClient.invalidateQueries({ queryKey: ['admin'] });
   };
-
-  const isLoading = busesAndRoutesQuery.isLoading && buses.length === 0;
 
   return (
     <AdminLayout
@@ -97,7 +43,7 @@ export default function AdminPage() {
       <PageHeading
         eyebrow="ACMIS Campus Transport"
         title="Admin Transport Management"
-        description="Simple, clear campus mobility administration for REC bus allotment, routes, stops, and live tracking."
+        description="Clear, reliable campus mobility administration for REC bus allotment, routes, stops, and real driver GPS tracking."
         action={
           <button
             type="button"
@@ -105,51 +51,30 @@ export default function AdminPage() {
             data-testid="button-admin-refresh"
             className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-2 text-xs font-bold hover:bg-muted"
           >
-            <RefreshCw size={13} className={busesAndRoutesQuery.isFetching ? 'animate-spin' : ''} />
+            <RefreshCw size={13} />
             Refresh
           </button>
         }
       />
 
       <div className="mt-5">
-        {isLoading ? (
-          <LoadingRows count={6} />
-        ) : (
-          <>
-            {activeSection === 'overview' && (
-              <AdminOverview
-                onNavigateToLiveBuses={() => goSection('live-buses')}
-                onNavigateToShifts={() => goSection('shift-assignments')}
-              />
-            )}
-
-            {activeSection === 'live-buses' && <AdminLiveBuses />}
-
-            {activeSection === 'schedule' && (
-              <AdminBusSchedule
-                onNavigateToShiftAssignments={() => goSection('shift-assignments')}
-              />
-            )}
-
-            {activeSection === 'alerts' && <AdminAlerts />}
-
-            {activeSection === 'buses-routes' && (
-              <AdminBusesAndRoutes drivers={drivers} />
-            )}
-
-            {activeSection === 'shift-assignments' && (
-              <AdminShiftAssignments buses={busesForAssignment} />
-            )}
-
-            {activeSection === 'drivers' && (
-              <AdminDrivers buses={busesForAssignment} />
-            )}
-
-            {activeSection === 'pickup-points' && (
-              <AdminPickupPoints />
-            )}
-          </>
+        {activeSection === 'dashboard' && (
+          <AdminOverview
+            onNavigateToLiveBuses={() => goSection('live-buses')}
+          />
         )}
+
+        {activeSection === 'live-buses' && <AdminLiveBuses />}
+
+        {activeSection === 'alerts' && <AdminAlerts />}
+
+        {activeSection === 'bus-routes' && <AdminBusRoutes />}
+
+        {activeSection === 'pickup-points' && <AdminPickupPoints />}
+
+        {activeSection === 'shift-management' && <AdminShiftManagement />}
+
+        {activeSection === 'buses-drivers' && <AdminBusesAndDrivers />}
       </div>
     </AdminLayout>
   );

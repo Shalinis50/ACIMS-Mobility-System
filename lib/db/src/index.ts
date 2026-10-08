@@ -19,11 +19,13 @@ let pgliteClient: PGlite | null = null;
 let db: any = null;
 
 // Determine connection strategy
-if (process.env.DATABASE_URL) {
+const rawDbUrl = process.env.DATABASE_URL ? process.env.DATABASE_URL.replace(/^["']|["']$/g, "").trim() : undefined;
+if (rawDbUrl) {
+  process.env.DATABASE_URL = rawDbUrl;
   try {
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL.includes("localhost") ? false : { rejectUnauthorized: false },
+      connectionString: rawDbUrl,
+      ssl: rawDbUrl.includes("localhost") ? false : { rejectUnauthorized: false },
     });
     db = drizzlePg(pool, { schema });
     console.log("[ACIMS DB] Connected to external PostgreSQL via DATABASE_URL");

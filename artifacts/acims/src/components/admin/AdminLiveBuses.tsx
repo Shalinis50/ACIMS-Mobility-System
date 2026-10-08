@@ -1,17 +1,18 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { MapContainer, TileLayer, CircleMarker, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import {
   Activity,
-  AlertTriangle,
+  AlertCircle,
+  ArrowLeft,
   BusFront,
-  Clock,
   Filter,
   MapPin,
   Phone,
   Radio,
   RefreshCw,
+  Signal,
   UserRound,
 } from 'lucide-react';
 import { mobilityAdminFetch } from '@/lib/mobilityApi';
@@ -27,7 +28,7 @@ export type LiveBus = {
   routeName: string;
   driverName: string;
   driverPhone?: string;
-  status: 'LIVE' | 'GPS UNAVAILABLE' | 'NOT STARTED' | 'DELAYED';
+  status: 'LIVE' | 'STALE' | 'GPS UNAVAILABLE' | 'DELAYED';
   latitude: number | null;
   longitude: number | null;
   accuracy: string;
@@ -57,122 +58,246 @@ type LiveBusesResponse = {
   counters: {
     total: number;
     live: number;
+    stale: number;
     gpsUnavailable: number;
-    delayed: number;
-    notStarted: number;
+    delayed?: number;
   };
 };
 
-function getMarkerColor(status: LiveBus['status']) {
+function getStatusBadge(status: LiveBus['status']) {
   switch (status) {
     case 'LIVE':
-      return '#22c55e'; // Green
+      return {
+        label: 'LIVE',
+        dotClass: 'bg-emerald-500',
+        badgeClass: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+        color: '#22c55e',
+      };
+    case 'STALE':
+      return {
+        label: 'STALE',
+        dotClass: 'bg-amber-500',
+        badgeClass: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+        color: '#f59e0b',
+      };
     case 'DELAYED':
-      return '#f59e0b'; // Amber
+      return {
+        label: 'DELAYED',
+        dotClass: 'bg-amber-500',
+        badgeClass: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+        color: '#f59e0b',
+      };
     case 'GPS UNAVAILABLE':
-      return '#ef4444'; // Red
-    case 'NOT STARTED':
     default:
-      return '#94a3b8'; // Grey
+      return {
+        label: 'UNAVAILABLE',
+        dotClass: 'bg-zinc-600 dark:bg-zinc-400',
+        badgeClass: 'bg-muted text-muted-foreground',
+        color: '#71717a',
+      };
   }
 }
 
-// Custom Leaflet DivIcon for stops
-function createStopIcon() {
+// Custom DivIcon for stops
+function createStopIcon(sequence: number) {
   return L.divIcon({
-    className: 'custom-stop-pin',
-    html: `<div style="width:10px;height:10px;background:#0284c7;border:2px solid white;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>`,
-    iconSize: [10, 10],
-    iconAnchor: [5, 5],
+    className: 'custom-stop-marker',
+    html: `<div style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;background:#0284c7;border:2px solid white;border-radius:50%;color:white;font-size:10px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,0.3);">${sequence}</div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
   });
 }
 
+// Helper to smoothly fly/set map view when user selects a bus
+function MapViewUpdater({ center, zoom }: { center: [number, number]; zoom: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, zoom, { animate: true });
+  }, [center, zoom, map]);
+  return null;
+}
+
 export function AdminLiveBuses() {
-  const [filter, setFilter] = useState<'ALL' | 'LIVE' | 'GPS UNAVAILABLE' | 'DELAYED' | 'NOT STARTED'>('ALL');
-  const [selectedBus, setSelectedBus] = useState<LiveBus | null>(null);
+  const [filter, setFilter] = useState<'ALL' | 'LIVE' | 'STALE' | 'GPS UNAVAILABLE'>('ALL');
+  const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
+  const [showAllStops, setShowAllStops] = useState(false);
 
   const query = useQuery({
     queryKey: ['admin', 'live-buses'],
     queryFn: async () => {
       const res = await mobilityAdminFetch('/admin/live-buses');
-      if (!res.ok) throw new Error('Live buses unavailable');
+      if (!res.ok) throw new Error('Unable to load bus information.');
       return (await res.json()) as LiveBusesResponse;
     },
     refetchInterval: 5000,
   });
 
+  const isLoading = query.isLoading && !query.data;
+  const isError = query.isError && !query.data;
+
   const data = query.data;
-  const buses = data?.buses ?? [];
-  const stops = data?.stops ?? [];
-  const counters = data?.counters ?? {
-    total: 0,
-    live: 0,
-    gpsUnavailable: 0,
-    delayed: 0,
-    notStarted: 0,
-  };
+  const rawBuses = data?.buses ?? [];
+  const allStops = data?.stops ?? [];
+
+  // Strictly exclude MTC or public transit buses from ACMIS campus fleet
+  const campusBuses = useMemo(() => {
+    return rawBuses
+      .filter((b) => !b.busNumber.toUpperCase().includes('MTC') && !b.displayName.toUpperCase().includes('MTC'))
+      .sort((a, b) => naturalBusSort(a.busNumber, b.busNumber));
+  }, [rawBuses]);
 
   const filteredBuses = useMemo(() => {
-    const campusBuses = buses.filter(
-      (b) => !b.busNumber.toUpperCase().includes('MTC') && !b.displayName.toUpperCase().includes('MTC')
-    );
-    const list = filter === 'ALL' ? campusBuses : campusBuses.filter((b) => b.status === filter);
-    return list.sort((a, b) => naturalBusSort(a.busNumber, b.busNumber));
-  }, [buses, filter]);
+    if (filter === 'ALL') return campusBuses;
+    return campusBuses.filter((b) => b.status === filter);
+  }, [campusBuses, filter]);
 
-  const mapCenter = useMemo(() => {
+  // Selected bus
+  const selectedBus = useMemo(() => {
+    if (!selectedBusId) return null;
+    return campusBuses.find((b) => b.id === selectedBusId) ?? null;
+  }, [campusBuses, selectedBusId]);
+
+  // Stops to show on map:
+  // Under Live Map Clutter Rule: default hides all stops to avoid clustering!
+  // If a bus is selected, show ONLY that bus's stops.
+  const displayedStops = useMemo(() => {
+    if (showAllStops) return allStops;
+    if (selectedBus) {
+      return allStops
+        .filter((s) => s.busId === selectedBus.id || (s.busNumber && s.busNumber.toUpperCase() === selectedBus.busNumber.toUpperCase()))
+        .sort((a, b) => a.sequence - b.sequence);
+    }
+    return [];
+  }, [showAllStops, selectedBus, allStops]);
+
+  // Selected bus stops list for bottom card
+  const selectedBusStopsList = useMemo(() => {
+    if (!selectedBus) return [];
+    return allStops
+      .filter((s) => s.busId === selectedBus.id || (s.busNumber && s.busNumber.toUpperCase() === selectedBus.busNumber.toUpperCase()))
+      .sort((a, b) => a.sequence - b.sequence);
+  }, [selectedBus, allStops]);
+
+  // Map center logic
+  const { mapCenter, mapZoom } = useMemo(() => {
     if (selectedBus && selectedBus.latitude != null && selectedBus.longitude != null) {
-      return [selectedBus.latitude, selectedBus.longitude] as [number, number];
+      return { mapCenter: [selectedBus.latitude, selectedBus.longitude] as [number, number], mapZoom: 13 };
     }
-    const liveWithCoords = buses.find((b) => b.latitude != null && b.longitude != null);
-    if (liveWithCoords?.latitude != null && liveWithCoords.longitude != null) {
-      return [liveWithCoords.latitude, liveWithCoords.longitude] as [number, number];
+    if (selectedBus && selectedBusStopsList.length > 0 && selectedBusStopsList[0].latitude != null) {
+      return { mapCenter: [selectedBusStopsList[0].latitude, selectedBusStopsList[0].longitude] as [number, number], mapZoom: 12 };
     }
-    return CHENNAI_CENTER;
-  }, [selectedBus, buses]);
+    const firstLive = campusBuses.find((b) => b.status === 'LIVE' && b.latitude != null && b.longitude != null);
+    if (firstLive?.latitude != null && firstLive.longitude != null) {
+      return { mapCenter: [firstLive.latitude, firstLive.longitude] as [number, number], mapZoom: 11 };
+    }
+    return { mapCenter: CHENNAI_CENTER, mapZoom: 11 };
+  }, [selectedBus, selectedBusStopsList, campusBuses]);
 
-  const stopIcon = useMemo(() => createStopIcon(), []);
+  // ERROR STATE
+  if (isError) {
+    return (
+      <div className="rounded-[28px] border border-destructive/30 bg-destructive/5 p-8 text-center space-y-4">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+          <AlertCircle size={24} />
+        </div>
+        <div>
+          <h3 className="text-base font-extrabold text-foreground">
+            Unable to load this information.
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Could not retrieve real-time campus bus telemetry from the server.
+          </p>
+        </div>
+        <div>
+          <button
+            type="button"
+            onClick={() => void query.refetch()}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-95"
+          >
+            <RefreshCw size={13} /> Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // LOADING STATE
+  if (isLoading) {
+    return (
+      <div className="rounded-[28px] border border-border bg-card p-12 text-center space-y-3">
+        <div className="inline-flex items-center gap-2 text-xs font-bold text-muted-foreground">
+          <RefreshCw size={16} className="animate-spin text-primary" />
+          Loading live bus GPS tracking...
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-5">
-      {/* Top Header & Filters */}
+    <div className="space-y-5 animate-in fade-in">
+      {/* Top Header & Mode Toggle */}
       <div className="rounded-[28px] border border-border bg-card p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              Real-Time Monitoring
+              Live Operations · GPS Telemetry
             </div>
-            <h2 className="mt-0.5 text-2xl font-extrabold text-foreground">
-              Live Buses
-            </h2>
+            <div className="mt-1 flex items-center gap-3">
+              <h2 className="text-2xl font-extrabold text-foreground">
+                {selectedBus ? `BUS ${selectedBus.busNumber} · ${selectedBus.routeName}` : 'Live Buses'}
+              </h2>
+              {selectedBus && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedBusId(null)}
+                  data-testid="button-all-buses-mode"
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1 text-xs font-bold text-foreground hover:bg-muted"
+                >
+                  <ArrowLeft size={12} /> All Buses
+                </button>
+              )}
+            </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Monitoring all registered campus buses. Only real GPS broadcasts are shown.
+              {selectedBus
+                ? 'Showing individual live location, telemetry, and configured route stops for this bus.'
+                : 'Monitoring all registered campus buses. Only real driver phone GPS coordinates are displayed.'}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
             {/* Filter Dropdown */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-muted-foreground flex items-center gap-1">
-                <Filter size={13} /> Filter:
-              </span>
-              <select
-                value={filter}
-                onChange={(e) => setFilter(e.target.value as any)}
-                data-testid="select-live-buses-filter"
-                className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-bold text-foreground shadow-xs"
-              >
-                <option value="ALL">All buses ({counters.total})</option>
-                <option value="LIVE">Live ({counters.live})</option>
-                <option value="DELAYED">Delayed ({counters.delayed})</option>
-                <option value="GPS UNAVAILABLE">GPS unavailable ({counters.gpsUnavailable})</option>
-                <option value="NOT STARTED">Not started ({counters.notStarted})</option>
-              </select>
-            </div>
+            {!selectedBus && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-muted-foreground flex items-center gap-1">
+                  <Filter size={13} /> Status:
+                </span>
+                <select
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value as any)}
+                  data-testid="select-live-buses-filter"
+                  className="rounded-xl border border-border bg-background px-3 py-2 text-xs font-bold text-foreground shadow-xs"
+                >
+                  <option value="ALL">All ({campusBuses.length})</option>
+                  <option value="LIVE">Live ({campusBuses.filter((b) => b.status === 'LIVE').length})</option>
+                  <option value="STALE">Stale ({campusBuses.filter((b) => b.status === 'STALE').length})</option>
+                  <option value="GPS UNAVAILABLE">Unavailable ({campusBuses.filter((b) => b.status === 'GPS UNAVAILABLE').length})</option>
+                </select>
+              </div>
+            )}
 
             <button
               type="button"
-              onClick={() => query.refetch()}
+              onClick={() => setShowAllStops(!showAllStops)}
+              className={`rounded-xl border px-3 py-2 text-xs font-bold transition ${
+                showAllStops ? 'border-sky-500 bg-sky-500/10 text-sky-700 dark:text-sky-300' : 'border-border bg-card text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              {showAllStops ? '✓ All stops shown' : 'Show all stops'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void query.refetch()}
               className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold hover:bg-muted"
             >
               <RefreshCw size={13} className={query.isFetching ? 'animate-spin' : ''} />
@@ -182,43 +307,44 @@ export function AdminLiveBuses() {
         </div>
 
         {/* Status Legend */}
-        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4 text-[11px] font-extrabold">
-          <span className="text-muted-foreground">Legend:</span>
+        <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-border pt-3 text-[11px] font-extrabold">
+          <span className="text-muted-foreground">GPS Status:</span>
           <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" /> Green = Live
+            <span className="h-2 w-2 rounded-full bg-emerald-500" /> 🟢 LIVE (Fresh GPS)
           </span>
           <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-            <span className="h-2 w-2 rounded-full bg-amber-500" /> Amber = Delayed
+            <span className="h-2 w-2 rounded-full bg-amber-500" /> 🟠 STALE (Old GPS)
           </span>
-          <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400">
-            <span className="h-2 w-2 rounded-full bg-red-500" /> Red = GPS unavailable
+          <span className="inline-flex items-center gap-1 text-zinc-600 dark:text-zinc-400">
+            <span className="h-2 w-2 rounded-full bg-zinc-500" /> ⚫ UNAVAILABLE (No GPS)
           </span>
-          <span className="inline-flex items-center gap-1 text-slate-500">
-            <span className="h-2 w-2 rounded-full bg-slate-400" /> Grey = Not started
-          </span>
-          <span className="ml-auto text-muted-foreground flex items-center gap-1">
-            <span className="h-2 w-2 rounded-full bg-sky-500" /> Blue = Stops
-          </span>
+          {displayedStops.length > 0 && (
+            <span className="ml-auto inline-flex items-center gap-1 text-sky-600 dark:text-sky-400">
+              <span className="h-2 w-2 rounded-full bg-sky-500" /> Blue = Configured Stops ({displayedStops.length})
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Main Map + Inspection Panel Layout */}
+      {/* Main Map + Side Panel Layout */}
       <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
         {/* Map Container */}
         <div className="rounded-[28px] border border-border bg-card overflow-hidden h-[540px] shadow-sm flex flex-col">
-          <div className="flex-1 w-full" data-testid="live-buses-map">
-            <MapContainer center={mapCenter} zoom={11} className="h-full w-full" scrollWheelZoom>
+          <div className="flex-1 w-full relative" data-testid="live-buses-map">
+            <MapContainer center={mapCenter} zoom={mapZoom} className="h-full w-full" scrollWheelZoom>
+              <MapViewUpdater center={mapCenter} zoom={mapZoom} />
+
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
 
-              {/* Stops Pins */}
-              {stops.map((stop) => (
+              {/* Stops Pins (Only for selected bus, or if Show All Stops is toggled) */}
+              {displayedStops.map((stop) => (
                 <Marker
                   key={stop.id}
                   position={[stop.latitude, stop.longitude]}
-                  icon={stopIcon}
+                  icon={createStopIcon(stop.sequence)}
                 >
                   <Popup>
                     <div className="text-xs space-y-1">
@@ -226,9 +352,6 @@ export function AdminLiveBuses() {
                         <MapPin size={12} className="text-sky-500" /> {stop.name}
                       </div>
                       <div className="text-[11px] text-muted-foreground">
-                        {stop.busDisplayName || stop.routeName || 'Campus Line'}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">
                         Stop #{stop.sequence} · Approx: {stop.time}
                       </div>
                     </div>
@@ -236,19 +359,25 @@ export function AdminLiveBuses() {
                 </Marker>
               ))}
 
-              {/* Bus Markers with real GPS */}
-              {buses.map((bus) => {
+              {/* Bus GPS Markers */}
+              {campusBuses.map((bus) => {
                 if (bus.latitude == null || bus.longitude == null) return null;
-                const color = getMarkerColor(bus.status);
+                const badge = getStatusBadge(bus.status);
+                const isSelected = selectedBusId === bus.id;
 
                 return (
                   <CircleMarker
                     key={bus.id}
                     center={[bus.latitude, bus.longitude]}
-                    radius={12}
-                    pathOptions={{ color, fillColor: color, fillOpacity: 0.9, weight: 3 }}
+                    radius={isSelected ? 14 : 10}
+                    pathOptions={{
+                      color: isSelected ? '#000000' : badge.color,
+                      fillColor: badge.color,
+                      fillOpacity: 0.9,
+                      weight: isSelected ? 3 : 2,
+                    }}
                     eventHandlers={{
-                      click: () => setSelectedBus(bus),
+                      click: () => setSelectedBusId(bus.id),
                     }}
                   >
                     <Popup>
@@ -257,16 +386,11 @@ export function AdminLiveBuses() {
                         <div className="text-[11px] text-muted-foreground">
                           Driver: {bus.driverName}
                         </div>
-                        <div className="text-[11px] font-bold" style={{ color }}>
+                        <div className="text-[11px] font-bold" style={{ color: badge.color }}>
                           {bus.status}
                         </div>
-                        {bus.nextStop && (
-                          <div className="text-[10px] text-muted-foreground">
-                            Next: {bus.nextStop}
-                          </div>
-                        )}
                         <div className="text-[10px] text-muted-foreground">
-                          Updated: {bus.lastUpdate}
+                          Last update: {bus.lastUpdate}
                         </div>
                       </div>
                     </Popup>
@@ -277,63 +401,73 @@ export function AdminLiveBuses() {
           </div>
         </div>
 
-        {/* Selected Bus or List Inspection Panel */}
+        {/* Beside/Below Map: Clean Bus List OR Individual Bus Live View */}
         <div className="space-y-4">
           {selectedBus ? (
+            /* INDIVIDUAL BUS LIVE VIEW (Section 7) */
             <div className="rounded-[28px] border-2 border-primary bg-card p-6 shadow-sm space-y-4 animate-in fade-in">
               <div className="flex items-center justify-between border-b border-border pb-3">
-                <span className="display-font text-lg font-extrabold text-foreground">
-                  {selectedBus.displayName}
-                </span>
+                <div>
+                  <div className="mono text-[10px] font-extrabold uppercase text-muted-foreground">
+                    Selected Bus
+                  </div>
+                  <h3 className="display-font text-xl font-extrabold text-foreground">
+                    BUS {selectedBus.busNumber} · {selectedBus.routeName}
+                  </h3>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setSelectedBus(null)}
-                  className="rounded-lg bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground hover:text-foreground"
+                  onClick={() => setSelectedBusId(null)}
+                  className="rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-bold text-foreground hover:bg-muted"
                 >
-                  ✕ Close
+                  ← All Buses
                 </button>
               </div>
 
-              <div className="grid gap-3 text-xs">
+              {/* Status & Telemetry Attributes */}
+              <div className="space-y-3 text-xs">
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Driver & Contact
-                  </span>
-                  <div className="font-extrabold text-foreground flex items-center gap-1.5 mt-0.5">
-                    <UserRound size={13} className="text-muted-foreground" />
-                    {selectedBus.driverName}
-                  </div>
-                  <div className="text-[11px] font-semibold text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                    <Phone size={11} className="text-muted-foreground" />
-                    {selectedBus.driverPhone || 'Phone not available'}
-                  </div>
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Current Status
+                    GPS Status
                   </span>
                   <div className="mt-1">
-                    <span
-                      className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-extrabold"
-                      style={{
-                        background: `${getMarkerColor(selectedBus.status)}20`,
-                        color: getMarkerColor(selectedBus.status),
-                      }}
-                    >
-                      <span
-                        className="h-2 w-2 rounded-full"
-                        style={{ background: getMarkerColor(selectedBus.status) }}
-                      />
-                      {selectedBus.status}
-                    </span>
+                    {(() => {
+                      const badge = getStatusBadge(selectedBus.status);
+                      return (
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-extrabold ${badge.badgeClass}`}>
+                          <span className={`h-2 w-2 rounded-full ${badge.dotClass}`} />
+                          {badge.label}
+                        </span>
+                      );
+                    })()}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                      Last update
+                      Driver
+                    </span>
+                    <div className="font-extrabold text-foreground mt-0.5 flex items-center gap-1">
+                      <UserRound size={12} className="text-muted-foreground" />
+                      {selectedBus.driverName || 'Not assigned'}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Phone
+                    </span>
+                    <div className="font-semibold text-foreground mt-0.5 flex items-center gap-1">
+                      <Phone size={11} className="text-muted-foreground" />
+                      {selectedBus.driverPhone || 'Not available'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Last updated
                     </span>
                     <div className="font-bold text-foreground mt-0.5">
                       {selectedBus.lastUpdate}
@@ -341,7 +475,7 @@ export function AdminLiveBuses() {
                   </div>
                   <div>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                      GPS accuracy
+                      Accuracy
                     </span>
                     <div className="font-bold text-foreground mt-0.5">
                       {selectedBus.accuracy}
@@ -349,83 +483,104 @@ export function AdminLiveBuses() {
                   </div>
                 </div>
 
-                <div>
+                <div className="pt-1">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Current location
+                    Current Location
                   </span>
-                  <div className="font-mono text-xs text-foreground mt-0.5">
+                  <div className="font-mono text-xs text-foreground mt-0.5 bg-muted/40 p-2 rounded-xl">
                     {selectedBus.latitude != null && selectedBus.longitude != null
                       ? `${selectedBus.latitude.toFixed(5)}, ${selectedBus.longitude.toFixed(5)}`
-                      : 'Coordinates unavailable'}
+                      : 'GPS location unavailable (driver has not started tracking)'}
                   </div>
                 </div>
 
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Route
-                  </span>
-                  <div className="font-extrabold text-foreground mt-0.5">
-                    {selectedBus.routeLabel}
+                {/* ROUTE STOPS (Section 7) */}
+                <div className="pt-2 border-t border-border">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Route Stops ({selectedBusStopsList.length})
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">Scheduled</span>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-3 pt-1 border-t border-border/60">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                      Next stop
-                    </span>
-                    <div className="font-extrabold text-foreground mt-0.5">
-                      {selectedBus.nextStop}
+                  {selectedBusStopsList.length === 0 ? (
+                    <div className="py-4 text-center text-xs text-muted-foreground">
+                      No stops configured for this bus yet.
                     </div>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                      ETA
-                    </span>
-                    <div className="font-extrabold text-foreground mt-0.5">
-                      {selectedBus.eta}
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 divide-y divide-border/40">
+                      {selectedBusStopsList.map((stop) => (
+                        <div
+                          key={stop.id}
+                          className="flex items-center justify-between pt-1.5 text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="grid h-5 w-5 place-items-center rounded-md bg-muted font-mono text-[10px] font-extrabold text-foreground">
+                              {stop.sequence}
+                            </span>
+                            <span className="font-extrabold text-foreground">
+                              {stop.name}
+                            </span>
+                          </div>
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            {stop.time}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
           ) : (
-            <div className="rounded-[28px] border border-border bg-card p-6 shadow-sm">
+            /* BUS LIST BESIDE MAP (Section 6) */
+            <div className="rounded-[28px] border border-border bg-card p-5 sm:p-6 shadow-sm">
               <div className="flex items-center justify-between border-b border-border pb-3">
                 <span className="mono text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
-                  Bus Quick Select ({filteredBuses.length})
+                  LIVE BUSES ({filteredBuses.length})
                 </span>
-                <span className="text-[11px] text-muted-foreground">Click bus to inspect</span>
+                <span className="text-[11px] text-muted-foreground">Click a bus to inspect</span>
               </div>
 
-              <div className="mt-3 max-h-[460px] overflow-y-auto space-y-2 pr-1">
-                {filteredBuses.map((bus) => (
-                  <button
-                    key={bus.id}
-                    type="button"
-                    onClick={() => setSelectedBus(bus)}
-                    className="w-full flex items-center justify-between rounded-xl border border-border p-3 text-left transition hover:border-primary/40 hover:bg-muted/30"
-                  >
-                    <div>
-                      <div className="font-extrabold text-xs text-foreground">
-                        {bus.displayName}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {bus.driverName}
-                      </div>
-                    </div>
-                    <span
-                      className="rounded-full px-2 py-0.5 text-[9px] font-extrabold"
-                      style={{
-                        background: `${getMarkerColor(bus.status)}15`,
-                        color: getMarkerColor(bus.status),
-                      }}
-                    >
-                      {bus.status}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              {filteredBuses.length === 0 ? (
+                <div className="py-12 text-center text-xs text-muted-foreground">
+                  No buses assigned yet.
+                </div>
+              ) : (
+                <div className="mt-3 max-h-[460px] overflow-y-auto space-y-2 pr-1">
+                  {filteredBuses.map((bus) => {
+                    const badge = getStatusBadge(bus.status);
+
+                    return (
+                      <button
+                        key={bus.id}
+                        type="button"
+                        onClick={() => setSelectedBusId(bus.id)}
+                        data-testid={`row-live-bus-${bus.id}`}
+                        className="w-full flex items-center justify-between rounded-xl border border-border p-3 text-left transition hover:border-primary/50 hover:bg-muted/40 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${badge.dotClass}`} />
+                          <div>
+                            <div className="font-extrabold text-xs text-foreground">
+                              BUS {bus.busNumber}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground uppercase font-bold">
+                              {bus.routeName}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${badge.badgeClass}`}>
+                            {badge.label}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>

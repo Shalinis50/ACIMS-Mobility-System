@@ -717,11 +717,13 @@ router.get("/admin/buses-and-routes", async (_req, res) => {
           // ignore
         }
 
-        let gpsStatus: "LIVE" | "GPS UNAVAILABLE" | "NOT STARTED" | "DELAYED" = "GPS UNAVAILABLE";
-        if (telemetry?.isLive) {
+        let gpsStatus: "LIVE" | "STALE" | "GPS UNAVAILABLE" | "DELAYED" = "GPS UNAVAILABLE";
+        if (telemetry?.isLive && telemetry.secondsAgo != null && telemetry.secondsAgo <= 90) {
           gpsStatus = (telemetry.delayMinutes && telemetry.delayMinutes > 2) ? "DELAYED" : "LIVE";
-        } else if (telemetry?.trackingStatus === "ACTIVE" || telemetry?.trackingStatus === "PAUSED") {
-          gpsStatus = "NOT STARTED";
+        } else if (telemetry?.latitude != null && telemetry.longitude != null) {
+          gpsStatus = "STALE";
+        } else if (telemetry?.trackingStatus === "PAUSED") {
+          gpsStatus = "STALE";
         }
 
         return {
@@ -1155,11 +1157,13 @@ router.get("/admin/live-buses", async (_req, res) => {
           // ignore
         }
 
-        let status: "LIVE" | "GPS UNAVAILABLE" | "NOT STARTED" | "DELAYED" = "GPS UNAVAILABLE";
-        if (telemetry?.isLive) {
+        let status: "LIVE" | "STALE" | "GPS UNAVAILABLE" | "DELAYED" = "GPS UNAVAILABLE";
+        if (telemetry?.isLive && telemetry.secondsAgo != null && telemetry.secondsAgo <= 90) {
           status = (telemetry.delayMinutes && telemetry.delayMinutes > 2) ? "DELAYED" : "LIVE";
-        } else if (telemetry?.trackingStatus === "ACTIVE" || telemetry?.trackingStatus === "PAUSED") {
-          status = "NOT STARTED";
+        } else if (telemetry?.latitude != null && telemetry.longitude != null) {
+          status = "STALE";
+        } else if (telemetry?.trackingStatus === "PAUSED") {
+          status = "STALE";
         }
 
         return {
@@ -1171,13 +1175,13 @@ router.get("/admin/live-buses", async (_req, res) => {
           driverName: driver?.name ?? "Driver not assigned",
           driverPhone: driver?.phone ?? "Phone not available",
           status,
-          latitude: telemetry?.isLive ? telemetry.latitude : null,
-          longitude: telemetry?.isLive ? telemetry.longitude : null,
-          accuracy: telemetry?.isLive && telemetry.accuracy ? `±${Math.round(telemetry.accuracy)}m` : "Coordinates unavailable",
-          lastUpdate: telemetry?.isLive && telemetry.secondsAgo != null ? `${telemetry.secondsAgo}s ago` : "No telemetry",
+          latitude: telemetry?.isLive ? telemetry.latitude : (status === "STALE" ? telemetry?.latitude : null),
+          longitude: telemetry?.isLive ? telemetry.longitude : (status === "STALE" ? telemetry?.longitude : null),
+          accuracy: telemetry?.accuracy ? `±${Math.round(telemetry.accuracy)}m` : "Coordinates unavailable",
+          lastUpdate: telemetry?.secondsAgo != null && telemetry.secondsAgo !== Infinity ? `${telemetry.secondsAgo}s ago` : "No telemetry",
           routeLabel: `${routeName} → REC Campus`,
-          nextStop: telemetry?.nextStop ?? (telemetry?.isLive ? "En route" : "GPS unavailable"),
-          eta: telemetry?.isLive && telemetry.etaMinutes != null ? `${telemetry.etaMinutes} min` : "ETA unavailable",
+          nextStop: telemetry?.nextStop ?? (status === "LIVE" ? "En route" : "GPS unavailable"),
+          eta: telemetry?.etaMinutes != null ? `${telemetry.etaMinutes} min` : "ETA unavailable",
           active: b.active,
         };
       })
@@ -1210,9 +1214,9 @@ router.get("/admin/live-buses", async (_req, res) => {
     const counters = {
       total: busesWithGps.length,
       live: busesWithGps.filter((b) => b.status === "LIVE").length,
+      stale: busesWithGps.filter((b) => b.status === "STALE").length,
       gpsUnavailable: busesWithGps.filter((b) => b.status === "GPS UNAVAILABLE").length,
       delayed: busesWithGps.filter((b) => b.status === "DELAYED").length,
-      notStarted: busesWithGps.filter((b) => b.status === "NOT STARTED").length,
     };
 
     res.json({

@@ -2,13 +2,14 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
-  AlertTriangle,
+  AlertCircle,
   ArrowRight,
   BusFront,
   Clock,
   Radio,
-  ShieldAlert,
-  UsersRound,
+  RefreshCw,
+  Signal,
+  WifiOff,
 } from 'lucide-react';
 import { mobilityAdminFetch } from '@/lib/mobilityApi';
 import { naturalBusSort } from '@/lib/naturalSort';
@@ -19,7 +20,7 @@ export type BusOverviewItem = {
   displayName: string;
   routeName: string;
   driverName?: string;
-  status: 'LIVE' | 'GPS UNAVAILABLE' | 'NOT STARTED' | 'DELAYED';
+  status: 'LIVE' | 'STALE' | 'GPS UNAVAILABLE' | 'DELAYED';
   nextStop?: string;
   etaMinutes?: number | null;
   secondsAgo?: number | null;
@@ -31,9 +32,9 @@ type LiveBusesPayload = {
   counters: {
     total: number;
     live: number;
+    stale: number;
     gpsUnavailable: number;
-    delayed: number;
-    notStarted: number;
+    delayed?: number;
   };
 };
 
@@ -50,10 +51,9 @@ type ShiftAssignmentItem = {
 
 export function AdminOverview({
   onNavigateToLiveBuses,
-  onNavigateToShifts,
 }: {
   onNavigateToLiveBuses: () => void;
-  onNavigateToShifts: () => void;
+  onNavigateToShifts?: () => void;
 }) {
   const liveBusesQuery = useQuery({
     queryKey: ['admin', 'live-buses'],
@@ -74,16 +74,30 @@ export function AdminOverview({
     },
   });
 
-  const buses = liveBusesQuery.data?.buses ?? [];
-  const counters = liveBusesQuery.data?.counters ?? {
-    total: 0,
-    live: 0,
-    gpsUnavailable: 0,
-    delayed: 0,
-    notStarted: 0,
-  };
+  const isLoading = (liveBusesQuery.isLoading && !liveBusesQuery.data) || (shiftsQuery.isLoading && !shiftsQuery.data);
+  const isError = liveBusesQuery.isError || shiftsQuery.isError;
 
+  const buses = liveBusesQuery.data?.buses ?? [];
+  const rawCounters = liveBusesQuery.data?.counters;
   const shifts = shiftsQuery.data ?? [];
+
+  // Computed counters from actual database buses
+  const counters = useMemo(() => {
+    if (rawCounters) {
+      return {
+        total: rawCounters.total ?? buses.length,
+        live: rawCounters.live ?? buses.filter((b) => b.status === 'LIVE').length,
+        stale: rawCounters.stale ?? buses.filter((b) => b.status === 'STALE').length,
+        gpsUnavailable: rawCounters.gpsUnavailable ?? buses.filter((b) => b.status === 'GPS UNAVAILABLE').length,
+      };
+    }
+    return {
+      total: buses.length,
+      live: buses.filter((b) => b.status === 'LIVE').length,
+      stale: buses.filter((b) => b.status === 'STALE').length,
+      gpsUnavailable: buses.filter((b) => b.status === 'GPS UNAVAILABLE').length,
+    };
+  }, [rawCounters, buses]);
 
   // Determine current active regular shift based on current time
   const currentShift = useMemo(() => {
@@ -91,11 +105,9 @@ export function AdminOverview({
     const now = new Date();
     const currentMins = now.getHours() * 60 + now.getMinutes();
 
-    // Check if within any active shift
     const regularShifts = shifts.filter((s) => s.active && !s.id.includes('exam'));
     if (!regularShifts.length) return shifts[0];
 
-    // Find shift whose time is closest or upcoming
     for (const s of regularShifts) {
       const [h, m] = (s.startTime || '00:00').split(':').map(Number);
       const shiftMins = (h || 0) * 60 + (m || 0);
@@ -103,213 +115,270 @@ export function AdminOverview({
         return s;
       }
     }
-    // Default to the afternoon or morning regular shift
     return regularShifts.find((s) => s.startTime.startsWith('15')) || regularShifts[0];
   }, [shifts]);
 
-  const assignedBusesInCurrentShift = useMemo(() => {
-    if (!currentShift) return [...buses].sort((a, b) => naturalBusSort(a.busNumber, b.busNumber)).slice(0, 4);
-    const assignedIds = new Set(currentShift.assignedBusIds || []);
-    const matching = buses.filter((b) => assignedIds.has(b.id));
-    const result = matching.length > 0 ? matching : buses.slice(0, 4);
-    return [...result].sort((a, b) => naturalBusSort(a.busNumber, b.busNumber));
-  }, [currentShift, buses]);
+  // Recent Transport Updates
+  const recentUpdates = useMemo(() => {
+    const updates: Array<{ id: string; title: string; subtitle: string; type: 'live' | 'stale' | 'unavailable' | 'shift' }> = [];
+
+    // 1. Shift assignment updates
+    for (const s of shifts.filter((sh) => !sh.id.includes('exam'))) {
+      const count = s.assignedBusIds?.length || 0;
+      updates.push({
+        id: `shift-${s.id}`,
+        title: `${s.displayTime} shift`,
+        subtitle: `${count} ${count === 1 ? 'bus' : 'buses'} assigned`,
+        type: 'shift',
+      });
+    }
+
+    // 2. Bus GPS updates
+    const sorted = [...buses].sort((a, b) => naturalBusSort(a.busNumber, b.busNumber));
+    for (const b of sorted) {
+      if (b.status === 'LIVE') {
+        updates.push({
+          id: `bus-${b.id}-live`,
+          title: `BUS ${b.busNumber}`,
+          subtitle: 'GPS started',
+          type: 'live',
+        });
+      } else if (b.status === 'STALE') {
+        updates.push({
+          id: `bus-${b.id}-stale`,
+          title: `BUS ${b.busNumber}`,
+          subtitle: 'GPS stale',
+          type: 'stale',
+        });
+      } else {
+        updates.push({
+          id: `bus-${b.id}-unavail`,
+          title: `BUS ${b.busNumber}`,
+          subtitle: 'GPS unavailable',
+          type: 'unavailable',
+        });
+      }
+    }
+
+    return updates;
+  }, [shifts, buses]);
+
+  // ERROR STATE
+  if (isError && !liveBusesQuery.data && !shiftsQuery.data) {
+    return (
+      <div className="rounded-[28px] border border-destructive/30 bg-destructive/5 p-8 text-center space-y-4">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+          <AlertCircle size={24} />
+        </div>
+        <div>
+          <h3 className="text-base font-extrabold text-foreground">
+            Unable to load this information.
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            The admin dashboard could not connect to the campus transport database.
+          </p>
+        </div>
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              void liveBusesQuery.refetch();
+              void shiftsQuery.refetch();
+            }}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-95"
+          >
+            <RefreshCw size={13} /> Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // LOADING STATE
+  if (isLoading) {
+    return (
+      <div className="rounded-[28px] border border-border bg-card p-12 text-center space-y-3">
+        <div className="inline-flex items-center gap-2 text-xs font-bold text-muted-foreground">
+          <RefreshCw size={16} className="animate-spin text-primary" />
+          Loading transport summary...
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Overview Stat Cards */}
+    <div className="space-y-6 animate-in fade-in">
+      {/* 5 Clear Summary Cards */}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <StatCard
+        <SummaryCard
           icon={BusFront}
-          label="Total Buses"
+          label="TOTAL BUSES"
           value={counters.total}
-          subtext="Registered in fleet"
           tone="default"
         />
-        <StatCard
+        <SummaryCard
           icon={Activity}
-          label="Currently Live"
+          label="LIVE"
           value={counters.live}
-          subtext="Active GPS broadcast"
           tone="emerald"
         />
-        <StatCard
+        <SummaryCard
+          icon={Signal}
+          label="STALE"
+          value={counters.stale}
+          tone="amber"
+        />
+        <SummaryCard
           icon={Radio}
-          label="Without GPS"
+          label="GPS UNAVAILABLE"
           value={counters.gpsUnavailable}
-          subtext="No GPS telemetry"
           tone="red"
         />
-        <StatCard
+        <SummaryCard
           icon={Clock}
-          label="Active Shift"
+          label="CURRENT SHIFT"
           value={currentShift?.displayTime || '3:15 PM'}
-          subtext={currentShift?.directionLabel || 'College → Home'}
+          subValue={currentShift?.directionLabel || 'College → Home'}
           tone="blue"
           isText
         />
-        <StatCard
-          icon={AlertTriangle}
-          label="Delayed Buses"
-          value={counters.delayed}
-          subtext="Exceeding schedule"
-          tone="amber"
-        />
       </section>
 
-      {/* CURRENT SHIFT CARD */}
-      <section className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
-          <div>
-            <div className="mono text-[10px] font-extrabold uppercase tracking-[0.2em] text-muted-foreground">
-              Current Shift Focus
-            </div>
-            <div className="mt-1 flex items-baseline gap-3">
-              <h2 className="display-font text-2xl font-extrabold sm:text-3xl text-foreground">
-                {currentShift?.displayTime || '3:15 PM'}
-              </h2>
-              <span className="rounded-full bg-secondary px-3 py-1 text-xs font-extrabold text-secondary-foreground">
-                {currentShift?.directionLabel || 'College → Home'}
-              </span>
-            </div>
+      {/* Button: [View Live Buses] */}
+      <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-4">
+        <div>
+          <div className="text-sm font-extrabold text-foreground">
+            Live Bus Tracking Map
           </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onNavigateToShifts}
-              className="rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs font-bold text-foreground hover:bg-muted"
-            >
-              Change Shift Assignments
-            </button>
-            <button
-              type="button"
-              onClick={onNavigateToLiveBuses}
-              data-testid="button-view-all-live-buses"
-              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-extrabold text-primary-foreground hover:opacity-95"
-            >
-              View all live buses <ArrowRight size={14} />
-            </button>
+          <div className="text-xs text-muted-foreground">
+            Monitor real-time GPS locations of all active REC campus buses.
           </div>
         </div>
+        <button
+          type="button"
+          onClick={onNavigateToLiveBuses}
+          data-testid="button-view-live-buses"
+          className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground shadow-xs hover:opacity-95"
+        >
+          View Live Buses <ArrowRight size={14} />
+        </button>
+      </div>
 
-        <div className="mt-6">
-          <div className="mb-3 flex items-center justify-between text-xs font-extrabold text-muted-foreground">
-            <span>
-              Assigned Buses for this Shift ({assignedBusesInCurrentShift.length})
-            </span>
-            <span className="mono text-[11px]">Real-Time Status</span>
+      {/* RECENT TRANSPORT UPDATES */}
+      <section className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
+        <div className="border-b border-border pb-4">
+          <div className="mono text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground">
+            Activity Feed
           </div>
+          <h3 className="mt-1 text-xl font-extrabold text-foreground">
+            Recent Transport Updates
+          </h3>
+        </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {assignedBusesInCurrentShift.map((bus) => (
+        {recentUpdates.length === 0 ? (
+          <div className="py-8 text-center text-xs text-muted-foreground">
+            No buses assigned yet.
+          </div>
+        ) : (
+          <div className="mt-4 divide-y divide-border">
+            {recentUpdates.map((item) => (
               <div
-                key={bus.id}
-                className="flex flex-col justify-between rounded-2xl border border-border bg-muted/20 p-4 transition hover:border-primary/40 hover:bg-muted/40"
+                key={item.id}
+                className="flex items-center justify-between py-3 text-xs"
               >
-                <div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="display-font text-base font-extrabold text-foreground">
-                      {bus.displayName}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Driver: {bus.driverName || 'Not assigned'}
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`grid h-8 w-8 place-items-center rounded-xl text-xs font-bold ${
+                      item.type === 'live'
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                        : item.type === 'stale'
+                        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                        : item.type === 'unavailable'
+                        ? 'bg-muted text-muted-foreground'
+                        : 'bg-primary/10 text-primary'
+                    }`}
+                  >
+                    {item.type === 'shift' ? (
+                      <Clock size={15} />
+                    ) : item.type === 'live' ? (
+                      <Activity size={15} />
+                    ) : item.type === 'stale' ? (
+                      <Signal size={15} />
+                    ) : (
+                      <WifiOff size={15} />
+                    )}
+                  </span>
+                  <div>
+                    <div className="font-extrabold text-sm text-foreground">
+                      {item.title}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {item.subtitle}
+                    </div>
                   </div>
                 </div>
 
-                <div className="mt-4 flex items-center justify-between pt-3 border-t border-border/50">
-                  <StatusBadge status={bus.status} />
-                  {bus.status === 'LIVE' && bus.secondsAgo != null && (
-                    <span className="mono text-[10px] text-muted-foreground">
-                      {bus.secondsAgo}s ago
+                <div>
+                  {item.type === 'live' && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      LIVE
+                    </span>
+                  )}
+                  {item.type === 'stale' && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[10px] font-extrabold text-amber-700 dark:text-amber-300">
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                      STALE
+                    </span>
+                  )}
+                  {item.type === 'unavailable' && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-[10px] font-extrabold text-muted-foreground">
+                      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+                      UNAVAILABLE
+                    </span>
+                  )}
+                  {item.type === 'shift' && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-extrabold text-primary">
+                      SHIFT
                     </span>
                   )}
                 </div>
               </div>
             ))}
           </div>
-        </div>
-      </section>
-
-      {/* COMPACT LIST OF CURRENT BUSES */}
-      <section className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-          <div>
-            <div className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              Fleet Summary
-            </div>
-            <h3 className="text-xl font-extrabold text-foreground">
-              All Registered Buses
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={onNavigateToLiveBuses}
-            className="text-xs font-extrabold text-primary hover:underline"
-          >
-            Open Live Buses Monitoring →
-          </button>
-        </div>
-
-        <div className="mt-4 divide-y divide-border">
-          {buses.slice(0, 10).map((b) => (
-            <div
-              key={b.id}
-              className="flex flex-wrap items-center justify-between gap-3 py-3 text-xs"
-            >
-              <div className="flex items-center gap-3">
-                <span className="grid h-8 w-8 place-items-center rounded-xl bg-muted font-mono font-extrabold text-xs">
-                  {b.busNumber}
-                </span>
-                <div>
-                  <div className="font-extrabold text-sm text-foreground">
-                    {b.displayName}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">
-                    Route: {b.routeName} · Driver: {b.driverName || 'Not assigned'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <StatusBadge status={b.status} />
-              </div>
-            </div>
-          ))}
-        </div>
+        )}
       </section>
     </div>
   );
 }
 
-function StatCard({
+function SummaryCard({
   icon: Icon,
   label,
   value,
-  subtext,
+  subValue,
   tone,
   isText = false,
 }: {
   icon: typeof BusFront;
   label: string;
   value: number | string;
-  subtext: string;
-  tone: 'default' | 'emerald' | 'red' | 'blue' | 'amber';
+  subValue?: string;
+  tone: 'default' | 'emerald' | 'amber' | 'red' | 'blue';
   isText?: boolean;
 }) {
   const toneClasses = {
     default: 'border-border bg-card text-foreground',
     emerald: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300',
+    amber: 'border-amber-500/30 bg-amber-500/5 text-amber-800 dark:text-amber-200',
     red: 'border-red-500/30 bg-red-500/5 text-red-700 dark:text-red-300',
     blue: 'border-primary/30 bg-primary/5 text-primary',
-    amber: 'border-amber-500/30 bg-amber-500/5 text-amber-800 dark:text-amber-200',
   };
 
   return (
     <div className={`rounded-2xl border p-4 ${toneClasses[tone]}`}>
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-extrabold uppercase tracking-wide opacity-80">
+        <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-80">
           {label}
         </span>
         <Icon size={16} />
@@ -317,7 +386,11 @@ function StatCard({
       <div className={`mt-2 font-extrabold ${isText ? 'text-xl' : 'display-font text-3xl'}`}>
         {value}
       </div>
-      <div className="mt-1 text-[11px] text-muted-foreground">{subtext}</div>
+      {subValue && (
+        <div className="mt-0.5 text-[11px] font-bold text-muted-foreground">
+          {subValue}
+        </div>
+      )}
     </div>
   );
 }
@@ -331,6 +404,14 @@ export function StatusBadge({ status }: { status: string }) {
       </span>
     );
   }
+  if (status === 'STALE') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[10px] font-extrabold text-amber-700 dark:text-amber-300">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+        STALE
+      </span>
+    );
+  }
   if (status === 'DELAYED') {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[10px] font-extrabold text-amber-700 dark:text-amber-300">
@@ -339,17 +420,9 @@ export function StatusBadge({ status }: { status: string }) {
       </span>
     );
   }
-  if (status === 'NOT STARTED') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-[10px] font-extrabold text-muted-foreground">
-        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
-        NOT STARTED
-      </span>
-    );
-  }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2.5 py-0.5 text-[10px] font-extrabold text-red-700 dark:text-red-300">
-      <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-[10px] font-extrabold text-muted-foreground">
+      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
       GPS UNAVAILABLE
     </span>
   );

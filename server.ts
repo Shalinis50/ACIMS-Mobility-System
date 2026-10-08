@@ -3,12 +3,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+if (process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = process.env.DATABASE_URL.replace(/^["']|["']$/g, "").trim();
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const bundlePath = path.resolve(__dirname, "server.bundle.js");
 const distPath = path.resolve(__dirname, "artifacts/acims/dist/index.html");
 
-const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION);
-const isProd = process.env.NODE_ENV === "production" || isCloudRun;
+const isProd = process.env.NODE_ENV === "production";
 
 async function main() {
   if (isProd && fs.existsSync(bundlePath)) {
