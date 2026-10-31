@@ -21,6 +21,21 @@ export function selectBus(busId: string) {
   window.dispatchEvent(new Event('acims-bus-changed'));
 }
 
+export function useSelectedBoardingStopId() {
+  const [stopId, setStopId] = useState(() => localStorage.getItem('acims-selected-boarding-stop') ?? '');
+  useEffect(() => {
+    const sync = () => setStopId(localStorage.getItem('acims-selected-boarding-stop') ?? '');
+    window.addEventListener('acims-boarding-stop-changed', sync);
+    return () => window.removeEventListener('acims-boarding-stop-changed', sync);
+  }, []);
+  return stopId;
+}
+
+export function selectBoardingStop(stopId: string) {
+  localStorage.setItem('acims-selected-boarding-stop', stopId);
+  window.dispatchEvent(new Event('acims-boarding-stop-changed'));
+}
+
 export function RouteMark({ small = false }: { small?: boolean }) {
   return (
     <span className={`flex items-center gap-2 ${small ? 'text-sm' : 'text-base'}`}>

@@ -835,9 +835,63 @@ router.get("/driver/session/:busId", async (req, res) => {
   }
 });
 
+let simulationTimer: NodeJS.Timeout | null = null;
+let simulationStepIndex = 0;
+
 export function startBusSimulation() {
-  // Real GPS Architecture: Zero simulation loop.
-  return null;
+  if (simulationTimer) return simulationTimer;
+
+  console.log("[ACIMS Simulation] Starting automatic Route 18 Avadi simulation along route geometry...");
+
+  simulationTimer = setInterval(async () => {
+    try {
+      const route = getRouteForBus("bus-18");
+      if (!route || !route.path || route.path.length === 0) return;
+
+      const pathLength = route.path.length;
+      const currentPoint = route.path[simulationStepIndex % pathLength];
+      const nextPoint = route.path[(simulationStepIndex + 1) % pathLength];
+
+      // Calculate bearing towards next point
+      const dLon = (nextPoint.longitude - currentPoint.longitude) * (Math.PI / 180);
+      const lat1 = currentPoint.latitude * (Math.PI / 180);
+      const lat2 = nextPoint.latitude * (Math.PI / 180);
+      const y = Math.sin(dLon) * Math.cos(lat2);
+      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+      const heading = Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
+
+      const now = new Date();
+
+      await recordBusLocation({
+        busId: "bus-18",
+        driverId: "sim-driver-18",
+        latitude: currentPoint.latitude,
+        longitude: currentPoint.longitude,
+        speed: 32,
+        bearing: heading,
+        accuracy: 4,
+        source: "real-device-gps",
+        trackingStatus: "ACTIVE",
+        recordedAt: now,
+      });
+
+      // Ensure active tracking session in DB so evaluateFreshness returns LIVE
+      const activeSession = await isBusTrackingActive("bus-18");
+      if (!activeSession.isActive) {
+        await startTrackingSession("bus-18", "sim-driver-18");
+      }
+
+      const telemetry = await buildBusTelemetry("bus-18");
+      realtimeHub.broadcastLocation(telemetry);
+
+      simulationStepIndex = (simulationStepIndex + 1) % pathLength;
+    } catch (err) {
+      // Non-blocking simulation error log
+      console.warn("[simulation loop]", err);
+    }
+  }, 2000);
+
+  return simulationTimer;
 }
 
 export default router;

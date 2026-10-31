@@ -1,2 +1,2 @@
-export * from "./phase2.ts";
-export * from "./auth.ts";
+export * from "./phase2";
+export * from "./auth";

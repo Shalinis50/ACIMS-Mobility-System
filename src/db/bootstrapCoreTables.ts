@@ -158,6 +158,7 @@ CREATE TABLE IF NOT EXISTS rec_transport_sync_status (
 
 const PICKUP_SCHEMA_PATCHES = [
   "ALTER TABLE shift_assignments ADD COLUMN IF NOT EXISTS active_stop_ids TEXT",
+  "ALTER TABLE shift_assignments ADD COLUMN IF NOT EXISTS departure_time TEXT",
   "ALTER TABLE shift_assignments ALTER COLUMN driver_id DROP NOT NULL",
   "ALTER TABLE official_pickup_points ALTER COLUMN latitude DROP NOT NULL",
   "ALTER TABLE official_pickup_points ALTER COLUMN longitude DROP NOT NULL",

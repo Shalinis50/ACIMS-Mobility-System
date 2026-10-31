@@ -130,7 +130,7 @@ const studentProfiles: Record<string, StudentProfile> = {
       longitude: 80.2012,
     },
     assignedBusId: "bus-18",
-    assignedRouteId: "route-bus-18",
+    assignedRouteId: "route-18",
     collegeDestination: {
       name: "Rajalakshmi Engineering College (REC)",
       latitude: REC_CAMPUS_CENTER.latitude,

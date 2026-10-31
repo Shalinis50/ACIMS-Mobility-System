@@ -7,6 +7,7 @@ import router from "./artifacts/api-server/src/routes/index";
 import {
   buildBusTelemetry,
   ingestRealDriverGps,
+  startBusSimulation,
 } from "./artifacts/api-server/src/routes/buses";
 import { realtimeHub } from "./artifacts/api-server/src/services/realtimeHub";
 
@@ -18,36 +19,6 @@ export async function startServer() {
     process.env.DATABASE_URL = process.env.DATABASE_URL.replace(/^["']|["']$/g, "").trim();
   }
 
-  try {
-    const { bootstrapAppTables, ensureBaselineFleetData } = await import("./src/db/bootstrapAppTables.ts");
-    await bootstrapAppTables();
-    const { bootstrapCoreTables } = await import("./src/db/bootstrapCoreTables.ts");
-    await bootstrapCoreTables();
-    const { migrateMobilitySchemaColumns } = await import("./src/db/bootstrapAppTables.ts");
-    await migrateMobilitySchemaColumns();
-    await ensureBaselineFleetData();
-    const { seedInitialDemoRoutes } = await import("./src/db/initialDemoRoutes.ts");
-    await seedInitialDemoRoutes();
-    const { ensureCanonicalShiftSlots } = await import("./src/db/shiftManagement.ts");
-    await ensureCanonicalShiftSlots();
-    const { ensureOfficialPickupPointsFromRoutes } = await import("./src/db/ensureMobilityPickups.ts");
-    await ensureOfficialPickupPointsFromRoutes();
-    try {
-      const { seedDatabase } = await import("./src/db/seed.ts");
-      await seedDatabase();
-    } catch (err) {
-      console.warn("Baseline seed skipped:", err);
-    }
-
-    const { ensureMtcSchema, purgeLegacyDummyMtcFromTransitDb } = await import(
-      "./artifacts/api-server/src/services/mtc/mtcService.ts"
-    );
-    ensureMtcSchema();
-    purgeLegacyDummyMtcFromTransitDb();
-  } catch (dbErr) {
-    console.error("[Database Bootstrap Warning]:", dbErr);
-  }
-
   const app = express();
   const port = Number(process.env.PORT) || 3000;
 
@@ -57,7 +28,7 @@ export async function startServer() {
     path.resolve(__dirname, "dist"),
   ];
   const distPath = candidatePaths.find((p) => fs.existsSync(path.join(p, "index.html")));
-  const isProd = process.env.NODE_ENV === "production" && Boolean(distPath);
+  const isProd = process.env.NODE_ENV === "production" || Boolean(distPath);
 
   app.use(cors());
   app.use(express.json());
@@ -115,6 +86,42 @@ export async function startServer() {
       return buildBusTelemetry(busId);
     },
   });
+
+  // Bootstrap DB tables and initial seeds asynchronously in background without delaying server listening
+  (async () => {
+    try {
+      const { bootstrapAppTables, ensureBaselineFleetData } = await import("./src/db/bootstrapAppTables.ts");
+      await bootstrapAppTables();
+      const { bootstrapCoreTables } = await import("./src/db/bootstrapCoreTables.ts");
+      await bootstrapCoreTables();
+      const { migrateMobilitySchemaColumns } = await import("./src/db/bootstrapAppTables.ts");
+      await migrateMobilitySchemaColumns();
+      await ensureBaselineFleetData();
+      const { seedInitialDemoRoutes } = await import("./src/db/initialDemoRoutes.ts");
+      await seedInitialDemoRoutes();
+      const { ensureCanonicalShiftSlots } = await import("./src/db/shiftManagement.ts");
+      await ensureCanonicalShiftSlots();
+      const { ensureOfficialPickupPointsFromRoutes } = await import("./src/db/ensureMobilityPickups.ts");
+      await ensureOfficialPickupPointsFromRoutes();
+      try {
+        const { seedDatabase } = await import("./src/db/seed.ts");
+        await seedDatabase();
+      } catch (err) {
+        console.warn("Baseline seed skipped:", err);
+      }
+
+      const { ensureMtcSchema, purgeLegacyDummyMtcFromTransitDb } = await import(
+        "./artifacts/api-server/src/services/mtc/mtcService.ts"
+      );
+      ensureMtcSchema();
+      purgeLegacyDummyMtcFromTransitDb();
+
+      // Start Route 18 Avadi automatic bus simulation
+      startBusSimulation();
+    } catch (dbErr) {
+      console.error("[Database Bootstrap Warning]:", dbErr);
+    }
+  })();
 
   // Graceful shutdown for Cloud Run
   const shutdown = () => {

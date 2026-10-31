@@ -1,651 +1,478 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "wouter";
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'wouter';
 import {
   BusFront,
-  LocateFixed,
+  Clock,
+  Compass,
+  GraduationCap,
+  Info,
   MapPin,
-  Navigation,
   Radio,
-  Clock3,
-  Smartphone,
-  UserCheck,
-} from "lucide-react";
+  Star,
+  Check,
+  BookmarkCheck,
+} from 'lucide-react';
 import {
-  useListBuses,
-  getListBusesQueryKey,
-} from "@workspace/api-client-react";
-import {
-  ErrorState,
-  LoadingRows,
   PageHeading,
   selectBus,
   useSelectedBusId,
-} from "@/components/acims-ui";
-import { useNetworkStatus } from "@/hooks/use-network";
-import { OfflineMobilityView } from "@/components/offline-mobility-view";
-import { saveLastKnownBusSnapshot } from "@/lib/offline-storage";
-import { useBusRealtimeLocation } from "@/lib/realtime-location";
+  selectBoardingStop,
+  useSelectedBoardingStopId,
+} from '@/components/acims-ui';
 import {
-  normalizeAcimsRoute,
-  type RoutePathCoordinate,
-  type RouteStopModel,
-} from "@/routes/routeTypes";
-import { estimateEta } from "@/eta/estimateEta";
-import { GoogleBusMap } from "@/maps/GoogleBusMap";
+  ALL_REC_ROUTES,
+  findRouteByNumberOrId,
+  getDefaultRecRoute,
+  type RecRoute,
+  type RecRouteStop,
+} from '@/data/recRoutes';
+import { MapView } from '@/components/MapView';
+import { useRouteSimulation } from '@/hooks/useRouteSimulation';
+import { useAuth } from '@/lib/auth-context';
 
 export default function LiveMap() {
-  const { isOnline } = useNetworkStatus();
-  const selectedBusId = useSelectedBusId();
-  const busesQuery = useListBuses({
-    query: { enabled: isOnline, queryKey: getListBusesQueryKey() },
+  const [, setLocation] = useLocation();
+  const { profile, refreshProfile } = useAuth();
+  const globalBusId = useSelectedBusId();
+  const globalBoardingStopId = useSelectedBoardingStopId();
+
+  // 1. Determine active route from URL query param, global state, profile, or default to Route 18
+  const [selectedRouteId, setSelectedRouteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlRoute = params.get('route') || params.get('busId');
+      if (urlRoute) {
+        const found = findRouteByNumberOrId(urlRoute);
+        if (found) return found.id;
+      }
+    }
+    if (globalBusId) {
+      const found = findRouteByNumberOrId(globalBusId);
+      if (found) return found.id;
+    }
+    if (profile?.assignedBusId) {
+      const found = findRouteByNumberOrId(profile.assignedBusId);
+      if (found) return found.id;
+    }
+    return getDefaultRecRoute().id;
   });
 
-  // Support ?busId= query parameter for direct linking from My Bus or Driver page
+  // Keep state synced if URL parameter changes
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    const urlBusId = params.get("busId");
-    if (urlBusId) {
-      selectBus(urlBusId);
+    const urlRoute = params.get('route') || params.get('busId');
+    if (urlRoute) {
+      const found = findRouteByNumberOrId(urlRoute);
+      if (found && found.id !== selectedRouteId) {
+        setSelectedRouteId(found.id);
+      }
     }
-  }, []);
+  }, [window.location.search]);
 
-  const activeBusId = selectedBusId || busesQuery.data?.[0]?.id || "bus-12";
+  // Current active route object (one of the 11 verified REC routes)
+  const activeRoute: RecRoute = useMemo(() => {
+    return findRouteByNumberOrId(selectedRouteId) || getDefaultRecRoute();
+  }, [selectedRouteId]);
 
-  const bus = useMemo(() => {
-    return (
-      busesQuery.data?.find((b) => b.id === activeBusId) ??
-      busesQuery.data?.[0]
-    );
-  }, [busesQuery.data, activeBusId]);
+  // 2. Determine student's selected boarding stop on the active route
+  const [selectedStopId, setSelectedStopId] = useState<string>(() => {
+    // Check if globalBoardingStopId belongs to this route
+    if (globalBoardingStopId) {
+      const match = activeRoute.stops.find(
+        (s) => s.id === globalBoardingStopId || s.name.toLowerCase() === globalBoardingStopId.toLowerCase()
+      );
+      if (match) return match.id;
+    }
+    // Default to first non-via boarding stop on the route
+    const firstBoarding = activeRoute.stops.find((s) => !s.isVia && !s.isCollege) || activeRoute.stops[0];
+    return firstBoarding?.id || '';
+  });
 
-  const effectiveBusId = bus?.id ?? activeBusId;
-
-  // Realtime SSE Location Hook (GET /api/realtime/bus/:busId)
-  const {
-    location,
-    routeDetails,
-    freshness,
-    isRealtimeConnected,
-  } = useBusRealtimeLocation(effectiveBusId, isOnline);
-
-  // Student's own real device GPS location for Google Map display
-  const [userLocation, setUserLocation] = useState<{
-    latitude: number;
-    longitude: number;
-    accuracy?: number | null;
-  } | null>(null);
-  const [centerOnUserTrigger, setCenterOnUserTrigger] = useState(0);
-  const [followBus, setFollowBus] = useState(true);
-
+  // When active route changes, reset selected boarding stop to first boarding stop of this route
   useEffect(() => {
-    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
-      return;
-    }
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        setUserLocation({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-        });
-      },
-      () => {},
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    const match = activeRoute.stops.find(
+      (s) => s.id === selectedStopId || s.name.toLowerCase() === selectedStopId.toLowerCase()
     );
-    return () => {
-      navigator.geolocation.clearWatch(watchId);
-    };
-  }, []);
-
-  // Cache bus state for offline view
-  useEffect(() => {
-    if (bus) {
-      saveLastKnownBusSnapshot(bus);
+    if (!match) {
+      const firstBoarding = activeRoute.stops.find((s) => !s.isVia && !s.isCollege) || activeRoute.stops[0];
+      setSelectedStopId(firstBoarding?.id || '');
     }
-  }, [bus]);
+  }, [activeRoute]);
 
-  const normalizedRoute = useMemo(
-    () => normalizeAcimsRoute(routeDetails, effectiveBusId),
-    [routeDetails, effectiveBusId]
-  );
+  const activeBoardingStop: RecRouteStop | undefined = useMemo(() => {
+    return activeRoute.stops.find((s) => s.id === selectedStopId) || activeRoute.stops[0];
+  }, [activeRoute, selectedStopId]);
 
-  const busNumber =
-    location?.busNumber ||
-    normalizedRoute?.busNumber ||
-    bus?.busNumber ||
-    effectiveBusId.replace("bus-", "");
-  const routeName =
-    location?.routeName ||
-    normalizedRoute?.name ||
-    bus?.routeLabel ||
-    "Campus Transit Line";
-  const origin =
-    location?.origin ||
-    normalizedRoute?.origin ||
-    bus?.origin ||
-    "Route Origin";
-  const destination =
-    location?.destination ||
-    normalizedRoute?.destination ||
-    bus?.destination ||
-    "Campus Terminal";
+  // 3. Route 18 Simulated Bus Engine (runs automatically for Route 18 only)
+  const simulation = useRouteSimulation(activeRoute, selectedStopId);
 
-  const stops: RouteStopModel[] = useMemo(
-    () => normalizedRoute?.stops ?? [],
-    [normalizedRoute]
-  );
+  // 4. Handle route switching by student
+  const handleRouteChange = (nextRouteId: string) => {
+    setSelectedRouteId(nextRouteId);
+    selectBus(nextRouteId);
 
-  const path: RoutePathCoordinate[] = useMemo(
-    () => normalizedRoute?.path ?? [],
-    [normalizedRoute]
-  );
-
-  const hasVerifiedGps =
-    Boolean(location) &&
-    location?.source === "real-device-gps" &&
-    freshness.statusBadge !== "UNAVAILABLE";
-
-  const currentBusCoord: RoutePathCoordinate | null = useMemo(() => {
-    if (location && typeof location.latitude === "number" && typeof location.longitude === "number") {
-      return { latitude: location.latitude, longitude: location.longitude };
+    const targetRoute = findRouteByNumberOrId(nextRouteId);
+    if (targetRoute) {
+      const firstStop = targetRoute.stops.find((s) => !s.isVia && !s.isCollege) || targetRoute.stops[0];
+      if (firstStop) {
+        setSelectedStopId(firstStop.id);
+        selectBoardingStop(firstStop.id);
+      }
     }
-    if (stops.length > 0) {
-      return { latitude: stops[0].latitude, longitude: stops[0].longitude };
+
+    // Update browser URL query param without full reload
+    if (typeof window !== 'undefined') {
+      const cleanNum = nextRouteId.replace(/^(route-|bus-)/, '');
+      const newUrl = `${window.location.pathname}?route=${cleanNum}`;
+      window.history.replaceState(null, '', newUrl);
     }
-    return null;
-  }, [location, stops]);
+  };
 
-  // Split route path into Traveled vs Remaining based on live bus pathIndex
-  const busPathIndex = location?.pathIndex ?? 0;
+  // 5. Handle boarding stop selection
+  const handleStopChange = (nextStopId: string) => {
+    setSelectedStopId(nextStopId);
+    selectBoardingStop(nextStopId);
+  };
 
-  const traveledPathCoords: RoutePathCoordinate[] = useMemo(() => {
-    if (path.length === 0) return [];
-    const subset = path.slice(0, Math.min(path.length, busPathIndex + 1));
-    if (currentBusCoord && subset.length > 0) {
-      return [...subset, currentBusCoord];
+  // 6. Save as My Bus action
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const handleSaveAsMyBus = async () => {
+    selectBus(activeRoute.id);
+    selectBoardingStop(selectedStopId);
+
+    try {
+      await fetch('/api/student/select-bus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId: profile?.userId || 'student-20418',
+          busId: activeRoute.id,
+          pickupStopId: selectedStopId,
+        }),
+      });
+      await refreshProfile();
+    } catch {
+      // ignore
     }
-    return subset;
-  }, [path, busPathIndex, currentBusCoord]);
 
-  const remainingPathCoords: RoutePathCoordinate[] = useMemo(() => {
-    if (path.length === 0) return [];
-    const subset = path.slice(Math.max(0, busPathIndex));
-    if (currentBusCoord && subset.length > 0) {
-      return [currentBusCoord, ...subset];
-    }
-    return subset;
-  }, [path, busPathIndex, currentBusCoord]);
-
-  // Compute fallback Haversine ETA via adapted estimateEta.ts if needed (never on fake coordinates)
-  const targetStopModel = useMemo(() => {
-    if (stops.length === 0) return null;
-    return (
-      stops.find((s) => s.id === location?.nextStopId) ||
-      stops[location?.stopSequenceIndex ?? 0] ||
-      stops[0]
-    );
-  }, [stops, location]);
-
-  const fallbackEta = useMemo(() => {
-    if (!targetStopModel) return null;
-    return estimateEta({
-      busLocation:
-        hasVerifiedGps && location
-          ? {
-              latitude: location.latitude,
-              longitude: location.longitude,
-              speedKph: location.speed,
-            }
-          : null,
-      targetStop: targetStopModel,
-      freshness: freshness.statusBadge,
-    });
-  }, [targetStopModel, hasVerifiedGps, location, freshness.statusBadge]);
-
-  if (!isOnline) {
-    return (
-      <OfflineMobilityView
-        initialTab="routes"
-        selectedBusId={effectiveBusId}
-      />
-    );
-  }
-
-  if (busesQuery.isLoading && !bus) return <LoadingRows count={4} />;
-  if (busesQuery.isError)
-    return <ErrorState onRetry={() => void busesQuery.refetch()} />;
-
-  const nextStopName =
-    location?.nextStop ||
-    targetStopModel?.name ||
-    bus?.nextStop ||
-    "Awaiting route stop";
-  const prevStopName =
-    location?.previousStop || stops[0]?.name || origin;
-  const isAtStop = location?.isAtStop ?? fallbackEta?.isAtStop ?? false;
-  const formattedEta = hasVerifiedGps
-    ? location?.formattedEta ||
-      fallbackEta?.formattedEta ||
-      `${location?.etaMinutes ?? 1} min`
-    : "Waiting for live GPS";
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 3000);
+  };
 
   return (
     <div className="page-in space-y-6">
-      {/* Page Header */}
-      <PageHeading
-        eyebrow="Real-Time Campus Transit"
-        title="Live Bus Tracking"
-        description="Live Google Maps bus tracking powered by real onboard driver GPS, PostgreSQL persistence, and instant Server-Sent Events (SSE)."
-        action={
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Bus Selector so Student Phone B can select the exact same bus as Driver Phone A */}
-            {busesQuery.data && busesQuery.data.length > 0 && (
-              <select
-                value={effectiveBusId}
-                onChange={(e) => selectBus(e.target.value)}
-                data-testid="select-student-map-bus"
-                aria-label="Select bus to track"
-                className="h-9 rounded-full border border-border bg-card px-3 text-xs font-extrabold text-foreground outline-none focus:ring-2 focus:ring-ring"
-              >
-                {busesQuery.data.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    Bus #{b.busNumber} — {b.routeLabel}
-                  </option>
-                ))}
-              </select>
-            )}
+      {/* HEADER SECTION */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="mono text-[10px] font-extrabold uppercase tracking-[0.2em] text-muted-foreground">
+            Student Live Transit
+          </div>
+          <h1 className="display-font text-3xl font-extrabold text-foreground sm:text-4xl">
+            TRACK MY BUS
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {activeRoute.displayName} · {activeRoute.origin} to {activeRoute.destination}
+          </p>
+        </div>
 
-            {/* Live / Recent / Stale / Unavailable Freshness Badge */}
-            {freshness.statusBadge === "LIVE" ? (
-              <div
-                data-testid="badge-status-live"
-                className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-3.5 py-1.5 text-xs font-extrabold text-emerald-800 dark:text-emerald-300 shadow-xs"
-              >
-                <span className="pulse-dot h-2 w-2 rounded-full bg-emerald-500" />
-                <span>LIVE</span>
-                <span className="text-[10px] font-medium text-emerald-700/80 dark:text-emerald-400/80">
-                  · {freshness.freshnessLabel}
-                </span>
-              </div>
-            ) : freshness.statusBadge === "RECENT" ? (
-              <div
-                data-testid="badge-status-recent"
-                className="flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/15 px-3 py-1.5 text-xs font-extrabold text-blue-800 dark:text-blue-300"
-              >
-                <Clock3 size={13} className="text-blue-600 dark:text-blue-400" />
-                <span>RECENT</span>
-                <span className="text-[10px] font-medium text-blue-700/80 dark:text-blue-400/80">
-                  · {freshness.freshnessLabel}
-                </span>
-              </div>
-            ) : freshness.statusBadge === "STALE" ? (
-              <div
-                data-testid="badge-status-stale"
-                className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/15 px-3 py-1.5 text-xs font-extrabold text-amber-800 dark:text-amber-300"
-              >
-                <Clock3 size={13} className="text-amber-600 dark:text-amber-400" />
-                <span>STALE</span>
-                <span className="text-[10px] font-medium text-amber-700/80 dark:text-amber-400/80">
-                  · {freshness.freshnessLabel}
-                </span>
-              </div>
+        {/* Route Selector & Save Controls */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* ALL 11 ROUTES SELECTOR */}
+          <div className="flex items-center gap-1.5 rounded-2xl border border-border bg-card px-3 py-1.5 shadow-xs">
+            <BusFront size={16} className="text-primary" />
+            <select
+              value={activeRoute.id}
+              onChange={(e) => handleRouteChange(e.target.value)}
+              data-testid="select-live-tracking-route"
+              aria-label="Select bus route"
+              className="bg-transparent text-xs font-black text-foreground outline-none cursor-pointer"
+            >
+              {ALL_REC_ROUTES.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.routeNumber} — {r.routeName}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* BOARDING STOP SELECTOR */}
+          <div className="flex items-center gap-1.5 rounded-2xl border border-border bg-card px-3 py-1.5 shadow-xs">
+            <MapPin size={16} className="text-sky-500" />
+            <select
+              value={selectedStopId}
+              onChange={(e) => handleStopChange(e.target.value)}
+              data-testid="select-live-tracking-stop"
+              aria-label="Select boarding stop"
+              className="bg-transparent text-xs font-bold text-foreground outline-none max-w-[200px] truncate cursor-pointer"
+            >
+              {activeRoute.stops.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.isCollege
+                    ? `🎓 ${s.name} (${s.time})`
+                    : s.isVia
+                    ? `○ ${s.name} (Via/Non-stop)`
+                    : `${s.sequence}. ${s.name} (${s.time})`}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* SAVE AS MY BUS BUTTON */}
+          <button
+            type="button"
+            onClick={handleSaveAsMyBus}
+            data-testid="button-save-as-my-bus"
+            className={`inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-2 text-xs font-extrabold transition shadow-xs ${
+              saveSuccess
+                ? 'bg-emerald-600 text-white'
+                : 'bg-primary text-primary-foreground hover:opacity-90'
+            }`}
+          >
+            {saveSuccess ? (
+              <>
+                <Check size={14} /> Saved as My Bus
+              </>
             ) : (
-              <div
-                data-testid="badge-status-unavailable"
-                className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-extrabold text-muted-foreground"
-              >
-                <span className="h-2 w-2 rounded-full bg-muted-foreground" />
-                <span>UNAVAILABLE · {freshness.freshnessLabel}</span>
-              </div>
+              <>
+                <BookmarkCheck size={14} /> Save as My Bus
+              </>
             )}
-
-            {/* Link to Driver Console */}
-            <Link
-              href="/driver"
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-bold text-foreground hover:bg-muted transition"
-              title="Open Driver Phone Console"
-            >
-              <Smartphone size={13} className="text-accent-foreground" />
-              <span>Driver Console</span>
-            </Link>
-          </div>
-        }
-      />
-
-      {/* Primary Live Card Banner */}
-      <section className="rounded-[28px] border-2 border-primary/20 bg-card p-6 shadow-sm sm:p-7">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="relative grid h-14 w-14 place-items-center rounded-2xl bg-primary text-accent shadow-md">
-              <BusFront size={28} strokeWidth={2.4} />
-              <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[10px] font-black text-primary">
-                {busNumber}
-              </span>
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="display-font text-2xl font-black text-foreground sm:text-3xl">
-                  Bus {busNumber}
-                </h2>
-                <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-extrabold text-secondary-foreground">
-                  {routeName}
-                </span>
-                <span
-                  className={`rounded-full px-2.5 py-0.5 font-mono text-[10px] font-black ${
-                    isRealtimeConnected
-                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                      : "bg-amber-500/15 text-amber-700"
-                  }`}
-                >
-                  {isRealtimeConnected ? `SOCKET.IO ROOM bus:${effectiveBusId}` : "SOCKET RECONNECTING"}
-                </span>
-              </div>
-              <div className="mt-1 flex items-center gap-2 text-xs font-bold text-muted-foreground">
-                <span>{origin}</span>
-                <span className="text-border">→</span>
-                <span>{destination}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Next Stop & Geographic ETA Card */}
-          <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-border bg-muted/30 p-4 sm:gap-8">
-            <div>
-              <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                Next stop
-              </div>
-              <div className="mt-0.5 flex items-center gap-1.5 text-base font-extrabold text-foreground sm:text-lg">
-                <MapPin size={17} className="text-accent-foreground shrink-0" />
-                <span data-testid="live-map-next-stop">{nextStopName}</span>
-                {isAtStop && hasVerifiedGps && (
-                  <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300">
-                    At Stop
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="border-l border-border pl-4 sm:pl-8">
-              <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                {hasVerifiedGps
-                  ? `${location?.etaLabel || "LIVE ETA"} (Haversine)`
-                  : "ETA STATUS"}
-              </div>
-              <div className="mt-0.5 flex items-center gap-2">
-                <span
-                  data-testid="live-map-eta"
-                  className="text-base font-extrabold text-primary dark:text-accent sm:text-lg"
-                >
-                  {formattedEta}
-                </span>
-                {hasVerifiedGps &&
-                  location?.etaConfidence &&
-                  location.etaConfidence !== "UNAVAILABLE" && (
-                    <span
-                      className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
-                        location.etaConfidence === "HIGH"
-                          ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {location.etaConfidence}
-                    </span>
-                  )}
-              </div>
-            </div>
-
-            {hasVerifiedGps && location?.remainingDistanceKm !== undefined && (
-              <div className="hidden border-l border-border pl-4 sm:block sm:pl-8">
-                <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                  Distance
-                </div>
-                <div className="mt-0.5 text-base font-extrabold text-foreground sm:text-lg">
-                  {location.remainingDistanceKm} km
-                </div>
-              </div>
-            )}
-          </div>
+          </button>
         </div>
-      </section>
+      </div>
 
-      {/* Google Map & Stop Sequence Layout */}
-      <section className="grid gap-6 xl:grid-cols-[1.5fr_.7fr]">
-        {/* Google Maps Container */}
-        <div className="relative min-h-[520px] overflow-hidden rounded-[28px] border border-border bg-secondary/30 p-3 sm:p-5">
-          {/* Top-Left Floating Info Overlay */}
-          <div className="pointer-events-none absolute left-6 top-6 z-10 flex flex-col gap-1 rounded-2xl border border-border bg-card/95 px-4 py-2.5 shadow-md backdrop-blur-md">
-            <div className="mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">
-              Google Maps Live Corridor
-            </div>
-            <div className="flex items-center gap-2 text-sm font-black text-foreground">
-              <span className="grid h-6 w-6 place-items-center rounded-md bg-primary text-accent text-xs font-bold">
-                {busNumber}
+      {/* MOBILE-FIRST & DESKTOP GRID LAYOUT */}
+      <div className="grid gap-6 lg:grid-cols-[1fr_360px] xl:grid-cols-[1fr_390px]">
+        {/* LEFT COLUMN: MAIN INTERACTIVE MAP (Takes most of screen) */}
+        <div className="space-y-4">
+          <div className="relative">
+            {/* Main Interactive Leaflet Map */}
+            <MapView
+              route={activeRoute}
+              busPosition={simulation.busPosition}
+              selectedBoardingStopId={selectedStopId}
+              isSimulatedRoute={simulation.isSimulated}
+              heightClassName="h-[480px] sm:h-[540px] lg:h-[600px]"
+            />
+
+            {/* Over-the-map Route Header Pill */}
+            <div className="absolute top-4 left-4 z-[400] flex items-center gap-2 rounded-2xl border border-border/80 bg-card/95 px-3.5 py-2 shadow-md backdrop-blur-md">
+              <span className="grid h-7 w-7 place-items-center rounded-xl bg-primary text-xs font-black text-primary-foreground">
+                {activeRoute.routeNumber}
               </span>
-              <span>{routeName}</span>
-            </div>
-            {hasVerifiedGps && location && (
-              <div
-                data-testid="live-map-bus-coords"
-                className="font-mono text-[10px] font-bold text-muted-foreground"
-              >
-                GPS: {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
-                {location.speed != null ? ` · ${location.speed} km/h` : ""}
+              <div>
+                <div className="text-xs font-extrabold text-foreground">
+                  {activeRoute.routeName}
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  Starts: {activeRoute.startTime} · Campus: {activeRoute.campusArrivalTime}
+                </div>
               </div>
-            )}
+            </div>
+
+            {/* Over-the-map Simulation Badge */}
+            <div className="absolute top-4 right-4 z-[400]">
+              {simulation.isSimulated ? (
+                <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-3 py-1.5 text-xs font-extrabold text-emerald-800 dark:text-emerald-300 shadow-md backdrop-blur-md">
+                  <span className="pulse-dot h-2 w-2 rounded-full bg-emerald-500" />
+                  <span>LIVE MOVING BUS</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 rounded-full border border-border/80 bg-card/95 px-3 py-1.5 text-xs font-bold text-muted-foreground shadow-md backdrop-blur-md">
+                  <Clock size={12} />
+                  <span>SCHEDULED ROUTE</span>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Top-Right Camera Controls */}
-          <div className="absolute right-6 top-6 z-10 flex items-center gap-2">
-            {userLocation && (
-              <button
-                type="button"
-                onClick={() => {
-                  setFollowBus(false);
-                  setCenterOnUserTrigger((c) => c + 1);
-                }}
-                title="Center on my current location"
-                data-testid="button-center-user-location"
-                className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card/95 px-3 py-2 text-xs font-extrabold text-foreground shadow-sm backdrop-blur hover:bg-card transition"
-              >
-                <UserCheck size={14} className="text-blue-600" />
-                <span className="hidden sm:inline">My Location</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setFollowBus((prev) => !prev)}
-              title={
-                followBus
-                  ? "Follow Bus Mode: Enabled"
-                  : "Follow Bus Mode: Click to Enable"
-              }
-              data-testid="button-toggle-follow-bus"
-              className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-extrabold shadow-sm backdrop-blur transition ${
-                followBus
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card/95 text-muted-foreground hover:bg-card"
-              }`}
-            >
-              <LocateFixed
-                size={14}
-                className={followBus ? "animate-pulse" : ""}
-              />
-              <span>{followBus ? "Following Bus" : "Follow Bus"}</span>
-            </button>
-          </div>
-
-          {/* Google Maps Visualizer */}
-          <GoogleBusMap
-            busId={effectiveBusId}
-            busNumber={busNumber}
-            stops={stops}
-            traveledPath={traveledPathCoords}
-            remainingPath={remainingPathCoords}
-            fullPath={path}
-            location={location}
-            userLocation={userLocation}
-            followBus={followBus}
-            centerOnUserTrigger={centerOnUserTrigger}
-          />
-
-          {/* Bottom Map Legend */}
-          <div className="pointer-events-none absolute bottom-5 left-5 right-5 z-10 flex flex-wrap items-center gap-3.5 rounded-2xl border border-border bg-card/95 px-4 py-2.5 text-[11px] font-bold shadow-md backdrop-blur-md">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-6 rounded-full bg-teal-700" />
-              <span>Remaining Route</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-6 rounded-full bg-slate-500" />
-              <span>Traveled Portion</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-3 w-3 rounded-full border-2 border-slate-900 bg-amber-400" />
-              <span>Next Stop</span>
-            </span>
-            {userLocation && (
-              <span className="flex items-center gap-1.5">
-                <span className="h-3 w-3 rounded-full border-2 border-white bg-blue-600 shadow" />
-                <span>Your Location</span>
-              </span>
-            )}
-            <span className="ml-auto flex items-center gap-1.5 text-muted-foreground">
-              <Radio size={13} className="text-primary dark:text-accent" />
+          {/* Under-the-map quick guidance banner for non-simulated routes */}
+          {!simulation.isSimulated && (
+            <div className="flex items-center gap-2.5 rounded-2xl border border-border bg-muted/40 p-3.5 text-xs text-muted-foreground">
+              <Info size={16} className="text-primary shrink-0" />
               <span>
-                {hasVerifiedGps
-                  ? `Real Device GPS (${freshness.statusBadge})`
-                  : "Waiting for Driver GPS"}
+                <strong>Route {activeRoute.routeNumber} ({activeRoute.routeName}):</strong> Live bus movement is not simulated for this route. Showing official verified stops, route path, and approximate timetable.
               </span>
-            </span>
-          </div>
+            </div>
+          )}
         </div>
 
-        {/* Right Sidebar: Stop Sequence & Context */}
-        <div className="rounded-[28px] border border-border bg-card p-6 sm:p-7">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-                Stop Sequence
-              </div>
-              <h3 className="mt-1 text-xl font-extrabold text-foreground">
-                {stops.length} Route Stops
-              </h3>
+        {/* RIGHT COLUMN: BUS & ROUTE INFORMATION PANEL */}
+        <div className="space-y-5">
+          {/* SECTION: BUS STATUS / TELEMETRY CARD */}
+          <div className="rounded-[24px] border border-border bg-card p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <span className="mono text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">
+                Current Bus
+              </span>
+              {simulation.isSimulated ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-emerald-600 dark:text-emerald-400">
+                  <span className="pulse-dot h-2 w-2 rounded-full bg-emerald-500" />
+                  ● Moving
+                </span>
+              ) : (
+                <span className="text-xs font-bold text-muted-foreground">
+                  Scheduled
+                </span>
+              )}
             </div>
-            <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-extrabold text-secondary-foreground">
-              {location?.status || "Standby"}
-            </span>
-          </div>
 
-          {/* Timeline of Stops */}
-          <div className="mt-6 space-y-0">
-            {stops.map((stop, index) => {
-              const isNext = stop.id === location?.nextStopId;
-              const isPassed =
-                hasVerifiedGps &&
-                (stop.pathIndex ?? index * 6) < busPathIndex &&
-                !isNext;
-              const isThisStopActive = Boolean(
-                hasVerifiedGps && isAtStop && isNext
-              );
+            {/* ROUTE 18 DYNAMIC TELEMETRY VS OTHER ROUTES SCHEDULE */}
+            {simulation.isSimulated ? (
+              <div className="space-y-3.5">
+                <div>
+                  <div className="mono text-[9px] uppercase font-bold text-muted-foreground">
+                    Current / Nearest Stop
+                  </div>
+                  <div className="mt-0.5 text-base font-extrabold text-foreground flex items-center gap-1.5">
+                    <MapPin size={15} className="text-primary shrink-0" />
+                    <span>{simulation.currentNearestStop?.name || 'Avadi Ramarathinam'}</span>
+                  </div>
+                </div>
 
-              return (
-                <div
-                  key={stop.id}
-                  data-testid={`stop-timeline-row-${stop.id}`}
-                  className="group relative flex gap-4 pb-6 last:pb-0"
-                >
-                  {/* Spine connection */}
-                  <div className="relative flex w-4 justify-center">
-                    <span
-                      className={`z-10 mt-1 h-4 w-4 rounded-full border-4 transition-all ${
-                        isThisStopActive
-                          ? "border-emerald-500 bg-emerald-100 ring-4 ring-emerald-500/20"
-                          : isNext
-                          ? "border-accent-foreground bg-accent ring-4 ring-accent/30"
-                          : isPassed
-                          ? "border-slate-400 bg-slate-300 dark:bg-slate-700"
-                          : "border-muted bg-card"
-                      }`}
-                    />
-                    {index < stops.length - 1 && (
-                      <span
-                        className={`absolute top-4 h-full w-0.5 ${
-                          isPassed
-                            ? "bg-slate-400 dark:bg-slate-700"
-                            : "bg-border"
-                        }`}
-                      />
+                <div>
+                  <div className="mono text-[9px] uppercase font-bold text-muted-foreground">
+                    Next Stop
+                  </div>
+                  <div className="mt-0.5 text-base font-extrabold text-foreground flex items-center gap-1.5">
+                    <Compass size={15} className="text-accent-foreground shrink-0" />
+                    <span>{simulation.nextStop?.name || 'College Campus'}</span>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-primary/10 p-4 border border-primary/20">
+                  <div className="mono text-[10px] uppercase font-black text-primary">
+                    Live ETA to {activeBoardingStop?.name || 'Your Stop'}
+                  </div>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="display-font text-4xl font-extrabold text-primary">
+                      {simulation.formattedEta}
+                    </span>
+                    {simulation.remainingDistanceKm != null && (
+                      <span className="text-xs font-bold text-muted-foreground">
+                        (~{simulation.remainingDistanceKm} km)
+                      </span>
                     )}
                   </div>
-
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <span
-                        className={`text-sm font-extrabold ${
-                          isNext
-                            ? "text-primary dark:text-accent font-black"
-                            : isPassed
-                            ? "text-muted-foreground"
-                            : "text-foreground"
-                        }`}
-                      >
-                        {stop.name}
-                      </span>
-                      {isNext && (
-                        <span className="rounded-full bg-accent/30 px-2 py-0.5 text-[10px] font-extrabold text-accent-foreground">
-                          Next
-                        </span>
-                      )}
-                      {isThisStopActive && (
-                        <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300">
-                          Bus Here
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-                      {isNext ? (
-                        <span className="font-bold text-accent-foreground">
-                          {hasVerifiedGps
-                            ? `Arriving in ${formattedEta}`
-                            : "Awaiting live driver GPS"}
-                        </span>
-                      ) : isPassed ? (
-                        <span>Passed</span>
-                      ) : (
-                        <span>Stop #{index + 1}</span>
-                      )}
-                    </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Dynamically updated from simulated moving onboard bus coordinates.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3.5">
+                <div>
+                  <div className="mono text-[9px] uppercase font-bold text-muted-foreground">
+                    Selected Boarding Stop
+                  </div>
+                  <div className="mt-0.5 text-base font-extrabold text-foreground flex items-center gap-1.5">
+                    <Star size={15} className="text-amber-500 shrink-0 fill-amber-500" />
+                    <span>{activeBoardingStop?.name || 'Select a stop'}</span>
                   </div>
                 </div>
-              );
-            })}
+
+                <div className="rounded-2xl bg-secondary/50 p-4 border border-border">
+                  <div className="mono text-[10px] uppercase font-bold text-muted-foreground">
+                    Approx. Schedule
+                  </div>
+                  <div className="display-font mt-1 text-3xl font-extrabold text-foreground">
+                    {activeBoardingStop?.time || activeRoute.startTime}
+                  </div>
+                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <Clock size={12} />
+                    <span>Campus Arrival: <strong>{activeRoute.campusArrivalTime}</strong></span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border/80 bg-muted/30 p-3 text-xs text-muted-foreground">
+                  <div className="font-extrabold text-foreground mb-0.5">Route Information</div>
+                  <div>Starts at {activeRoute.origin} at {activeRoute.startTime}.</div>
+                  {activeRoute.viaNotes && (
+                    <div className="mt-1">Via: {activeRoute.viaNotes}.</div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Context Footer */}
-          <div className="mt-6 rounded-2xl bg-muted/50 p-4 text-xs">
-            <div className="flex items-center gap-2 font-bold text-foreground">
-              <Navigation size={14} className="text-primary dark:text-accent" />
-              <span>Live Telemetry Status</span>
+          {/* SECTION: ALL ROUTE STOPS CHECKLIST */}
+          <div className="rounded-[24px] border border-border bg-card p-5 shadow-xs">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div>
+                <span className="mono text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">
+                  Route Stops
+                </span>
+                <h3 className="text-sm font-extrabold text-foreground">
+                  {activeRoute.stops.length} Official Stops
+                </h3>
+              </div>
+              <span className="text-[11px] font-bold text-muted-foreground">
+                Tap to pick boarding
+              </span>
             </div>
-            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-              {hasVerifiedGps ? (
-                <>
-                  Bus #{busNumber} is moving from <strong>{prevStopName}</strong>{" "}
-                  toward <strong>{nextStopName}</strong>.
-                  {location?.remainingDistanceKm
-                    ? ` ~${location.remainingDistanceKm} km remaining.`
-                    : ""}
-                </>
-              ) : (
-                <>
-                  No active GPS broadcast for Bus #{busNumber} right now. Start
-                  a trip on <strong>/driver</strong> to stream live coordinates.
-                </>
-              )}
-            </p>
+
+            <div className="mt-3 max-h-[380px] space-y-2 overflow-y-auto pr-1">
+              {activeRoute.stops.map((stop) => {
+                const isSelected = stop.id === selectedStopId;
+                return (
+                  <button
+                    key={stop.id}
+                    type="button"
+                    onClick={() => handleStopChange(stop.id)}
+                    className={`w-full rounded-2xl border p-3 text-left transition flex items-start justify-between gap-3 ${
+                      isSelected
+                        ? 'border-amber-500 bg-amber-500/10 ring-2 ring-amber-500/30'
+                        : stop.isCollege
+                        ? 'border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-500/50'
+                        : stop.isVia
+                        ? 'border-dashed border-border bg-muted/20 hover:bg-muted/40'
+                        : 'border-border bg-muted/30 hover:border-primary/40'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        {stop.isCollege ? (
+                          <GraduationCap size={15} className="text-emerald-600 shrink-0" />
+                        ) : stop.isVia ? (
+                          <span className="text-xs text-muted-foreground font-black">○</span>
+                        ) : isSelected ? (
+                          <Star size={13} className="text-amber-500 fill-amber-500 shrink-0" />
+                        ) : (
+                          <span className="mono text-[10px] font-black text-muted-foreground">
+                            #{stop.sequence}
+                          </span>
+                        )}
+                        <span className="text-xs font-extrabold text-foreground truncate">
+                          {stop.name}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">
+                        {stop.isCollege
+                          ? 'College Campus Destination'
+                          : stop.isVia
+                          ? 'Via / Non-Stop Location'
+                          : `Scheduled Timetable: ${stop.time}`}
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <div className="text-xs font-black text-foreground">
+                        {stop.time}
+                      </div>
+                      {isSelected && (
+                        <span className="mt-0.5 inline-block rounded-md bg-amber-500 px-1.5 py-0.5 text-[9px] font-black text-white">
+                          Boarding
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </section>
+      </div>
     </div>
   );
 }

@@ -3,13 +3,14 @@ import { useNetworkStatus } from '@/hooks/use-network';
 import { Link } from 'wouter';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, BusFront, Clock3, MapPin, RefreshCw, Settings2, TrainFront } from 'lucide-react';
-import { PageHeading, ErrorState, selectBus } from '@/components/acims-ui';
+import { PageHeading, ErrorState, selectBus, selectBoardingStop } from '@/components/acims-ui';
 import { useAuth } from '@/lib/auth-context';
 import { studentMobilityHeaders } from '@/lib/mobilityApi';
 import { Button } from '@/components/ui/button';
 import { useBusRealtimeLocation } from '@/lib/realtime-location';
 import { normalizeAcimsRoute } from '@/routes/routeTypes';
-import { GoogleBusMap } from '@/maps/GoogleBusMap';
+import { MapView } from '@/components/MapView';
+import { findRouteByNumberOrId } from '@/data/recRoutes';
 
 type MyBusPayload = {
   busId: string;
@@ -124,6 +125,10 @@ export default function MyBusPage() {
     () => (data?.busId ? normalizeAcimsRoute(routeDetails, data.busId) : null),
     [routeDetails, data?.busId],
   );
+
+  const recRoute = useMemo(() => {
+    return findRouteByNumberOrId(data?.busNumber || data?.busId);
+  }, [data?.busNumber, data?.busId]);
 
   const pickupOptionsQuery = useQuery({
     queryKey: ['student', 'pickup-options', profile?.userId],
@@ -245,11 +250,15 @@ export default function MyBusPage() {
               <p className="text-sm text-muted-foreground">{data.directionLabel}</p>
             </div>
             <Link
-              href={`/map?busId=${encodeURIComponent(data.busId)}`}
-              onClick={() => selectBus(data.busId)}
+              href={`/map?route=${encodeURIComponent(data.busNumber || data.busId)}`}
+              onClick={() => {
+                selectBus(data.busId);
+                if (data.pickup?.id) selectBoardingStop(data.pickup.id);
+              }}
+              data-testid="button-track-live-bus"
               className="rounded-xl bg-primary px-3.5 py-2 text-xs font-extrabold text-primary-foreground hover:opacity-90"
             >
-              Open Full Live Map
+              Track Live Bus
             </Link>
           </div>
 
@@ -304,20 +313,13 @@ export default function MyBusPage() {
             )}
           </div>
 
-          {/* Live Embedded Google Map */}
-          {normalizedRoute && (
+          {/* Interactive Leaflet Route Map */}
+          {recRoute && (
             <div className="overflow-hidden rounded-2xl border border-border">
-              <GoogleBusMap
-                busId={data.busId}
-                busNumber={data.busNumber}
-                stops={normalizedRoute.stops}
-                traveledPath={[]}
-                remainingPath={normalizedRoute.path}
-                fullPath={normalizedRoute.path}
-                location={liveBusLocation}
-                userLocation={userLocation}
-                followBus={true}
-                highlightPickupStopId={data.pickup.id}
+              <MapView
+                route={recRoute}
+                selectedBoardingStopId={data.pickup.id}
+                isSimulatedRoute={recRoute.routeNumber === '18'}
                 heightClassName="h-[340px]"
               />
             </div>

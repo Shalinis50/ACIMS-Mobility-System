@@ -2,7 +2,7 @@ import pg from "pg";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import { PGlite } from "@electric-sql/pglite";
-import * as schema from "./schema/index.ts";
+import * as schema from "./schema/index";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -35,15 +35,39 @@ if (rawDbUrl) {
 }
 
 if (!db) {
-  // Use persistent embedded PostgreSQL engine
-  const dataDir = path.resolve(process.cwd(), "data/postgres");
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+  // Use persistent embedded PostgreSQL engine with fallback for read-only environments
+  try {
+    let chosenDir: string | undefined;
+    const localDir = path.resolve(process.cwd(), "data/postgres");
+    try {
+      if (!fs.existsSync(localDir)) {
+        fs.mkdirSync(localDir, { recursive: true });
+      }
+      fs.accessSync(localDir, fs.constants.W_OK);
+      chosenDir = localDir;
+    } catch {
+      // Local dir not writable (e.g. read-only container root in Cloud Run); fallback to /tmp
+      const tmpDir = path.resolve("/tmp", "acims-postgres");
+      try {
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        chosenDir = tmpDir;
+      } catch {
+        chosenDir = undefined; // pure in-memory
+      }
+    }
+
+    pgliteClient = global._pgliteClient ?? (chosenDir ? new PGlite(chosenDir) : new PGlite());
+    global._pgliteClient = pgliteClient;
+    db = drizzlePglite(pgliteClient, { schema });
+    console.log(`[ACIMS DB] Embedded PostgreSQL engine initialized at ${chosenDir || "memory"}`);
+  } catch (embeddedErr) {
+    console.warn("[ACIMS DB] Falling back to in-memory PGlite:", embeddedErr);
+    pgliteClient = new PGlite();
+    global._pgliteClient = pgliteClient;
+    db = drizzlePglite(pgliteClient, { schema });
   }
-  pgliteClient = global._pgliteClient ?? new PGlite(dataDir);
-  global._pgliteClient = pgliteClient;
-  db = drizzlePglite(pgliteClient, { schema });
-  console.log(`[ACIMS DB] Persistent PostgreSQL engine initialized at ${dataDir}`);
 }
 
 /**
@@ -156,4 +180,4 @@ export async function initDatabase() {
 }
 
 export { pool, db, pgliteClient };
-export * from "./schema/index.ts";
+export * from "./schema/index";

@@ -190,7 +190,7 @@ export const REC_CAMPUS_STOPS: CampusBusStop[] = [
   {
     id: "rec-central-academic-stop",
     name: "Central Block Academic Stop",
-    servedRoutes: ["Campus Loop A", "Hostel Village Shuttle", "Metro Connector Feeder"],
+    servedRoutes: ["Campus Loop A", "Hostel Village Shuttle", "Avadi Route"],
     description: "Located at the central crossroad between Central Academic Block and the Sports Field.",
     latitude: 13.0084,
     longitude: 80.0042,

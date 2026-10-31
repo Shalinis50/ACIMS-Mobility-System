@@ -1,3 +1,5 @@
+import { INITIAL_DEMO_ROUTES } from "../../../../src/db/initialDemoRoutes.ts";
+
 export type Coordinate = {
   latitude: number;
   longitude: number;
@@ -72,82 +74,71 @@ function interpolateWaypoints(waypoints: Coordinate[], pointsPerSegment: number)
 
 /**
  * ------------------------------------------------------------------------
- * ROUTE 18: Metro Connector Feeder (Reference Route)
+ * ROUTE 18: AVADI (Official REC Transport Route)
  * Stops:
- * - Metro Central Station (pathIndex: 0)
- * - JB Estate (pathIndex: 6)
- * - Ponnu (pathIndex: 12)
- * - Ramratna (pathIndex: 18)
- * - Medical Sciences Center (pathIndex: 24)
+ * - Avadi Ramarathinam (pathIndex: 0)
+ * - Ponnu Supermarket (pathIndex: 12)
+ * - Poonamallee Bypass (pathIndex: 24) [Via / Non-stop]
+ * - College Campus (pathIndex: 36) [Destination]
  * ------------------------------------------------------------------------
  */
 const bus18Waypoints: Coordinate[] = [
-  { latitude: 12.9249, longitude: 80.1275 }, // Stop 0: Metro Central Station (idx 0)
-  { latitude: 12.9272, longitude: 80.1302 }, // Stop 1: JB Estate (idx 6)
-  { latitude: 12.9301, longitude: 80.1336 }, // Stop 2: Ponnu (idx 12)
-  { latitude: 12.9338, longitude: 80.1368 }, // Stop 3: Ramratna (idx 18)
-  { latitude: 12.9372, longitude: 80.1396 }, // Stop 4: Medical Sciences Center (idx 24)
+  { latitude: 13.1180, longitude: 80.1030 }, // Avadi Ramarathinam
+  { latitude: 13.1140, longitude: 80.1070 }, // Ponnu Supermarket
+  { latitude: 13.0489, longitude: 80.0934 }, // Poonamallee Bypass
+  { latitude: 13.0084, longitude: 80.0033 }, // College Campus
 ];
-const bus18Path = interpolateWaypoints(bus18Waypoints, 6);
+const bus18Path = interpolateWaypoints(bus18Waypoints, 12);
 const bus18Cumulative = calculateCumulativeDistances(bus18Path);
 
 const routeBus18: RouteDefinition = {
-  id: "route-bus-18",
+  id: "route-18",
   routeNumber: "18",
-  name: "Metro Connector Feeder",
-  origin: "Metro Central Station",
-  destination: "Medical Sciences Center",
+  name: "AVADI",
+  origin: "Avadi Ramarathinam",
+  destination: "College Campus",
   stops: [
     {
-      id: "metro-central",
-      name: "Metro Central Station",
-      sequence: 0,
+      id: "18-1",
+      name: "Avadi Ramarathinam",
+      sequence: 1,
       pathIndex: 0,
-      latitude: bus18Path[0].latitude,
-      longitude: bus18Path[0].longitude,
+      latitude: 13.1180,
+      longitude: 80.1030,
       minutesFromPrevious: 0,
     },
     {
-      id: "jb-estate",
-      name: "JB Estate",
-      sequence: 1,
-      pathIndex: 6,
-      latitude: bus18Path[6].latitude,
-      longitude: bus18Path[6].longitude,
-      minutesFromPrevious: 3,
-    },
-    {
-      id: "ponnu",
-      name: "Ponnu",
+      id: "18-2",
+      name: "Ponnu Supermarket",
       sequence: 2,
       pathIndex: 12,
-      latitude: bus18Path[12].latitude,
-      longitude: bus18Path[12].longitude,
-      minutesFromPrevious: 4,
+      latitude: 13.1140,
+      longitude: 80.1070,
+      minutesFromPrevious: 2,
     },
     {
-      id: "ramratna",
-      name: "Ramratna",
+      id: "18-3",
+      name: "Poonamallee Bypass",
       sequence: 3,
-      pathIndex: 18,
-      latitude: bus18Path[18].latitude,
-      longitude: bus18Path[18].longitude,
-      minutesFromPrevious: 3,
+      pathIndex: 24,
+      latitude: 13.0489,
+      longitude: 80.0934,
+      minutesFromPrevious: 33,
     },
     {
-      id: "medical-sciences",
-      name: "Medical Sciences Center",
+      id: "18-4",
+      name: "College Campus",
       sequence: 4,
-      pathIndex: 24,
-      latitude: bus18Path[24].latitude,
-      longitude: bus18Path[24].longitude,
-      minutesFromPrevious: 4,
+      pathIndex: 36,
+      latitude: 13.0084,
+      longitude: 80.0033,
+      minutesFromPrevious: 25,
     },
   ],
   path: bus18Path,
   cumulativeDistances: bus18Cumulative,
   totalDistanceKm: Number(bus18Cumulative[bus18Cumulative.length - 1].toFixed(2)),
-  averageSpeedKmh: 22,
+  averageSpeedKmh: 30,
 };
 
 /**
@@ -487,46 +478,86 @@ const routeMtc27b: RouteDefinition = {
   averageSpeedKmh: 24,
 };
 
+// Build all 11 official REC College Routes from INITIAL_DEMO_ROUTES
+const recDemoRouteRegistry: Record<string, RouteDefinition> = {};
+for (const demo of INITIAL_DEMO_ROUTES) {
+  if (demo.routeNumber === "18") {
+    recDemoRouteRegistry["route-18"] = routeBus18;
+    recDemoRouteRegistry["route-bus-18"] = routeBus18;
+    continue;
+  }
+  const waypoints = demo.stops.map((s) => ({ latitude: s.lat, longitude: s.lng }));
+  const path = interpolateWaypoints(waypoints, 6);
+  const cumulative = calculateCumulativeDistances(path);
+  const routeDef: RouteDefinition = {
+    id: `route-${demo.routeNumber.toLowerCase()}`,
+    routeNumber: demo.routeNumber,
+    name: demo.routeName,
+    origin: demo.origin,
+    destination: demo.destination,
+    stops: demo.stops.map((s, idx) => ({
+      id: `route-${demo.routeNumber.toLowerCase()}-stop-${idx + 1}`,
+      name: s.name,
+      sequence: idx + 1,
+      pathIndex: Math.min(idx * 6, Math.max(0, path.length - 1)),
+      latitude: s.lat,
+      longitude: s.lng,
+      minutesFromPrevious: idx === 0 ? 0 : 3,
+    })),
+    path,
+    cumulativeDistances: cumulative,
+    totalDistanceKm: Number((cumulative[cumulative.length - 1] || 0).toFixed(2)),
+    averageSpeedKmh: 24,
+  };
+  recDemoRouteRegistry[routeDef.id] = routeDef;
+  recDemoRouteRegistry[`route-bus-${demo.routeNumber.toLowerCase()}`] = routeDef;
+}
+
 const routeRegistry: Record<string, RouteDefinition> = {
+  ...recDemoRouteRegistry,
   "route-MTC_21G": routeMtc21g,
   "route-MTC_27B": routeMtc27b,
   "route-bus-18": routeBus18,
+  "route-18": routeBus18,
   "route-bus-12": routeBus12,
   "route-bus-4b": routeBus4b,
   "route-bus-7": routeBus7,
   "route-bus-21": routeBus21,
 };
 
-const busToRouteMap: Record<string, string> = {
-  "MTC_21G": "route-MTC_21G",
-  "MTC_27B": "route-MTC_27B",
-  "bus-18": "route-bus-18",
-  "bus-12": "route-bus-12",
-  "bus-4b": "route-bus-4b",
-  "bus-7": "route-bus-7",
-  "bus-21": "route-bus-21",
-};
-
 export function getRouteById(routeId: string): RouteDefinition | undefined {
-  return routeRegistry[routeId];
+  if (!routeId) return undefined;
+  const clean = routeId.trim().toLowerCase();
+  return (
+    routeRegistry[clean] ||
+    routeRegistry[`route-${clean}`] ||
+    routeRegistry[`route-bus-${clean}`] ||
+    Object.values(routeRegistry).find(
+      (r) => r.id.toLowerCase() === clean || r.routeNumber.toLowerCase() === clean
+    )
+  );
 }
 
 export function getRouteForBus(busId: string): RouteDefinition {
-  const routeId = busToRouteMap[busId];
-  const known = routeId ? routeRegistry[routeId] : undefined;
-  if (known) return known;
-  return {
-    id: busId,
-    routeNumber: "",
-    name: "College bus",
-    origin: "",
-    destination: "",
-    stops: [],
-    path: [],
-    cumulativeDistances: [0],
-    totalDistanceKm: 0,
-    averageSpeedKmh: 22,
-  };
+  if (!busId) {
+    return routeBus18;
+  }
+  const clean = busId.trim().toLowerCase();
+  const numOnly = clean.replace(/^(bus-|route-)/, "");
+
+  // 1. Direct registry lookup
+  if (routeRegistry[`route-${clean}`]) return routeRegistry[`route-${clean}`];
+  if (routeRegistry[`route-bus-${clean}`]) return routeRegistry[`route-bus-${clean}`];
+  if (routeRegistry[clean]) return routeRegistry[clean];
+
+  // 2. Lookup by stripped route number
+  const matchByNum = Object.values(routeRegistry).find(
+    (r) => r.routeNumber.toLowerCase() === numOnly || r.id.toLowerCase() === `route-${numOnly}`
+  );
+  if (matchByNum) return matchByNum;
+
+  // 3. Fallback to Route 18 or first registered route
+  return routeRegistry["route-18"] || Object.values(routeRegistry)[0];
 }
 
 export function getAllRoutes(): RouteDefinition[] {

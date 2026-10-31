@@ -221,6 +221,18 @@ export async function seedInitialDemoRoutes() {
     console.warn("MTC cleanup skipped:", err);
   }
 
+  // Purge incorrect legacy route-bus-18 ("Metro Connector Feeder") entry and ensure bus-18 is mapped to legitimate route-18 (Avadi)
+  try {
+    const { students, trips } = await import("./schema.ts");
+    await db.update(buses).set({ routeId: "route-18" }).where(eq(buses.id, "bus-18"));
+    await db.update(students).set({ assignedRouteId: "route-18" }).where(eq(students.assignedRouteId, "route-bus-18"));
+    await db.update(trips).set({ routeId: "route-18" }).where(eq(trips.routeId, "route-bus-18"));
+    await db.delete(busStops).where(eq(busStops.routeId, "route-bus-18"));
+    await db.delete(busRoutes).where(eq(busRoutes.id, "route-bus-18"));
+  } catch (err) {
+    console.warn("Legacy route-bus-18 cleanup skipped:", err);
+  }
+
   for (const r of INITIAL_DEMO_ROUTES) {
     const routeId = `route-${r.routeNumber.toLowerCase()}`;
     const busId = `bus-${r.routeNumber.toLowerCase()}`;
@@ -250,6 +262,8 @@ export async function seedInitialDemoRoutes() {
         source: "REC_TRANSPORT",
         active: true,
       });
+    } else if (existingBus.routeId !== routeId && (!existingBus.routeId || existingBus.routeId === "route-bus-18")) {
+      await db.update(buses).set({ routeId }).where(eq(buses.id, busId));
     }
 
     // 3. Stops

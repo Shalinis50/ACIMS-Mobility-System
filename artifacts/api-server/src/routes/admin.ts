@@ -11,7 +11,7 @@ import {
 } from "@workspace/api-zod";
 import { db } from "../../../../src/db/index.ts";
 import { buses, busRoutes, busStops, profiles, drivers, safetyReports } from "../../../../src/db/schema.ts";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, or } from "drizzle-orm";
 import {
   getDbBuses,
   createDbBus,
@@ -47,6 +47,8 @@ import {
   getShiftById,
   validateAndUpdateShift,
   setShiftActive,
+  createShift,
+  deleteShift,
 } from "../../../../src/db/shiftManagement.ts";
 
 const router: IRouter = Router();
@@ -217,13 +219,33 @@ router.get("/admin/audit-logs", async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// SHIFT MANAGEMENT (Morning / Evening canonical slots)
+// SHIFT MANAGEMENT (Morning / Evening canonical slots & custom shifts)
 // -------------------------------------------------------------
 router.get("/admin/shifts", async (_req, res) => {
   try {
     res.json(await listAdminShifts());
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to list shifts" });
+  }
+});
+
+router.post("/admin/shifts", async (req, res) => {
+  try {
+    const created = await createShift(req.body);
+    const authUser = (req as AuthRequest).user as { uid?: string };
+    await recordAdminAudit({
+      adminId: authUser?.uid || req.header("x-acims-user-id") || "admin",
+      action: "CREATE_SHIFT",
+      entityType: "shift",
+      entityId: created.id,
+      detail: `${created.name} ${created.startTime}-${created.endTime}`,
+    });
+    res.status(201).json({
+      shift: created,
+      message: `${created.name} created successfully.`,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "Failed to create shift" });
   }
 });
 
@@ -246,10 +268,30 @@ router.put("/admin/shifts/:shiftId", async (req, res) => {
     });
     res.json({
       shift: updated,
-      message: `${updated.name} timing updated successfully.`,
+      message: `${updated.name} updated successfully.`,
     });
   } catch (err: any) {
     res.status(400).json({ error: err.message || "Failed to update shift" });
+  }
+});
+
+router.delete("/admin/shifts/:shiftId", async (req, res) => {
+  try {
+    const result = await deleteShift(req.params.shiftId);
+    const authUser = (req as AuthRequest).user as { uid?: string };
+    await recordAdminAudit({
+      adminId: authUser?.uid || req.header("x-acims-user-id") || "admin",
+      action: "DELETE_SHIFT",
+      entityType: "shift",
+      entityId: req.params.shiftId,
+      detail: `Deleted shift ${result.name}`,
+    });
+    res.json({
+      success: true,
+      message: `Shift ${result.name} deleted successfully.`,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "Failed to delete shift" });
   }
 });
 
@@ -296,15 +338,43 @@ router.get("/admin/buses", async (_req, res) => {
 router.post("/admin/buses", async (req, res) => {
   try {
     const input = CreateAdminBusBody.parse(req.body);
-    const busId = `bus-${input.busNumber.toLowerCase().replace(/[^a-z0-9]/g, "") || Date.now()}`;
+    const busNumberNormalized = input.busNumber.trim().toUpperCase();
+    const busId = `bus-${busNumberNormalized.toLowerCase().replace(/[^a-z0-9]/g, "") || Date.now()}`;
+
+    // Validate duplicate bus number or ID
+    const existingBuses = await getDbBuses();
+    const duplicate = existingBuses.find(
+      (b) => b.busNumber.trim().toUpperCase() === busNumberNormalized || b.id === busId
+    );
+    if (duplicate) {
+      return res.status(400).json({ error: `A bus with number "${busNumberNormalized}" already exists.` });
+    }
 
     const created = await createDbBus({
       id: busId,
-      busNumber: input.busNumber,
+      busNumber: busNumberNormalized,
       routeId: input.routeId,
       driverId: input.driverId,
       active: input.active ?? true,
     });
+
+    // Optional shift assignment during bus creation
+    const shiftIds = (req.body as any)?.shiftIds;
+    if (Array.isArray(shiftIds) && shiftIds.length > 0) {
+      const { shiftAssignments: saTable } = await import("../../../../src/db/schema.ts");
+      for (const sId of shiftIds) {
+        try {
+          await db.insert(saTable).values({
+            id: `sa-${sId}-${created.id}-${Date.now()}`,
+            shiftId: sId,
+            busId: created.id,
+            active: true,
+          }).onConflictDoNothing();
+        } catch {
+          // Ignore assignment errors
+        }
+      }
+    }
 
     const authUser = (req as AuthRequest).user as { uid?: string };
     await recordAdminAudit({
@@ -326,7 +396,7 @@ router.post("/admin/buses", async (req, res) => {
     });
   } catch (err: any) {
     console.error("Error creating bus:", err);
-    res.status(400).json({ error: "Failed to create bus" });
+    res.status(400).json({ error: err.message || "Failed to create bus" });
   }
 });
 
@@ -774,26 +844,101 @@ router.get("/admin/buses-and-routes", async (_req, res) => {
 
 router.post("/admin/buses-and-routes", async (req, res) => {
   try {
-    const { busNumber, routeName, driverId, driverName, driverPhone, morningShift, eveningShift, stops } = req.body as {
+    const { busNumber, routeName, routeId: inputRouteId, driverId, driverName, driverPhone, morningShift, eveningShift, stops } = req.body as {
       busNumber: string;
-      routeName: string;
+      routeName?: string;
+      routeId?: string;
       driverId?: string;
       driverName?: string;
       driverPhone?: string;
-      morningShift?: string;
-      eveningShift?: string;
+      morningShift?: string | boolean;
+      eveningShift?: string | boolean;
       stops?: Array<{ name: string; time?: string; latitude?: number; longitude?: number }>;
     };
 
-    if (!busNumber?.trim() || !routeName?.trim()) {
-      return res.status(400).json({ error: "Bus number and Route name are required" });
+    if (!busNumber?.trim()) {
+      return res.status(400).json({ error: "Bus number is required" });
     }
 
     const cleanNumber = busNumber.trim().toUpperCase();
-    const cleanRoute = routeName.trim().toUpperCase();
     const busId = `bus-${cleanNumber.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
-    const routeId = `route-${cleanNumber.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
-    const fullRouteName = `${cleanNumber} · ${cleanRoute}`;
+
+    // Prevent duplicate bus numbers
+    const existingBus = await db
+      .select()
+      .from(buses)
+      .where(or(eq(buses.busNumber, cleanNumber), eq(buses.id, busId)))
+      .limit(1);
+    if (existingBus.length > 0) {
+      return res.status(409).json({ error: `Bus number "${cleanNumber}" already exists in the system.` });
+    }
+
+    // Determine route assignment: existing route vs new route
+    let effectiveRouteId = inputRouteId?.trim() || "";
+    let effectiveRouteName = "";
+
+    if (effectiveRouteId) {
+      const [existingRoute] = await db
+        .select()
+        .from(busRoutes)
+        .where(eq(busRoutes.id, effectiveRouteId))
+        .limit(1);
+      if (!existingRoute) {
+        return res.status(400).json({ error: `Selected route "${effectiveRouteId}" does not exist.` });
+      }
+      effectiveRouteName = existingRoute.routeName.replace(/^\d+[A-Z]?\s*·?\s*/i, "").trim() || existingRoute.routeName;
+    } else {
+      if (!routeName?.trim()) {
+        return res.status(400).json({ error: "Route name is required when creating a new route" });
+      }
+      const cleanRoute = routeName.trim().toUpperCase();
+      effectiveRouteName = cleanRoute;
+      effectiveRouteId = `route-${cleanNumber.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+      const fullRouteName = `${cleanNumber} · ${cleanRoute}`;
+
+      await db.insert(busRoutes).values({
+        id: effectiveRouteId,
+        routeName: fullRouteName,
+        routeCode: cleanNumber,
+        active: true,
+        source: "ADMIN",
+        manuallyEdited: true,
+      }).onConflictDoNothing();
+
+      // Create initial stops for new route if provided
+      if (Array.isArray(stops) && stops.length > 0) {
+        for (let i = 0; i < stops.length; i++) {
+          const s = stops[i];
+          if (!s.name?.trim()) continue;
+          await db.insert(busStops).values({
+            id: `${effectiveRouteId}-stop-${i + 1}`,
+            routeId: effectiveRouteId,
+            stopName: s.name.trim(),
+            latitude: s.latitude ?? 13.0084,
+            longitude: s.longitude ?? 80.0033,
+            sequenceNumber: i + 1,
+          }).onConflictDoNothing();
+        }
+      } else {
+        // Add default stops: Route Origin & College Campus
+        await db.insert(busStops).values({
+          id: `${effectiveRouteId}-stop-1`,
+          routeId: effectiveRouteId,
+          stopName: `${cleanRoute} Bus Stand`,
+          latitude: 13.0827,
+          longitude: 80.2707,
+          sequenceNumber: 1,
+        }).onConflictDoNothing();
+        await db.insert(busStops).values({
+          id: `${effectiveRouteId}-stop-2`,
+          routeId: effectiveRouteId,
+          stopName: "College Campus",
+          latitude: 13.0084,
+          longitude: 80.0033,
+          sequenceNumber: 2,
+        }).onConflictDoNothing();
+      }
+    }
 
     // Handle driver creation/linking directly from the bus form
     let effectiveDriverId = driverId || null;
@@ -836,59 +981,18 @@ router.post("/admin/buses-and-routes", async (req, res) => {
       effectiveDriverId = targetUserId;
     }
 
-    // 1. Create or update route
-    await db.insert(busRoutes).values({
-      id: routeId,
-      routeName: fullRouteName,
-      routeCode: cleanNumber,
-      active: true,
-      source: "ADMIN",
-    }).onConflictDoNothing();
-
-    // 2. Create or update bus
+    // Create bus in database
     await db.insert(buses).values({
       id: busId,
       busNumber: cleanNumber,
-      routeId,
+      routeId: effectiveRouteId,
       driverId: effectiveDriverId,
       active: true,
       source: "ADMIN",
-    }).onConflictDoNothing();
+      manuallyEdited: true,
+    });
 
-    // 3. Create initial stops if provided
-    if (Array.isArray(stops) && stops.length > 0) {
-      for (let i = 0; i < stops.length; i++) {
-        const s = stops[i];
-        await db.insert(busStops).values({
-          id: `${routeId}-stop-${i + 1}`,
-          routeId,
-          stopName: s.name,
-          latitude: s.latitude ?? 13.0084,
-          longitude: s.longitude ?? 80.0033,
-          sequenceNumber: i + 1,
-        }).onConflictDoNothing();
-      }
-    } else {
-      // Add default stops: Route Origin & College Campus
-      await db.insert(busStops).values({
-        id: `${routeId}-stop-1`,
-        routeId,
-        stopName: `${cleanRoute} Bus Stand`,
-        latitude: 13.0827,
-        longitude: 80.2707,
-        sequenceNumber: 1,
-      }).onConflictDoNothing();
-      await db.insert(busStops).values({
-        id: `${routeId}-stop-2`,
-        routeId,
-        stopName: "College Campus",
-        latitude: 13.0084,
-        longitude: 80.0033,
-        sequenceNumber: 2,
-      }).onConflictDoNothing();
-    }
-
-    // 4. Update shift assignments if selected
+    // Update shift assignments if selected
     const { setShiftAssignedBuses, listShiftAssignmentsForShift } = await import("../../../../src/db/shiftManagement.ts");
     if (morningShift) {
       const existingM = await listShiftAssignmentsForShift("shift-morning-630");
@@ -904,9 +1008,9 @@ router.post("/admin/buses-and-routes", async (req, res) => {
     res.status(201).json({
       id: busId,
       busNumber: cleanNumber,
-      routeId,
-      routeName: cleanRoute,
-      displayName: `BUS ${cleanNumber} · ${cleanRoute}`,
+      routeId: effectiveRouteId,
+      routeName: effectiveRouteName,
+      displayName: `BUS ${cleanNumber} · ${effectiveRouteName}`,
       driverId: effectiveDriverId,
       active: true,
     });
@@ -1117,6 +1221,44 @@ router.put("/admin/shift-assignments/:shiftId/bus/:busId/stops", async (req, res
   } catch (err: any) {
     console.error("[admin/shift-assignments/:shiftId/bus/:busId/stops]", err);
     res.status(400).json({ error: err.message || "Failed to update stop checklist" });
+  }
+});
+
+router.put("/admin/shift-assignments/:shiftId/bus/:busId/timing", async (req, res) => {
+  try {
+    const { shiftId, busId } = req.params;
+    const { departureTime } = req.body as { departureTime: string | null };
+    const { updateShiftBusTiming } = await import("../../../../src/db/shiftManagement.ts");
+    const result = await updateShiftBusTiming(shiftId, busId, departureTime);
+
+    res.json({
+      success: true,
+      shiftId,
+      busId,
+      departureTime: result.departureTime,
+      message: departureTime ? `Bus departure timing updated to ${result.departureTime}.` : "Bus timing reset to shift default.",
+    });
+  } catch (err: any) {
+    console.error("[admin/shift-assignments/:shiftId/bus/:busId/timing]", err);
+    res.status(400).json({ error: err.message || "Failed to update bus timing" });
+  }
+});
+
+router.delete("/admin/shift-assignments/:shiftId/bus/:busId", async (req, res) => {
+  try {
+    const { shiftId, busId } = req.params;
+    const { removeBusFromShift } = await import("../../../../src/db/shiftManagement.ts");
+    await removeBusFromShift(shiftId, busId);
+
+    res.json({
+      success: true,
+      shiftId,
+      busId,
+      message: "Bus removed from shift successfully.",
+    });
+  } catch (err: any) {
+    console.error("[admin/shift-assignments/:shiftId/bus/:busId DELETE]", err);
+    res.status(400).json({ error: err.message || "Failed to remove bus from shift" });
   }
 });
 

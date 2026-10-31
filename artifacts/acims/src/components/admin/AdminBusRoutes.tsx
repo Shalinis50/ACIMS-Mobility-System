@@ -58,12 +58,39 @@ export function AdminBusRoutes() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Add Bus Modal state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newBusNumber, setNewBusNumber] = useState('');
+  const [routeMode, setRouteMode] = useState<'existing' | 'new'>('existing');
+  const [selectedRouteId, setSelectedRouteId] = useState('');
+  const [newRouteName, setNewRouteName] = useState('');
+  const [newDriverName, setNewDriverName] = useState('');
+  const [newDriverPhone, setNewDriverPhone] = useState('');
+  const [addMorningShift, setAddMorningShift] = useState(true);
+  const [addEveningShift, setAddEveningShift] = useState(true);
+  const [newCustomStops, setNewCustomStops] = useState<Array<{ name: string; time: string }>>([
+    { name: '', time: '6:30 AM' },
+    { name: 'College Campus', time: '7:40 AM' },
+  ]);
+  const [addBusError, setAddBusError] = useState<string | null>(null);
+  const [addingBus, setAddingBus] = useState(false);
+
   const query = useQuery({
     queryKey: ['admin', 'buses-and-routes'],
     queryFn: async () => {
       const res = await mobilityAdminFetch('/admin/buses-and-routes');
       if (!res.ok) throw new Error('Unable to load this information.');
       return (await res.json()) as BusRouteRecord[];
+    },
+  });
+
+  // Query existing routes for route assignment dropdown
+  const routesQuery = useQuery({
+    queryKey: ['admin', 'routes'],
+    queryFn: async () => {
+      const res = await mobilityAdminFetch('/admin/routes');
+      if (!res.ok) return [];
+      return (await res.json()) as Array<{ id: string; name: string; destination: string }>;
     },
   });
 
@@ -187,6 +214,125 @@ export function AdminBusRoutes() {
     }
   };
 
+  const handleOpenAddBus = () => {
+    setNewBusNumber('');
+    setRouteMode('existing');
+    const available = routesQuery.data ?? [];
+    if (available.length > 0) {
+      setSelectedRouteId(available[0].id);
+    } else if (buses.length > 0) {
+      setSelectedRouteId(buses[0].routeId);
+    } else {
+      setSelectedRouteId('');
+    }
+    setNewRouteName('');
+    setNewDriverName('');
+    setNewDriverPhone('');
+    setAddMorningShift(true);
+    setAddEveningShift(true);
+    setNewCustomStops([
+      { name: '', time: '6:30 AM' },
+      { name: 'College Campus', time: '7:40 AM' },
+    ]);
+    setAddBusError(null);
+    setShowAddModal(true);
+  };
+
+  const handleAddCustomStop = () => {
+    setNewCustomStops((prev) => [...prev, { name: '', time: '7:00 AM' }]);
+  };
+
+  const handleRemoveCustomStop = (idx: number) => {
+    setNewCustomStops((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleUpdateCustomStop = (idx: number, field: 'name' | 'time', value: string) => {
+    setNewCustomStops((prev) =>
+      prev.map((s, i) => (i === idx ? { ...s, [field]: value } : s))
+    );
+  };
+
+  const handleAddBus = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddBusError(null);
+
+    const cleanBusNum = newBusNumber.trim().toUpperCase();
+    if (!cleanBusNum) {
+      setAddBusError('Please enter a bus number or bus ID.');
+      return;
+    }
+
+    // Check duplicate bus number
+    const isDuplicate = buses.some(
+      (b) => b.busNumber.toUpperCase() === cleanBusNum || b.id.toLowerCase() === `bus-${cleanBusNum.toLowerCase()}`
+    );
+    if (isDuplicate) {
+      setAddBusError(`Bus "${cleanBusNum}" already exists in the system. Please use a unique bus number.`);
+      return;
+    }
+
+    if (routeMode === 'existing' && !selectedRouteId) {
+      setAddBusError('Please select a route to assign this bus.');
+      return;
+    }
+
+    if (routeMode === 'new' && !newRouteName.trim()) {
+      setAddBusError('Please enter a route name for the new route.');
+      return;
+    }
+
+    setAddingBus(true);
+    try {
+      const payload: Record<string, any> = {
+        busNumber: cleanBusNum,
+        morningShift: addMorningShift,
+        eveningShift: addEveningShift,
+      };
+
+      if (routeMode === 'existing') {
+        payload.routeId = selectedRouteId;
+      } else {
+        payload.routeName = newRouteName.trim();
+        const validStops = newCustomStops
+          .filter((s) => s.name.trim().length > 0)
+          .map((s) => ({ name: s.name.trim(), time: s.time.trim() || 'Scheduled' }));
+        if (validStops.length > 0) {
+          payload.stops = validStops;
+        }
+      }
+
+      if (newDriverName.trim()) {
+        payload.driverName = newDriverName.trim();
+        if (newDriverPhone.trim()) {
+          payload.driverPhone = newDriverPhone.trim();
+        }
+      }
+
+      const res = await mobilityAdminFetch('/admin/buses-and-routes', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setAddBusError(data?.error || 'Failed to add new bus.');
+        return;
+      }
+
+      setToast(`Bus ${cleanBusNum} successfully added and registered in ACMIS fleet.`);
+      setShowAddModal(false);
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'buses-and-routes'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'routes'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'shifts'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'live-buses'] });
+    } catch (err: any) {
+      setAddBusError(err.message || 'Error occurred while saving new bus.');
+    } finally {
+      setAddingBus(false);
+      setTimeout(() => setToast(null), 4000);
+    }
+  };
+
   // ERROR STATE
   if (isError) {
     return (
@@ -230,16 +376,27 @@ export function AdminBusRoutes() {
   return (
     <div className="space-y-6 animate-in fade-in">
       {/* Header */}
-      <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8">
-        <div className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          Transport Management
+      <div className="rounded-[28px] border border-border bg-card p-6 sm:p-8 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <div className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Transport Management
+          </div>
+          <h2 className="mt-1 text-2xl font-extrabold text-foreground">
+            Bus Routes
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Campus routes organized by bus in natural ascending order. Inspect scheduled stops, configure stops, or add new buses to the fleet.
+          </p>
         </div>
-        <h2 className="mt-1 text-2xl font-extrabold text-foreground">
-          Bus Routes
-        </h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Campus routes organized by bus in natural ascending order. Inspect scheduled stops and configure stops per bus.
-        </p>
+        <button
+          type="button"
+          onClick={handleOpenAddBus}
+          data-testid="button-add-bus"
+          className="inline-flex items-center gap-2 rounded-2xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm transition hover:opacity-90 active:scale-95"
+        >
+          <Plus size={15} />
+          Add Bus
+        </button>
       </div>
 
       {toast && (
@@ -509,6 +666,273 @@ export function AdminBusRoutes() {
                 {saving ? 'Saving…' : 'Save Stops'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD BUS MODAL */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-xl rounded-[28px] border border-border bg-card p-6 sm:p-8 shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-border pb-4">
+              <div>
+                <span className="mono text-[10px] uppercase font-bold text-muted-foreground">
+                  Fleet Registry
+                </span>
+                <h3 className="display-font text-xl font-extrabold text-foreground">
+                  Add Bus Number
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Register a new bus into the ACMIS campus transport fleet and assign its route and stops.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddBus} className="flex-1 overflow-y-auto space-y-4 my-4 pr-1">
+              {addBusError && (
+                <div
+                  data-testid="add-bus-error"
+                  className="rounded-xl border border-destructive/30 bg-destructive/10 p-3.5 text-xs font-bold text-destructive flex items-start gap-2"
+                >
+                  <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                  <span>{addBusError}</span>
+                </div>
+              )}
+
+              {/* Bus Number */}
+              <div>
+                <label className="mono block text-[10px] uppercase font-bold tracking-wider text-muted-foreground mb-1">
+                  Bus Number or Unique ID *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. 5, 5B, 19, 50"
+                  value={newBusNumber}
+                  onChange={(e) => {
+                    setNewBusNumber(e.target.value);
+                    setAddBusError(null);
+                  }}
+                  data-testid="input-add-bus-number"
+                  className="admin-input h-10 w-full rounded-xl border border-border bg-background px-3 text-xs font-bold uppercase"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Unique identifier used by students, dispatchers, and live GPS tracking.
+                </p>
+              </div>
+
+              {/* Route Assignment Mode */}
+              <div>
+                <label className="mono block text-[10px] uppercase font-bold tracking-wider text-muted-foreground mb-1.5">
+                  Route Assignment *
+                </label>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setRouteMode('existing')}
+                    className={`rounded-xl border py-2 px-3 text-xs font-bold text-left transition ${
+                      routeMode === 'existing'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-background text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    Assign to Existing Route
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRouteMode('new')}
+                    className={`rounded-xl border py-2 px-3 text-xs font-bold text-left transition ${
+                      routeMode === 'new'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-background text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    Create New Route
+                  </button>
+                </div>
+
+                {routeMode === 'existing' ? (
+                  <div>
+                    <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                      Select Existing Route
+                    </label>
+                    <select
+                      value={selectedRouteId}
+                      onChange={(e) => setSelectedRouteId(e.target.value)}
+                      data-testid="select-existing-route"
+                      className="admin-input h-10 w-full rounded-xl border border-border bg-background px-3 text-xs font-bold"
+                    >
+                      {routesQuery.data && routesQuery.data.length > 0 ? (
+                        routesQuery.data.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name} {r.destination ? `→ ${r.destination}` : ''}
+                          </option>
+                        ))
+                      ) : (
+                        buses.map((b) => (
+                          <option key={b.routeId} value={b.routeId}>
+                            Route {b.busNumber} · {b.routeName}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                        New Route Name *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. TAMBARAM EXPRESS or KOYAMBEDU LINK"
+                        value={newRouteName}
+                        onChange={(e) => setNewRouteName(e.target.value)}
+                        data-testid="input-new-route-name"
+                        className="admin-input h-10 w-full rounded-xl border border-border bg-background px-3 text-xs font-bold uppercase"
+                      />
+                    </div>
+
+                    {/* Pickup stops list */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-[11px] font-bold text-muted-foreground">
+                          Scheduled Pickup Stops
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleAddCustomStop}
+                          className="text-[11px] font-bold text-primary hover:underline"
+                        >
+                          + Add Stop
+                        </button>
+                      </div>
+
+                      <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                        {newCustomStops.map((stop, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <span className="grid h-6 w-6 place-items-center rounded-md bg-muted font-mono text-[10px] font-bold shrink-0">
+                              {idx + 1}
+                            </span>
+                            <input
+                              type="text"
+                              placeholder={idx === 0 ? "Origin Stop (e.g. Tambaram Terminal)" : "Stop Name"}
+                              value={stop.name}
+                              onChange={(e) => handleUpdateCustomStop(idx, 'name', e.target.value)}
+                              className="admin-input h-8 flex-1 rounded-lg border border-border bg-background px-2.5 text-xs font-semibold"
+                            />
+                            <input
+                              type="text"
+                              placeholder="6:30 AM"
+                              value={stop.time}
+                              onChange={(e) => handleUpdateCustomStop(idx, 'time', e.target.value)}
+                              className="admin-input h-8 w-24 rounded-lg border border-border bg-background px-2 text-xs font-mono"
+                            />
+                            {newCustomStops.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCustomStop(idx)}
+                                className="rounded-md p-1 text-muted-foreground hover:text-destructive"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Driver Assignment (Optional) */}
+              <div className="border-t border-border pt-3">
+                <span className="mono text-[10px] uppercase font-bold text-muted-foreground block mb-2">
+                  Driver Assignment (Optional)
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                      Driver Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Rajesh Kumar"
+                      value={newDriverName}
+                      onChange={(e) => setNewDriverName(e.target.value)}
+                      data-testid="input-add-bus-driver-name"
+                      className="admin-input h-9 w-full rounded-xl border border-border bg-background px-3 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-muted-foreground mb-1">
+                      Driver Phone
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="e.g. +91 98401 23456"
+                      value={newDriverPhone}
+                      onChange={(e) => setNewDriverPhone(e.target.value)}
+                      data-testid="input-add-bus-driver-phone"
+                      className="admin-input h-9 w-full rounded-xl border border-border bg-background px-3 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Shift Assignment (Optional) */}
+              <div className="border-t border-border pt-3">
+                <span className="mono text-[10px] uppercase font-bold text-muted-foreground block mb-2">
+                  Assign to Daily Shifts (Optional)
+                </span>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs font-bold text-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={addMorningShift}
+                      onChange={(e) => setAddMorningShift(e.target.checked)}
+                      className="h-4 w-4 rounded text-primary focus:ring-primary"
+                    />
+                    <span>Morning Shift (6:30 AM · TO COLLEGE)</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-xs font-bold text-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={addEveningShift}
+                      onChange={(e) => setAddEveningShift(e.target.checked)}
+                      className="h-4 w-4 rounded text-primary focus:ring-primary"
+                    />
+                    <span>Evening Shift (3:15 PM · FROM COLLEGE)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="mt-4 flex justify-end gap-2 border-t border-border pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="rounded-xl px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={addingBus}
+                  data-testid="button-submit-add-bus"
+                  className="rounded-xl bg-primary px-5 py-2 text-xs font-extrabold text-primary-foreground hover:opacity-95 disabled:opacity-50"
+                >
+                  {addingBus ? 'Adding Bus…' : 'Add Bus'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

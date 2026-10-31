@@ -18,7 +18,7 @@
     "mtc:sync": "tsx scripts/mtc-sync.ts",
     "rec:sync": "tsx scripts/rec-sync.ts",
     "rec:publish": "tsx scripts/rec-sync.ts --publish-only",
-    "build": "vite build --config artifacts/acims/vite.config.ts && esbuild server-app.ts --bundle --platform=node --format=esm --external:express --external:cors --external:pino --external:pino-http --external:vite --external:pg --external:drizzle-orm --external:firebase-admin --external:@electric-sql/pglite --external:@google/genai --external:socket.io --outfile=server.bundle.js",
+    "build": "vite build --config artifacts/acims/vite.config.ts && node -e \"import('node:fs').then(fs => fs.cpSync('artifacts/acims/dist', 'dist', {recursive: true}))\" && esbuild server-app.ts --bundle --platform=node --format=esm --external:express --external:cors --external:pino --external:pino-http --external:vite --external:pg --external:drizzle-orm --external:firebase-admin --external:@electric-sql/pglite --external:@google/genai --external:socket.io --outfile=server.bundle.js",
     "gcp-build": "npm run build",
     "lint": "tsc --noEmit",
     "typecheck:libs": "tsc --build",

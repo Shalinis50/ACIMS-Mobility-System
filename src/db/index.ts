@@ -50,11 +50,29 @@ export let db: any;
 
 try {
   if (useEmbeddedDb()) {
-    const dataDir = path.resolve(process.cwd(), "data/postgres");
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-    pgliteClient = global._pgliteClient ?? new PGlite(dataDir);
+    let chosenDir: string | undefined;
+    const localDir = path.resolve(process.cwd(), "data/postgres");
+    try {
+      if (!fs.existsSync(localDir)) {
+        fs.mkdirSync(localDir, { recursive: true });
+      }
+      fs.accessSync(localDir, fs.constants.W_OK);
+      chosenDir = localDir;
+    } catch {
+      const tmpDir = path.resolve("/tmp", "acims-postgres");
+      try {
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        chosenDir = tmpDir;
+      } catch {
+        chosenDir = undefined;
+      }
+    }
+
+    pgliteClient = global._pgliteClient ?? (chosenDir ? new PGlite(chosenDir) : new PGlite());
     global._pgliteClient = pgliteClient;
-    console.log(`[src/db] Embedded PostgreSQL (PGlite) at ${dataDir}`);
+    console.log(`[src/db] Embedded PostgreSQL (PGlite) at ${chosenDir || "memory"}`);
   } else {
     pool = global._postgresPool ?? createPool();
     global._postgresPool = pool;

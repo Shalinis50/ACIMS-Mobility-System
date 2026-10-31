@@ -65,10 +65,10 @@ export function getStopNameById(id: string): string {
 
 const routes: AdminRoute[] = [
   {
-    id: "route-bus-18",
-    name: "Metro Connector Feeder (Metro Central → Medical Center)",
-    destination: "Medical Sciences Center",
-    stopIds: ["metro-central", "jb-estate", "ponnu", "ramratna", "medical-sciences"],
+    id: "route-18",
+    name: "Avadi Route (Avadi → Poonamallee → College)",
+    destination: "College Campus",
+    stopIds: ["18-1", "18-2", "18-3", "college"],
     active: true,
     assignedBusIds: ["bus-18"],
   },
