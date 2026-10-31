@@ -1,3 +1,8 @@
+import { CampusRouter } from "./campusRouter";
+import { REC_CAMPUS_WALKWAY_NETWORK } from "./campusWalkwayGraph";
+
+const campusRouter = new CampusRouter({ walkway_network: REC_CAMPUS_WALKWAY_NETWORK });
+
 /**
  * REC (Rajalakshmi Engineering College) Campus Mobility Centralized Data Model
  * 
@@ -405,7 +410,32 @@ export function calculateCampusWalkingRoute(startId: string, endId: string) {
 
   if (!startLoc || !endLoc) return null;
 
-  // Direct distance
+  // Prefer the verified OSM walkway graph from Campus Mobility. This uses
+  // A* pathfinding with turn penalties and nearest-segment snapping to avoid
+  // straight-line shortcuts and unnecessary campus detours.
+  try {
+    const graphRoute = campusRouter.calculateGraphAStarPath(
+      [startLoc.latitude, startLoc.longitude],
+      [endLoc.latitude, endLoc.longitude],
+      { profile: "walking", destinationName: endLoc.name },
+    );
+    if (graphRoute?.success && Array.isArray(graphRoute.coordinates) && graphRoute.coordinates.length >= 2) {
+      return {
+        start: startLoc,
+        destination: endLoc,
+        distanceMeters: graphRoute.distanceMeters,
+        walkingMinutes: graphRoute.durationMinutes,
+        pathWaypoints: graphRoute.coordinates.map(([latitude, longitude]) => ({ latitude, longitude })),
+        provider: graphRoute.provider,
+        steps: graphRoute.steps,
+      };
+    }
+  } catch (error) {
+    console.warn("Verified campus A* route unavailable; using ACIMS fallback:", error);
+  }
+
+  // Safe fallback to ACIMS's existing path calculation if the imported graph
+  // cannot connect the selected endpoints.
   const directMeters = campusDistanceMeters(startLoc, endLoc);
   // Estimate internal walking path with slight road winding factor (1.18x)
   const walkingMeters = Math.max(40, Math.round(directMeters * 1.18));
