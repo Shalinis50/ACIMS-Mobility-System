@@ -414,11 +414,24 @@ export function calculateCampusWalkingRoute(startId: string, endId: string) {
   // A* pathfinding with turn penalties and nearest-segment snapping to avoid
   // straight-line shortcuts and unnecessary campus detours.
   try {
-    const graphRoute = campusRouter.calculateGraphAStarPath(
-      [startLoc.latitude, startLoc.longitude],
-      [endLoc.latitude, endLoc.longitude],
-      { profile: "walking", destinationName: endLoc.name },
-    );
+    const startPoint: [number, number] = [startLoc.latitude, startLoc.longitude];
+    const endPoint: [number, number] = [endLoc.latitude, endLoc.longitude];
+    const startSnap = campusRouter.findNearestRoadProjection(startPoint);
+    const endSnap = campusRouter.findNearestRoadProjection(endPoint);
+
+    // ACIMS and the source project contain some differently calibrated POI
+    // coordinates. Never snap a destination a long way across campus.
+    const MAX_GRAPH_SNAP_METERS = 75;
+    const endpointsFitGraph =
+      startSnap.distance <= MAX_GRAPH_SNAP_METERS &&
+      endSnap.distance <= MAX_GRAPH_SNAP_METERS;
+
+    const graphRoute = endpointsFitGraph
+      ? campusRouter.calculateGraphAStarPath(startPoint, endPoint, {
+          profile: "walking",
+          destinationName: endLoc.name,
+        })
+      : null;
     if (graphRoute?.success && Array.isArray(graphRoute.coordinates) && graphRoute.coordinates.length >= 2) {
       return {
         start: startLoc,
