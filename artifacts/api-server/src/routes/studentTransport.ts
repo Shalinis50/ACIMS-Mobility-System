@@ -343,4 +343,81 @@ router.post("/student/select-bus", async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// STUDENT UNIFIED TRANSPORT SCHEDULE & FLEET DIRECTORY
+// -------------------------------------------------------------
+router.get("/student/transport-schedule", async (_req, res) => {
+  try {
+    const { getActiveShiftsForStudents, formatShiftTimeDisplay } = await import(
+      "../../../../src/db/shiftManagement.ts"
+    );
+    const { getDbBuses, getDbRoutes } = await import("../../../../src/db/services.ts");
+    const { profiles, drivers, busStops } = await import("../../../../src/db/schema.ts");
+    const { naturalBusSort } = await import("../../../../src/lib/naturalSort.ts");
+
+    const [shifts, buses, routes, allStops] = await Promise.all([
+      getActiveShiftsForStudents(),
+      getDbBuses(),
+      getDbRoutes(),
+      db.select().from(busStops).orderBy(busStops.sequenceNumber),
+    ]);
+
+    const driverProfiles = await db
+      .select({
+        userId: profiles.userId,
+        name: profiles.name,
+        phone: profiles.phone,
+        assignedBusId: drivers.assignedBusId,
+      })
+      .from(drivers)
+      .innerJoin(profiles, eq(drivers.profileId, profiles.id));
+
+    // Prepare published fleet
+    const fleet = buses.map((bus) => {
+      const route = routes.find((r) => r.id === bus.routeId);
+      const driver = driverProfiles.find(
+        (d) => d.userId === bus.driverId || d.assignedBusId === bus.id
+      );
+      const stops = allStops.filter((s) => s.routeId === bus.routeId);
+
+      // Find shifts containing this bus
+      const busShifts = shifts.filter((s) => s.assignedBusIds.includes(bus.id));
+      const morningShift = busShifts.find((s) => s.direction === "TO_COLLEGE");
+      const eveningShift = busShifts.find((s) => s.direction === "FROM_COLLEGE");
+
+      const morningAssignment = morningShift?.assignedBuses?.find((ab: any) => ab.busId === bus.id);
+      const eveningAssignment = eveningShift?.assignedBuses?.find((ab: any) => ab.busId === bus.id);
+
+      return {
+        id: bus.id,
+        busNumber: bus.busNumber,
+        routeId: bus.routeId,
+        routeName: route?.routeName || `Route ${bus.busNumber}`,
+        origin: route?.origin || stops[0]?.stopName || "Central Campus",
+        destination: route?.destination || stops[stops.length - 1]?.stopName || "City Station",
+        stopCount: stops.length,
+        driverId: bus.driverId || driver?.userId || null,
+        driverName: driver?.name || null,
+        driverPhone: driver?.phone || null, // approved contact only
+        morningDeparture: morningAssignment?.departureTimeDisplay || (morningShift ? formatShiftTimeDisplay(morningShift.startTime) : null),
+        eveningDeparture: eveningAssignment?.departureTimeDisplay || (eveningShift ? formatShiftTimeDisplay(eveningShift.startTime) : null),
+        active: bus.active,
+        status: bus.active ? "Available" : "Unavailable",
+      };
+    });
+
+    fleet.sort((a, b) => naturalBusSort(a.busNumber, b.busNumber));
+
+    res.json({
+      shifts,
+      fleet,
+      publishedAt: new Date().toISOString(),
+      syncStatus: "LIVE_SYNCHRONIZED",
+    });
+  } catch (err: any) {
+    console.error("Error in /student/transport-schedule:", err);
+    res.status(500).json({ error: "Failed to load transport schedule" });
+  }
+});
+
 export default router;

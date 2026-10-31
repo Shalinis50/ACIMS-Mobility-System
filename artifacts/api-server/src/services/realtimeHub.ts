@@ -416,6 +416,70 @@ class RealtimeLocationHub {
     }
   }
 
+  /**
+   * Registers a client for Server-Sent Events (SSE) synchronization updates
+   * Whenever Admin updates buses, shifts, timings, or drivers, all connected clients receive event: transport_update
+   */
+  public subscribeTransportSync(res: Response): string {
+    const clientId = `sync-${++this.clientIdCounter}-${Date.now()}`;
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.flushHeaders?.();
+
+    const client: ClientConnection = {
+      id: clientId,
+      res,
+      connectedAt: new Date(),
+    };
+
+    this.clients.set(clientId, client);
+
+    res.write(`event: connected\ndata: ${JSON.stringify({ clientId, scope: "transport_sync", timestamp: new Date().toISOString() })}\n\n`);
+
+    res.on("close", () => {
+      this.removeClient(clientId);
+    });
+
+    return clientId;
+  }
+
+  /**
+   * Broadcasts administrative transport data changes (bus, shift, timing, driver)
+   * to all connected Socket.IO clients and SSE listeners.
+   */
+  public broadcastTransportUpdate(action: string, data?: any) {
+    const payload = {
+      type: "TRANSPORT_UPDATE",
+      action,
+      data: data || {},
+      timestamp: new Date().toISOString(),
+    };
+
+    const sseMessage = `event: transport_update\ndata: ${JSON.stringify(payload)}\n\n`;
+
+    // 1. Broadcast to SSE clients
+    for (const [id, client] of this.clients.entries()) {
+      try {
+        client.res.write(sseMessage);
+      } catch {
+        this.removeClient(id);
+      }
+    }
+
+    // 2. Broadcast to Socket.IO clients
+    if (this.io) {
+      this.io.emit("transport_update", payload);
+      this.io.emit("transport_sync", payload);
+      this.io.emit("data_sync", payload);
+    }
+  }
+
   private removeClient(id: string) {
     this.clients.delete(id);
   }

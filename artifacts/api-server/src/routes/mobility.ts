@@ -19,6 +19,7 @@ import type { AuthRequest } from "../../../../src/middleware/auth.ts";
 import { recordAdminAudit } from "../services/adminPortalService.ts";
 import { getActiveShiftsForStudents, directionLabel, formatShiftTimeDisplay } from "../../../../src/db/shiftManagement.ts";
 import { getBusShiftTimingContext } from "../services/shiftTiming.ts";
+import { realtimeHub } from "../services/realtimeHub.ts";
 
 const router: IRouter = Router();
 
@@ -28,33 +29,34 @@ router.get("/mobility/shifts", async (_req, res) => {
 
 /** Student-facing daily shift schedule (active, DB-backed). */
 router.get("/mobility/daily-shifts", async (_req, res) => {
-  const rows = await getActiveShiftsForStudents();
-  const { getDbBuses, getDbRoutes } = await import("../../../../src/db/services.ts");
-  const buses = await getDbBuses();
-  const routes = await getDbRoutes();
-  res.json(
-    rows.map((s) => {
-      const bus = buses.find((b) => b.id === s.busId);
-      const route = routes.find((r) => r.id === s.routeId);
-      return {
+  try {
+    const rows = await getActiveShiftsForStudents();
+    res.json(
+      rows.map((s: any) => ({
         id: s.id,
         shiftType: s.shiftType,
         name: s.name,
         startTime: s.startTime,
         endTime: s.endTime,
-        startTimeDisplay: formatShiftTimeDisplay(s.startTime),
-        endTimeDisplay: formatShiftTimeDisplay(s.endTime),
+        startTimeDisplay: s.startTimeDisplay || formatShiftTimeDisplay(s.startTime),
+        endTimeDisplay: s.endTimeDisplay || formatShiftTimeDisplay(s.endTime),
         direction: s.direction,
-        directionLabel: directionLabel(s.direction),
-        routeId: s.routeId,
-        routeName: route?.routeName ?? s.routeId,
-        busId: s.busId,
-        busNumber: bus?.busNumber ?? s.busId,
-        driverId: s.driverId,
+        directionLabel: s.directionLabel || directionLabel(s.direction),
         operatingDays: s.operatingDays,
-      };
-    }),
-  );
+        assignedBuses: s.assignedBuses || [],
+        assignedBusIds: s.assignedBusIds || [],
+        // Backward-compatible properties for single-bus views
+        busId: s.assignedBuses?.[0]?.busId || s.busId || null,
+        busNumber: s.assignedBuses?.[0]?.busNumber || s.busId || "—",
+        routeName: s.assignedBuses?.[0]?.routeName || "Campus Route",
+        driverName: s.assignedBuses?.[0]?.driverName || null,
+        driverPhone: s.assignedBuses?.[0]?.driverPhone || null,
+      }))
+    );
+  } catch (err: any) {
+    console.error("Error in /mobility/daily-shifts:", err);
+    res.status(500).json({ error: "Failed to load daily shifts" });
+  }
 });
 
 router.post("/mobility/shifts", requireAuth, requireAdmin, async (req, res) => {
@@ -68,6 +70,7 @@ router.post("/mobility/shifts", requireAuth, requireAdmin, async (req, res) => {
       entityId: shift.id,
       detail: shift.name,
     });
+    realtimeHub.broadcastTransportUpdate("SHIFT_CREATED", shift);
     res.status(201).json(shift);
   } catch (err: any) {
     res.status(400).json({ error: err.message || "Failed to create shift" });
@@ -89,6 +92,7 @@ router.post("/mobility/shift-assignments", requireAuth, requireAdmin, async (req
       entityId: assignment.id,
       detail: `bus=${assignment.busId} driver=${assignment.driverId}`,
     });
+    realtimeHub.broadcastTransportUpdate("SHIFT_ASSIGNMENT_CREATED", assignment);
     res.status(201).json(assignment);
   } catch (err: any) {
     res.status(409).json({ error: err.message || "Assignment conflict" });

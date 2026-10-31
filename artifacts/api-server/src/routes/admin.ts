@@ -50,6 +50,7 @@ import {
   createShift,
   deleteShift,
 } from "../../../../src/db/shiftManagement.ts";
+import { realtimeHub } from "../services/realtimeHub.ts";
 
 const router: IRouter = Router();
 
@@ -240,6 +241,7 @@ router.post("/admin/shifts", async (req, res) => {
       entityId: created.id,
       detail: `${created.name} ${created.startTime}-${created.endTime}`,
     });
+    realtimeHub.broadcastTransportUpdate("SHIFT_CREATED", created);
     res.status(201).json({
       shift: created,
       message: `${created.name} created successfully.`,
@@ -266,6 +268,7 @@ router.put("/admin/shifts/:shiftId", async (req, res) => {
       entityId: updated.id,
       detail: `${updated.name} ${updated.startTime}-${updated.endTime}`,
     });
+    realtimeHub.broadcastTransportUpdate("SHIFT_UPDATED", updated);
     res.json({
       shift: updated,
       message: `${updated.name} updated successfully.`,
@@ -286,6 +289,7 @@ router.delete("/admin/shifts/:shiftId", async (req, res) => {
       entityId: req.params.shiftId,
       detail: `Deleted shift ${result.name}`,
     });
+    realtimeHub.broadcastTransportUpdate("SHIFT_DELETED", { id: req.params.shiftId, name: result.name });
     res.json({
       success: true,
       message: `Shift ${result.name} deleted successfully.`,
@@ -298,6 +302,7 @@ router.delete("/admin/shifts/:shiftId", async (req, res) => {
 router.post("/admin/shifts/:shiftId/activate", async (req, res) => {
   try {
     const updated = await setShiftActive(req.params.shiftId, true);
+    realtimeHub.broadcastTransportUpdate("SHIFT_ACTIVATED", updated);
     res.json(updated);
   } catch (err: any) {
     res.status(400).json({ error: err.message || "Failed to activate shift" });
@@ -307,6 +312,7 @@ router.post("/admin/shifts/:shiftId/activate", async (req, res) => {
 router.post("/admin/shifts/:shiftId/deactivate", async (req, res) => {
   try {
     const updated = await setShiftActive(req.params.shiftId, false);
+    realtimeHub.broadcastTransportUpdate("SHIFT_DEACTIVATED", updated);
     res.json(updated);
   } catch (err: any) {
     res.status(400).json({ error: err.message || "Failed to deactivate shift" });
@@ -385,6 +391,8 @@ router.post("/admin/buses", async (req, res) => {
       detail: created.busNumber,
     });
 
+    realtimeHub.broadcastTransportUpdate("BUS_CREATED", created);
+
     res.status(201).json({
       id: created.id,
       busNumber: created.busNumber,
@@ -416,6 +424,8 @@ router.patch("/admin/buses/:busId", async (req, res) => {
       return res.status(404).json({ error: "Bus not found" });
     }
 
+    realtimeHub.broadcastTransportUpdate("BUS_UPDATED", updated);
+
     res.json({
       id: updated.id,
       busNumber: updated.busNumber,
@@ -437,6 +447,7 @@ router.delete("/admin/buses/:busId", async (req, res) => {
     if (!updated) {
       return res.status(404).json({ error: "Bus not found" });
     }
+    realtimeHub.broadcastTransportUpdate("BUS_DEACTIVATED", updated);
     res.json({
       id: updated.id,
       busNumber: updated.busNumber,
@@ -501,6 +512,13 @@ router.post("/admin/drivers", async (req, res) => {
       assignedBusId: input.busId || null,
     });
 
+    realtimeHub.broadcastTransportUpdate("DRIVER_CREATED", {
+      id: userId,
+      name: input.name,
+      phone: input.phone,
+      busId: input.busId,
+    });
+
     res.status(201).json({
       id: userId,
       name: input.name,
@@ -540,6 +558,13 @@ router.patch("/admin/drivers/:driverId", async (req, res) => {
         .set({ assignedBusId: busId })
         .where(eq(drivers.profileId, profs[0].id));
     }
+
+    realtimeHub.broadcastTransportUpdate("DRIVER_UPDATED", {
+      id: driverId,
+      name: name || profs[0].name,
+      phone: phone || profs[0].phone,
+      busId,
+    });
 
     res.json({
       id: driverId,
@@ -614,6 +639,14 @@ router.post("/admin/routes", async (req, res) => {
       }
     }
 
+    realtimeHub.broadcastTransportUpdate("ROUTE_CREATED", {
+      id: created.id,
+      name: created.routeName,
+      destination: input.destination,
+      stopIds: input.stopIds || [],
+      active: created.active,
+    });
+
     res.status(201).json({
       id: created.id,
       name: created.routeName,
@@ -673,6 +706,13 @@ router.patch("/admin/routes/:routeId", async (req, res) => {
       .from(busStops)
       .where(eq(busStops.routeId, routeId))
       .orderBy(busStops.sequenceNumber);
+
+    realtimeHub.broadcastTransportUpdate("ROUTE_UPDATED", {
+      id: updated.id,
+      name: updated.routeName,
+      active: updated.active,
+      stopIds: stops.map((s) => s.stopName),
+    });
 
     res.json({
       id: updated.id,
@@ -1005,6 +1045,13 @@ router.post("/admin/buses-and-routes", async (req, res) => {
       await setShiftAssignedBuses("shift-evening-315", ids);
     }
 
+    realtimeHub.broadcastTransportUpdate("BUS_CREATED", {
+      id: busId,
+      busNumber: cleanNumber,
+      routeId: effectiveRouteId,
+      driverId: effectiveDriverId,
+    });
+
     res.status(201).json({
       id: busId,
       busNumber: cleanNumber,
@@ -1114,6 +1161,13 @@ router.patch("/admin/buses-and-routes/:busId", async (req, res) => {
         .where(eq(busRoutes.id, bus.routeId));
     }
 
+    realtimeHub.broadcastTransportUpdate("BUS_UPDATED", {
+      id: busId,
+      busNumber: newNumber,
+      driverId: assignedDriverId,
+      active,
+    });
+
     res.json({
       id: busId,
       busNumber: newNumber,
@@ -1155,6 +1209,7 @@ router.put("/admin/buses-and-routes/:busId/stops", async (req, res) => {
     }
 
     res.json({ success: true, count: stops.length, message: "Route stops updated successfully" });
+    realtimeHub.broadcastTransportUpdate("STOPS_UPDATED", { busId, count: stops.length });
   } catch (err: any) {
     console.error("[admin/buses-and-routes/:busId/stops]", err);
     res.status(400).json({ error: err.message || "Failed to update stops" });
@@ -1187,6 +1242,8 @@ router.put("/admin/shift-assignments/:shiftId", async (req, res) => {
     const { setShiftAssignedBuses } = await import("../../../../src/db/shiftManagement.ts");
     await setShiftAssignedBuses(shiftId, busIds);
 
+    realtimeHub.broadcastTransportUpdate("SHIFT_ASSIGNMENT_UPDATED", { shiftId, busIds });
+
     res.json({
       success: true,
       shiftId,
@@ -1211,6 +1268,8 @@ router.put("/admin/shift-assignments/:shiftId/bus/:busId/stops", async (req, res
     const { updateShiftBusActiveStops } = await import("../../../../src/db/shiftManagement.ts");
     await updateShiftBusActiveStops(shiftId, busId, activeStopIds);
 
+    realtimeHub.broadcastTransportUpdate("SHIFT_STOPS_UPDATED", { shiftId, busId, activeStopIds });
+
     res.json({
       success: true,
       shiftId,
@@ -1231,6 +1290,12 @@ router.put("/admin/shift-assignments/:shiftId/bus/:busId/timing", async (req, re
     const { updateShiftBusTiming } = await import("../../../../src/db/shiftManagement.ts");
     const result = await updateShiftBusTiming(shiftId, busId, departureTime);
 
+    realtimeHub.broadcastTransportUpdate("SHIFT_BUS_TIMING_UPDATED", {
+      shiftId,
+      busId,
+      departureTime: result.departureTime,
+    });
+
     res.json({
       success: true,
       shiftId,
@@ -1249,6 +1314,8 @@ router.delete("/admin/shift-assignments/:shiftId/bus/:busId", async (req, res) =
     const { shiftId, busId } = req.params;
     const { removeBusFromShift } = await import("../../../../src/db/shiftManagement.ts");
     await removeBusFromShift(shiftId, busId);
+
+    realtimeHub.broadcastTransportUpdate("SHIFT_BUS_REMOVED", { shiftId, busId });
 
     res.json({
       success: true,

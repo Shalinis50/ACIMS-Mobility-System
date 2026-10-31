@@ -11,6 +11,7 @@ import { useBusRealtimeLocation } from '@/lib/realtime-location';
 import { normalizeAcimsRoute } from '@/routes/routeTypes';
 import { MapView } from '@/components/MapView';
 import { findRouteByNumberOrId } from '@/data/recRoutes';
+import { useTransportSync } from '@/hooks/use-transport-sync';
 
 type MyBusPayload = {
   busId: string;
@@ -51,6 +52,10 @@ export default function MyBusPage() {
   const { profile, token } = useAuth();
   const { isOnline } = useNetworkStatus();
   const queryClient = useQueryClient();
+
+  // Automatic real-time synchronization with Admin transport office updates
+  useTransportSync();
+
   const headers = studentMobilityHeaders(token, profile);
   const [pickupSaving, setPickupSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);

@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import {
   getDbBuses,
   getDbBusById,
+  getDbRoutes,
   getDbStopsByRoute,
   recordBusLocation,
   getLatestBusLocation,
@@ -14,6 +15,9 @@ import {
   isBusTrackingActive,
   verifyDriverBusAssignment,
 } from "../../../../src/db/services.ts";
+import { db } from "../../../../src/db/index.ts";
+import { profiles, drivers, busRoutes } from "../../../../src/db/schema.ts";
+import { eq } from "drizzle-orm";
 import { getRouteForBus } from "../services/routesData";
 import {
   validateGpsCoordinate,
@@ -189,23 +193,50 @@ export async function buildBusTelemetry(busId: string): Promise<ComputedTelemetr
   };
 }
 
+async function resolveDriverForBus(bus: { id: string; driverId?: string | null }) {
+  try {
+    if (bus.driverId) {
+      const prof = await db
+        .select({ name: profiles.name, phone: profiles.phone })
+        .from(profiles)
+        .where(eq(profiles.userId, bus.driverId))
+        .limit(1);
+      if (prof.length > 0) return { name: prof[0].name, phone: prof[0].phone };
+    }
+    const driverRow = await db
+      .select({ name: profiles.name, phone: profiles.phone })
+      .from(drivers)
+      .innerJoin(profiles, eq(drivers.profileId, profiles.id))
+      .where(eq(drivers.assignedBusId, bus.id))
+      .limit(1);
+    if (driverRow.length > 0) return { name: driverRow[0].name, phone: driverRow[0].phone };
+  } catch (err) {
+    console.error("Error resolving driver for bus:", err);
+  }
+  return null;
+}
+
 // -------------------------------------------------------------
 // LIST ALL BUSES
 // -------------------------------------------------------------
 router.get("/buses", async (_req, res) => {
   try {
     const dbBusesList = await getDbBuses();
+    const dbRoutes = await getDbRoutes();
     const results = await Promise.all(
       dbBusesList.map(async (bus) => {
         const routeDef = getRouteForBus(bus.id);
+        const dbRoute = dbRoutes.find((r) => r.id === bus.routeId);
         const telemetry = await buildBusTelemetry(bus.id);
+        const driverInfo = await resolveDriverForBus(bus);
 
         return {
           id: bus.id,
           busNumber: bus.busNumber,
-          origin: routeDef?.origin || "Central Campus",
-          destination: routeDef?.destination || "City Station",
-          routeLabel: routeDef?.name || "Campus Express",
+          origin: dbRoute?.origin || routeDef?.origin || "Central Campus",
+          destination: dbRoute?.destination || routeDef?.destination || "City Station",
+          routeLabel: dbRoute?.routeName || routeDef?.name || `Route ${bus.busNumber}`,
+          routeName: dbRoute?.routeName || routeDef?.name || `Route ${bus.busNumber}`,
           capacity: 45,
           currentLocation: { latitude: telemetry.latitude, longitude: telemetry.longitude },
           nextStop: telemetry.nextStop,
@@ -221,6 +252,8 @@ router.get("/buses", async (_req, res) => {
           active: bus.active,
           routeId: bus.routeId || routeDef?.id || "route-bus-12",
           driverId: bus.driverId || undefined,
+          driverName: driverInfo?.name || null,
+          driverPhone: driverInfo?.phone || null,
           locationMode: "driver-gps",
           freshness: telemetry.freshness,
           isLive: telemetry.isLive,
@@ -249,14 +282,18 @@ router.get("/buses/:busId", async (req, res) => {
     }
 
     const routeDef = getRouteForBus(bus.id);
+    const dbRoutes = await getDbRoutes();
+    const dbRoute = dbRoutes.find((r) => r.id === bus.routeId);
     const telemetry = await buildBusTelemetry(bus.id);
+    const driverInfo = await resolveDriverForBus(bus);
 
     res.json({
       id: bus.id,
       busNumber: bus.busNumber,
-      origin: routeDef?.origin || "Central Campus",
-      destination: routeDef?.destination || "City Station",
-      routeLabel: routeDef?.name || "Campus Express",
+      origin: dbRoute?.origin || routeDef?.origin || "Central Campus",
+      destination: dbRoute?.destination || routeDef?.destination || "City Station",
+      routeLabel: dbRoute?.routeName || routeDef?.name || `Route ${bus.busNumber}`,
+      routeName: dbRoute?.routeName || routeDef?.name || `Route ${bus.busNumber}`,
       capacity: 45,
       currentLocation: { latitude: telemetry.latitude, longitude: telemetry.longitude },
       nextStop: telemetry.nextStop,
@@ -272,6 +309,8 @@ router.get("/buses/:busId", async (req, res) => {
       active: bus.active,
       routeId: bus.routeId || routeDef?.id || "route-bus-12",
       driverId: bus.driverId || undefined,
+      driverName: driverInfo?.name || null,
+      driverPhone: driverInfo?.phone || null,
       locationMode: "driver-gps",
       freshness: telemetry.freshness,
       isLive: telemetry.isLive,
@@ -328,6 +367,14 @@ router.get("/realtime/buses", async (_req, res) => {
     realtimeHub.subscribeAllBuses(res, initialFleet);
   } catch (err: any) {
     res.status(500).json({ error: "Failed to connect to fleet realtime stream" });
+  }
+});
+
+router.get("/realtime/sync", (_req, res) => {
+  try {
+    realtimeHub.subscribeTransportSync(res);
+  } catch (err: any) {
+    res.status(500).json({ error: "Failed to connect to transport sync stream" });
   }
 });
 

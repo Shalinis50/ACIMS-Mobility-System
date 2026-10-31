@@ -663,3 +663,61 @@ export function useBusRealtimeLocation(busId: string, enabled = true) {
     refresh,
   };
 }
+
+/**
+ * Subscribes to real-time transport schedule, bus, driver, and shift synchronization events.
+ * Uses Socket.IO channel backed by Server-Sent Events (SSE) fallback.
+ */
+export function subscribeToTransportSync(
+  onSync: (event: { action: string; timestamp: string; data?: any }) => void
+): () => void {
+  let active = true;
+  let eventSource: EventSource | null = null;
+  const socket = getAcimsSocket();
+
+  const handleSync = (payload: any) => {
+    if (!active) return;
+    onSync(payload || { action: "DATA_SYNC", timestamp: new Date().toISOString() });
+  };
+
+  // 1. Socket.IO listeners
+  if (socket) {
+    socket.on("transport_sync", handleSync);
+    socket.on("transport_update", handleSync);
+    socket.on("data_sync", handleSync);
+  }
+
+  // 2. Dual-transport SSE listener
+  if (typeof EventSource !== "undefined") {
+    try {
+      eventSource = new EventSource("/api/realtime/sync");
+      eventSource.addEventListener("sync", (e: MessageEvent) => {
+        if (!active) return;
+        try {
+          const parsed = JSON.parse(e.data);
+          handleSync(parsed);
+        } catch {
+          handleSync({ action: "SYNC", timestamp: new Date().toISOString() });
+        }
+      });
+      eventSource.onerror = () => {
+        // SSE will attempt auto-reconnect; socket.io serves as primary
+      };
+    } catch {
+      // ignore
+    }
+  }
+
+  return () => {
+    active = false;
+    if (socket) {
+      socket.off("transport_sync", handleSync);
+      socket.off("transport_update", handleSync);
+      socket.off("data_sync", handleSync);
+    }
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+  };
+}

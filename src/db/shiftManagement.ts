@@ -1,6 +1,6 @@
 import { and, desc, eq, ne } from "drizzle-orm";
 import { db } from "./index.ts";
-import { shifts, trips } from "./schema.ts";
+import { shifts, trips, profiles, drivers } from "./schema.ts";
 import { getDbBusById, getDbRoutes } from "./services.ts";
 
 export const CANONICAL_SHIFT_TYPES = ["MORNING", "EVENING", "REGULAR", "EXAM_ONLY"] as const;
@@ -49,13 +49,13 @@ export const PRIMARY_SHIFTS = [
   },
   {
     id: "shift-exam-1145",
-    name: "11:45 AM Exam Service",
+    name: "11:45 AM Exam Shift",
     shiftType: "EXAM_ONLY",
     startTime: "11:45",
     endTime: "13:30",
     direction: "FROM_COLLEGE",
     operatingDays: "MON,TUE,WED,THU,FRI",
-    active: false,
+    active: true,
   },
   {
     id: "shift-exam-1200",
@@ -435,13 +435,115 @@ export async function setShiftActive(shiftId: string, active: boolean) {
 
 export async function getActiveShiftsForStudents() {
   await ensureCanonicalShiftSlots();
-  const rows = await db.select().from(shifts).where(eq(shifts.active, true));
-  return rows
-    .filter((s) => s.startTime && s.endTime && s.routeId && s.busId)
-    .sort((a, b) => (a.shiftType === "MORNING" ? -1 : b.shiftType === "MORNING" ? 1 : 0));
+  const rows = await db.select().from(shifts).where(eq(shifts.active, true)).orderBy(shifts.startTime);
+  const { shiftAssignments: saTable, busStops: bsTable } = await import("./schema.ts");
+  const allAssignments = await db.select().from(saTable).where(eq(saTable.active, true));
+  const { getDbBuses, getDbRoutes } = await import("./services.ts");
+  const allBuses = await getDbBuses();
+  const allRoutes = await getDbRoutes();
+  const allStops = await db.select().from(bsTable).orderBy(bsTable.sequenceNumber);
+  const driverProfiles = await db
+    .select({
+      userId: profiles.userId,
+      name: profiles.name,
+      phone: profiles.phone,
+      assignedBusId: drivers.assignedBusId,
+    })
+    .from(drivers)
+    .innerJoin(profiles, eq(drivers.profileId, profiles.id));
+
+  return rows.map((s) => {
+    const assignments = allAssignments.filter((a) => a.shiftId === s.id);
+    const busIds = new Set<string>();
+    if (s.busId) busIds.add(s.busId);
+    assignments.forEach((a) => busIds.add(a.busId));
+
+    const assignedBuses = Array.from(busIds).map((bId) => {
+      const bus = allBuses.find((b) => b.id === bId);
+      const assignment = assignments.find((a) => a.busId === bId);
+      const effectiveRouteId = bus?.routeId || s.routeId;
+      const route = allRoutes.find((r) => r.id === effectiveRouteId);
+      const stopsForRoute = allStops.filter((st) => st.routeId === effectiveRouteId);
+      const startingPoint = route?.origin || stopsForRoute[0]?.stopName || "Central Campus Depot";
+      const destination = route?.destination || stopsForRoute[stopsForRoute.length - 1]?.stopName || "College Campus";
+      const driver = driverProfiles.find((d) => d.userId === bus?.driverId || d.assignedBusId === bId);
+      const departureTime = assignment?.departureTime || s.startTime;
+      const busNum = bus?.busNumber || bId.replace("bus-", "").toUpperCase();
+      const rawRouteName = (route?.routeName || "Campus Route").replace(/^\d+[A-Z]?\s*·?\s*/i, "");
+
+      return {
+        busId: bId,
+        busNumber: busNum,
+        busName: `BUS ${busNum} · ${rawRouteName.toUpperCase()}`,
+        routeId: effectiveRouteId,
+        routeName: route?.routeName || `Route ${busNum}`,
+        startingPoint,
+        destination,
+        driverName: driver?.name || null,
+        driverPhone: driver?.phone || null,
+        departureTime: departureTime,
+        departureTimeDisplay: formatShiftTimeDisplay(departureTime),
+        arrivalTime: s.endTime,
+        arrivalTimeDisplay: formatShiftTimeDisplay(s.endTime),
+        active: bus?.active ?? true,
+        status: (bus?.active ?? true) ? "Available" : "Unavailable",
+        availabilityStatus: (bus?.active ?? true) ? "Available" : "Unavailable",
+      };
+    });
+
+    const startMins = parseTimeToMinutes(s.startTime);
+    let category: "MORNING" | "AFTERNOON" | "EVENING" | "EXAM" = "MORNING";
+    if (s.shiftType === "EXAM_ONLY" || s.id.includes("exam") || s.name.toLowerCase().includes("exam")) {
+      category = "EXAM";
+    } else if (startMins != null && startMins >= 720 && startMins < 960) {
+      category = "AFTERNOON";
+    } else if (startMins != null && startMins >= 960) {
+      category = "EVENING";
+    } else {
+      category = "MORNING";
+    }
+
+    const instructions =
+      category === "EXAM"
+        ? "Official Exam Transit Service: Please report to your assigned boarding point 15 minutes before departure. Student ID card and Exam Hall Ticket are required at boarding."
+        : "Regular scheduled campus transport service. Live synchronized with the College Transport Office.";
+
+    return {
+      ...s,
+      category,
+      instructions,
+      status: s.active ? "Active" : "Standby",
+      startTimeDisplay: formatShiftTimeDisplay(s.startTime),
+      endTimeDisplay: formatShiftTimeDisplay(s.endTime),
+      directionLabel: directionLabel(s.direction),
+      assignedBuses,
+      assignedBusIds: Array.from(busIds),
+    };
+  });
 }
 
 export async function getShiftAssignedToBus(busId: string) {
+  const { shiftAssignments: saTable } = await import("./schema.ts");
+  const assigned = await db
+    .select()
+    .from(saTable)
+    .where(and(eq(saTable.busId, busId), eq(saTable.active, true)))
+    .limit(1);
+
+  if (assigned.length > 0) {
+    const shift = await db
+      .select()
+      .from(shifts)
+      .where(and(eq(shifts.id, assigned[0].shiftId), eq(shifts.active, true)))
+      .limit(1);
+    if (shift[0]) {
+      return {
+        ...shift[0],
+        startTime: assigned[0].departureTime || shift[0].startTime,
+      };
+    }
+  }
+
   const rows = await db
     .select()
     .from(shifts)

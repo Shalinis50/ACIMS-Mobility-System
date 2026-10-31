@@ -38,10 +38,15 @@ import { PersonalizedPublicTransportCard } from '@/components/PersonalizedPublic
 import { StudentLocationRouteSelector } from '@/components/StudentLocationRouteSelector';
 import { useAuth } from '@/lib/auth-context';
 import { studentMobilityHeaders } from '@/lib/mobilityApi';
+import { StudentTransportBoard } from '@/components/StudentTransportBoard';
+import { useTransportSync } from '@/hooks/use-transport-sync';
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
   const { profile, token, refreshProfile } = useAuth();
+
+  // Automatic real-time synchronization with Admin transport office updates
+  useTransportSync();
 
   const collegeRouteQuery = useQuery({
     queryKey: ['mvp', 'college-route'],
@@ -549,6 +554,9 @@ export default function Dashboard() {
           </Link>
         </div>
       </section>
+
+      {/* ADMIN-TO-STUDENT REALTIME TRANSPORT SCHEDULE & FLEET BOARD */}
+      <StudentTransportBoard />
 
       {/* PERSONALIZED PUBLIC TRANSPORT NEAR YOU (Personalized to student real GPS) */}
       <PersonalizedPublicTransportCard
