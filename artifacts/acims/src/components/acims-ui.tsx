@@ -54,6 +54,7 @@ const navItems = [
   { href: '/my-bus', label: 'My bus', icon: BusFront },
   { href: '/mobi', label: 'MOBI', icon: Mic },
   { href: '/map', label: 'Live map', icon: Map },
+  { href: '/campus-mobility', label: 'Campus Mobility', icon: Map },
   { href: '/public-transport', label: 'Public transport', icon: TrainFront },
   { href: '/alerts', label: 'Alerts', icon: Bell },
 ];
