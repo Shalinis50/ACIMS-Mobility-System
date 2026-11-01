@@ -80,6 +80,11 @@ function Router() {
             <CampusMapPage />
           </AcimsLayout>
         </Route>
+        <Route path="/campus-mobility">
+          <AcimsLayout>
+            <CampusMapPage />
+          </AcimsLayout>
+        </Route>
         <Route path="/navigation">
           <AcimsLayout>
             <NavigationPage />
